@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,6 +34,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
+private val SendButtonWidth = 116.dp
 
 @Composable
 fun DeepSeekScreen(
@@ -62,28 +65,10 @@ fun DeepSeekScreen(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    OutlinedTextField(
-                        value = state.prompt,
-                        onValueChange = { onEvent(DeepSeekViewEvent.PromptChanged(it)) },
-                        modifier = Modifier.weight(1f).height(96.dp),
-                        minLines = 3,
-                        maxLines = 3,
-                        placeholder = { Text("Введите сообщение") },
-                    )
-
-                    Button(
-                        onClick = { onEvent(DeepSeekViewEvent.SendClicked) },
-                        enabled = state.isSendEnabled,
-                        modifier = Modifier.height(56.dp),
-                    ) {
-                        Text(if (state.isLoading) "ждите" else "отправить")
-                    }
-                }
+                PromptInputArea(
+                    state = state,
+                    onEvent = onEvent,
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -123,6 +108,57 @@ fun DeepSeekScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptInputArea(
+    state: DeepSeekViewState,
+    onEvent: (DeepSeekViewEvent) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("system prompt:")
+
+            OutlinedTextField(
+                value = state.systemPrompt,
+                onValueChange = { onEvent(DeepSeekViewEvent.SystemPromptChanged(it)) },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+            )
+
+            Spacer(modifier = Modifier.width(SendButtonWidth))
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            OutlinedTextField(
+                value = state.prompt,
+                onValueChange = { onEvent(DeepSeekViewEvent.PromptChanged(it)) },
+                modifier = Modifier.weight(1f).height(96.dp),
+                minLines = 3,
+                maxLines = 3,
+                placeholder = { Text("Введите сообщение") },
+            )
+
+            Button(
+                onClick = { onEvent(DeepSeekViewEvent.SendClicked) },
+                enabled = state.isSendEnabled,
+                modifier = Modifier.width(SendButtonWidth).height(56.dp),
+            ) {
+                Text(if (state.isLoading) "ждите" else "отправить")
             }
         }
     }

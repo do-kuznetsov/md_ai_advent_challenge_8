@@ -40,7 +40,7 @@ class KtorDeepSeekRepository : DeepSeekRepository {
                 setBody(
                     ChatCompletionRequest(
                         model = request.model.id,
-                        messages = listOf(ChatMessage(role = "user", content = request.prompt)),
+                        messages = request.chatMessages(),
                         stream = false,
                         thinking = Thinking(type = "disabled"),
                         temperature = request.apiSettings.deepSeekTemperature(),
@@ -82,6 +82,17 @@ class KtorDeepSeekRepository : DeepSeekRepository {
 
         val message = apiMessage ?: body.take(600).ifBlank { "без тела ответа" }
         return "Ошибка API: HTTP $statusCode $statusDescription\n$message"
+    }
+}
+
+private fun DeepSeekRequestData.chatMessages(): List<ChatMessage> {
+    val trimmedSystemPrompt = systemPrompt.trim()
+    return buildList {
+        if (trimmedSystemPrompt.isNotEmpty()) {
+            add(ChatMessage(role = "system", content = trimmedSystemPrompt))
+        }
+
+        add(ChatMessage(role = "user", content = prompt))
     }
 }
 

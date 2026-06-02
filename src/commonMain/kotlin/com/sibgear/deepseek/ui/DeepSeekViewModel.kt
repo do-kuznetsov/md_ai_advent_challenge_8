@@ -61,6 +61,10 @@ class DeepSeekViewModel(
                 )
             }
 
+            is DeepSeekViewEvent.SystemPromptChanged -> {
+                state = state.copy(systemPrompt = event.systemPrompt)
+            }
+
             is DeepSeekViewEvent.TemperatureChanged -> {
                 state = state.copy(
                     apiSettings = state.apiSettings.copy(
@@ -80,6 +84,7 @@ class DeepSeekViewModel(
 
         val request = DeepSeekRequestData(
             apiKey = state.apiKey,
+            systemPrompt = state.systemPrompt,
             prompt = state.prompt,
             model = state.selectedModel,
             apiSettings = state.apiSettings,

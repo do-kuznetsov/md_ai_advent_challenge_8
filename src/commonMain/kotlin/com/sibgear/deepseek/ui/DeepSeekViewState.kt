@@ -5,6 +5,7 @@ import com.sibgear.deepseek.domain.DeepSeekModel
 import com.sibgear.deepseek.domain.DeepSeekModels
 
 data class DeepSeekViewState(
+    val systemPrompt: String = "",
     val prompt: String = "",
     val apiKey: String = "",
     val selectedModel: DeepSeekModel = DeepSeekModels.Default,
