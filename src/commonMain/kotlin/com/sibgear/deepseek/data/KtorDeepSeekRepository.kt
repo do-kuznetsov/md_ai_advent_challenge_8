@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.data
 
 import com.sibgear.deepseek.domain.AgentResponse
+import com.sibgear.deepseek.domain.ApiSettings
 import com.sibgear.deepseek.domain.DeepSeekRepository
 import com.sibgear.deepseek.domain.DeepSeekRequestData
 import io.ktor.client.HttpClient
@@ -42,6 +43,9 @@ class KtorDeepSeekRepository : DeepSeekRepository {
                         messages = listOf(ChatMessage(role = "user", content = request.prompt)),
                         stream = false,
                         thinking = Thinking(type = "disabled"),
+                        temperature = request.apiSettings.deepSeekTemperature(),
+                        maxTokens = request.apiSettings.deepSeekMaxTokens(),
+                        stop = request.apiSettings.deepSeekStop(),
                     ),
                 )
             }
@@ -81,12 +85,41 @@ class KtorDeepSeekRepository : DeepSeekRepository {
     }
 }
 
+private fun ApiSettings.deepSeekTemperature(): Float? {
+    if (!isApiControlEnabled) {
+        return null
+    }
+
+    return temperature.coerceIn(0f, 1f) * 2f
+}
+
+private fun ApiSettings.deepSeekMaxTokens(): Int? {
+    if (!isApiControlEnabled || maxTokens <= 0) {
+        return null
+    }
+
+    return maxTokens
+}
+
+private fun ApiSettings.deepSeekStop(): List<String>? {
+    if (!isApiControlEnabled) {
+        return null
+    }
+
+    val trimmedStopWord = stopWord.trim()
+    return trimmedStopWord.takeIf { it.isNotEmpty() }?.let { listOf(it) }
+}
+
 @Serializable
 private data class ChatCompletionRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val stream: Boolean,
     val thinking: Thinking,
+    val temperature: Float? = null,
+    @kotlinx.serialization.SerialName("max_tokens")
+    val maxTokens: Int? = null,
+    val stop: List<String>? = null,
 )
 
 @Serializable

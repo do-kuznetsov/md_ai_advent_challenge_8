@@ -18,8 +18,26 @@ class DeepSeekViewModel(
 
     fun onEvent(event: DeepSeekViewEvent) {
         when (event) {
+            is DeepSeekViewEvent.ApiControlChanged -> {
+                state = state.copy(
+                    apiSettings = state.apiSettings.copy(
+                        isApiControlEnabled = event.isEnabled,
+                    ),
+                )
+            }
+
             is DeepSeekViewEvent.ApiKeyChanged -> {
                 state = state.copy(apiKey = event.apiKey)
+            }
+
+            is DeepSeekViewEvent.MaxTokensChanged -> {
+                val digitsOnly = event.maxTokens.filter { it.isDigit() }
+                state = state.copy(
+                    maxTokensInput = digitsOnly,
+                    apiSettings = state.apiSettings.copy(
+                        maxTokens = digitsOnly.toIntOrNull() ?: 0,
+                    ),
+                )
             }
 
             is DeepSeekViewEvent.ModelMenuExpandedChanged -> {
@@ -37,6 +55,20 @@ class DeepSeekViewModel(
                 state = state.copy(prompt = event.prompt)
             }
 
+            is DeepSeekViewEvent.StopWordChanged -> {
+                state = state.copy(
+                    apiSettings = state.apiSettings.copy(stopWord = event.stopWord),
+                )
+            }
+
+            is DeepSeekViewEvent.TemperatureChanged -> {
+                state = state.copy(
+                    apiSettings = state.apiSettings.copy(
+                        temperature = event.temperature.coerceIn(0f, 1f),
+                    ),
+                )
+            }
+
             DeepSeekViewEvent.SendClicked -> sendPrompt()
         }
     }
@@ -50,6 +82,7 @@ class DeepSeekViewModel(
             apiKey = state.apiKey,
             prompt = state.prompt,
             model = state.selectedModel,
+            apiSettings = state.apiSettings,
         )
 
         coroutineScope.launch {
