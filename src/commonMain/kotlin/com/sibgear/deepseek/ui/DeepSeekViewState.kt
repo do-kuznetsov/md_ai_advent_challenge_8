@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.ui
 
 import com.sibgear.deepseek.domain.ApiSettings
+import com.sibgear.deepseek.domain.ChatMessage
 import com.sibgear.deepseek.domain.DeepSeekModel
 import com.sibgear.deepseek.domain.DeepSeekModels
 
@@ -10,7 +11,7 @@ data class DeepSeekViewState(
     val apiKey: String = "",
     val selectedModel: DeepSeekModel = DeepSeekModels.Default,
     val availableModels: List<DeepSeekModel> = DeepSeekModels.Available,
-    val output: String = "Ответ DeepSeek появится здесь.",
+    val messages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
     val isModelMenuExpanded: Boolean = false,
     val apiSettings: ApiSettings = ApiSettings(),

@@ -2,6 +2,8 @@ package com.sibgear.deepseek.data
 
 import com.sibgear.deepseek.domain.AgentResponse
 import com.sibgear.deepseek.domain.ApiSettings
+import com.sibgear.deepseek.domain.ChatMessage
+import com.sibgear.deepseek.domain.ChatRole
 import com.sibgear.deepseek.domain.DeepSeekRepository
 import com.sibgear.deepseek.domain.DeepSeekRequestData
 import io.ktor.client.HttpClient
@@ -19,7 +21,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-class KtorDeepSeekRepository : DeepSeekRepository {
+class KtorDeepSeekRepository(
+    private val history: InMemoryChatHistory = InMemoryChatHistory(),
+) : DeepSeekRepository {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -33,6 +37,8 @@ class KtorDeepSeekRepository : DeepSeekRepository {
     }
 
     override suspend fun sendMessage(request: DeepSeekRequestData): AgentResponse {
+        history.add(ChatMessage(role = ChatRole.User, content = request.prompt))
+
         return try {
             val response = client.post("https://api.deepseek.com/chat/completions") {
                 bearerAuth(request.apiKey)
@@ -40,7 +46,7 @@ class KtorDeepSeekRepository : DeepSeekRepository {
                 setBody(
                     ChatCompletionRequest(
                         model = request.model.id,
-                        messages = request.chatMessages(),
+                        messages = request.apiMessages(history.getMessages()),
                         stream = false,
                         thinking = Thinking(type = "disabled"),
                         temperature = request.apiSettings.deepSeekTemperature(),
@@ -52,25 +58,30 @@ class KtorDeepSeekRepository : DeepSeekRepository {
 
             val body = response.bodyAsText()
             if (!response.status.isSuccess()) {
-                return AgentResponse(
-                    content = formatApiError(
+                val errorContent = formatApiError(
                         statusCode = response.status.value,
                         statusDescription = response.status.description,
                         body = body,
-                    ),
+                    )
+
+                return AgentResponse(
+                    messages = history.add(ChatMessage(role = ChatRole.Assistant, content = errorContent)),
                 )
             }
 
             val completion = json.decodeFromString<ChatCompletionResponse>(body)
+            val assistantContent = completion.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
+                ?: "DeepSeek вернул пустой ответ."
+
             AgentResponse(
-                content = completion.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
-                    ?: "DeepSeek вернул пустой ответ.",
+                messages = history.add(ChatMessage(role = ChatRole.Assistant, content = assistantContent)),
             )
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Throwable) {
+            val errorContent = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
             AgentResponse(
-                content = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                messages = history.add(ChatMessage(role = ChatRole.Assistant, content = errorContent)),
             )
         }
     }
@@ -85,16 +96,24 @@ class KtorDeepSeekRepository : DeepSeekRepository {
     }
 }
 
-private fun DeepSeekRequestData.chatMessages(): List<ChatMessage> {
+private fun DeepSeekRequestData.apiMessages(historyMessages: List<ChatMessage>): List<ApiChatMessage> {
     val trimmedSystemPrompt = systemPrompt.trim()
     return buildList {
         if (trimmedSystemPrompt.isNotEmpty()) {
-            add(ChatMessage(role = "system", content = trimmedSystemPrompt))
+            add(ApiChatMessage(role = "system", content = trimmedSystemPrompt))
         }
 
-        add(ChatMessage(role = "user", content = prompt))
+        historyMessages.forEach { message ->
+            add(ApiChatMessage(role = message.role.apiRole, content = message.content))
+        }
     }
 }
+
+private val ChatRole.apiRole: String
+    get() = when (this) {
+        ChatRole.User -> "user"
+        ChatRole.Assistant -> "assistant"
+    }
 
 private fun ApiSettings.deepSeekTemperature(): Float? {
     if (!isApiControlEnabled) {
@@ -124,7 +143,7 @@ private fun ApiSettings.deepSeekStop(): List<String>? {
 @Serializable
 private data class ChatCompletionRequest(
     val model: String,
-    val messages: List<ChatMessage>,
+    val messages: List<ApiChatMessage>,
     val stream: Boolean,
     val thinking: Thinking,
     val temperature: Float? = null,
@@ -134,7 +153,7 @@ private data class ChatCompletionRequest(
 )
 
 @Serializable
-private data class ChatMessage(
+private data class ApiChatMessage(
     val role: String,
     val content: String,
 )

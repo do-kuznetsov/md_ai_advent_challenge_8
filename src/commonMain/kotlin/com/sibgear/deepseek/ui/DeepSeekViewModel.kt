@@ -3,6 +3,8 @@ package com.sibgear.deepseek.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.sibgear.deepseek.domain.ChatMessage
+import com.sibgear.deepseek.domain.ChatRole
 import com.sibgear.deepseek.domain.DeepSeekRepository
 import com.sibgear.deepseek.domain.DeepSeekRequestData
 import kotlinx.coroutines.CancellationException
@@ -89,26 +91,32 @@ class DeepSeekViewModel(
             model = state.selectedModel,
             apiSettings = state.apiSettings,
         )
+        val userMessage = ChatMessage(role = ChatRole.User, content = state.prompt)
 
         coroutineScope.launch {
             state = state.copy(
                 isLoading = true,
-                output = "Отправляю запрос...",
+                prompt = "",
+                messages = state.messages + userMessage,
             )
 
             try {
                 val response = repository.sendMessage(request)
                 state = state.copy(
                     isLoading = false,
-                    output = response.content,
+                    messages = response.messages,
                 )
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
             } catch (exception: Throwable) {
+                val errorMessage = ChatMessage(
+                    role = ChatRole.Assistant,
+                    content = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                )
                 state = state.copy(
                     isLoading = false,
-                    output = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                    messages = state.messages + errorMessage,
                 )
             }
         }
