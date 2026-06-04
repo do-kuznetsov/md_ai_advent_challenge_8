@@ -28,10 +28,6 @@ class DeepSeekViewModel(
                 )
             }
 
-            is DeepSeekViewEvent.ApiKeyChanged -> {
-                state = state.copy(apiKey = event.apiKey)
-            }
-
             is DeepSeekViewEvent.MaxTokensChanged -> {
                 val digitsOnly = event.maxTokens.filter { it.isDigit() }
                 state = state.copy(
@@ -75,17 +71,17 @@ class DeepSeekViewModel(
                 )
             }
 
-            DeepSeekViewEvent.SendClicked -> sendPrompt()
+            DeepSeekViewEvent.SendClicked -> Unit
         }
     }
 
-    private fun sendPrompt() {
+    fun sendPrompt(apiKey: String) {
         if (!state.isSendEnabled) {
             return
         }
 
         val request = DeepSeekRequestData(
-            apiKey = state.apiKey,
+            apiKey = apiKey,
             systemPrompt = state.systemPrompt,
             prompt = state.prompt,
             model = state.selectedModel,
