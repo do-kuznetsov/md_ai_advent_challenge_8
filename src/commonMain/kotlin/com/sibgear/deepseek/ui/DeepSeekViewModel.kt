@@ -76,18 +76,19 @@ class DeepSeekViewModel(
     }
 
     fun sendPrompt(apiKey: String) {
-        if (!state.isSendEnabled) {
+        val prompt = state.prompt.trim()
+        if (prompt.isEmpty() || state.isLoading) {
             return
         }
 
         val request = DeepSeekRequestData(
             apiKey = apiKey,
             systemPrompt = state.systemPrompt,
-            prompt = state.prompt,
+            prompt = prompt,
             model = state.selectedModel,
             apiSettings = state.apiSettings,
         )
-        val userMessage = ChatMessage(role = ChatRole.User, content = state.prompt)
+        val userMessage = ChatMessage(role = ChatRole.User, content = prompt)
 
         coroutineScope.launch {
             state = state.copy(

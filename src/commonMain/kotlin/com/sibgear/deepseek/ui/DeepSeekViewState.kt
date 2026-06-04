@@ -17,5 +17,5 @@ data class DeepSeekViewState(
     val maxTokensInput: String = ApiSettings().maxTokens.toString(),
 ) {
     val isSendEnabled: Boolean
-        get() = !isLoading
+        get() = prompt.isNotBlank() && !isLoading
 }
