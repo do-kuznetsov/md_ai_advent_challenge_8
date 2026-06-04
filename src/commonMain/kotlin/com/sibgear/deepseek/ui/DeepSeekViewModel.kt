@@ -28,10 +28,6 @@ class DeepSeekViewModel(
                 )
             }
 
-            is DeepSeekViewEvent.ApiKeyChanged -> {
-                state = state.copy(apiKey = event.apiKey)
-            }
-
             is DeepSeekViewEvent.MaxTokensChanged -> {
                 val digitsOnly = event.maxTokens.filter { it.isDigit() }
                 state = state.copy(
@@ -75,23 +71,24 @@ class DeepSeekViewModel(
                 )
             }
 
-            DeepSeekViewEvent.SendClicked -> sendPrompt()
+            DeepSeekViewEvent.SendClicked -> Unit
         }
     }
 
-    private fun sendPrompt() {
-        if (!state.isSendEnabled) {
+    fun sendPrompt(apiKey: String) {
+        val prompt = state.prompt.trim()
+        if (prompt.isEmpty() || state.isLoading) {
             return
         }
 
         val request = DeepSeekRequestData(
-            apiKey = state.apiKey,
+            apiKey = apiKey,
             systemPrompt = state.systemPrompt,
-            prompt = state.prompt,
+            prompt = prompt,
             model = state.selectedModel,
             apiSettings = state.apiSettings,
         )
-        val userMessage = ChatMessage(role = ChatRole.User, content = state.prompt)
+        val userMessage = ChatMessage(role = ChatRole.User, content = prompt)
 
         coroutineScope.launch {
             state = state.copy(

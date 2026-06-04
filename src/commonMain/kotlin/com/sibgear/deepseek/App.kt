@@ -3,21 +3,17 @@ package com.sibgear.deepseek
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import com.sibgear.deepseek.data.KtorDeepSeekRepository
-import com.sibgear.deepseek.ui.DeepSeekScreen
-import com.sibgear.deepseek.ui.DeepSeekViewModel
+import com.sibgear.deepseek.ui.DeepSeekAppScreen
+import com.sibgear.deepseek.ui.DeepSeekAppViewModel
 
 @Composable
 fun App() {
     val scope = rememberCoroutineScope()
     val viewModel = remember(scope) {
-        DeepSeekViewModel(
-            repository = KtorDeepSeekRepository(),
-            coroutineScope = scope,
-        )
+        DeepSeekAppViewModel(coroutineScope = scope)
     }
 
-    DeepSeekScreen(
+    DeepSeekAppScreen(
         state = viewModel.state,
         onEvent = viewModel::onEvent,
     )

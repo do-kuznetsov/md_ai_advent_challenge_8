@@ -8,7 +8,6 @@ import com.sibgear.deepseek.domain.DeepSeekModels
 data class DeepSeekViewState(
     val systemPrompt: String = "",
     val prompt: String = "",
-    val apiKey: String = "",
     val selectedModel: DeepSeekModel = DeepSeekModels.Default,
     val availableModels: List<DeepSeekModel> = DeepSeekModels.Available,
     val messages: List<ChatMessage> = emptyList(),
@@ -18,5 +17,5 @@ data class DeepSeekViewState(
     val maxTokensInput: String = ApiSettings().maxTokens.toString(),
 ) {
     val isSendEnabled: Boolean
-        get() = apiKey.isNotBlank() && !isLoading
+        get() = prompt.isNotBlank() && !isLoading
 }
