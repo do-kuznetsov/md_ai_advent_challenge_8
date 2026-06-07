@@ -18,4 +18,5 @@ data class ChatMessageFooter(
     val completionTokens: Int? = null,
     val totalTokens: Int? = null,
     val cost: Double? = null,
+    val retryCount: Int = 0,
 )

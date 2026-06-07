@@ -10,18 +10,24 @@ import com.sibgear.deepseek.domain.AiModel
 import com.sibgear.deepseek.domain.AiRepository
 import com.sibgear.deepseek.domain.AiRequestData
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.readLine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.time.TimeSource
@@ -36,6 +42,11 @@ class KtorAiRepository(
 
     private val client = HttpClient {
         expectSuccess = false
+        install(HttpTimeout) {
+            connectTimeoutMillis = ConnectTimeoutMillis
+            socketTimeoutMillis = DefaultRequestTimeoutMillis
+            requestTimeoutMillis = DefaultRequestTimeoutMillis
+        }
         install(ContentNegotiation) {
             json(json)
         }
@@ -44,75 +55,166 @@ class KtorAiRepository(
     override suspend fun sendMessage(request: AiRequestData): AgentResponse {
         history.add(ChatMessage(role = ChatRole.User, content = request.prompt))
         val startedAt = TimeSource.Monotonic.markNow()
+        var retryCount = 0
 
         return try {
-            val response = client.post(request.model.provider.chatCompletionsUrl) {
-                bearerAuth(request.apiKey)
-                header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                setBody(
-                    ChatCompletionRequest(
-                        model = request.model.id,
-                        messages = request.apiMessages(history.getMessages()),
-                        stream = false,
-                        thinking = request.model.provider.thinking,
-                        temperature = request.apiSettings.deepSeekTemperature(),
-                        maxTokens = request.apiSettings.deepSeekMaxTokens(),
-                        stop = request.apiSettings.deepSeekStop(),
-                    ),
-                )
+            val completion = when (request.model.provider) {
+                AiProvider.DeepSeek -> sendNonStreamingCompletion(request)
+                AiProvider.OpenRouter -> sendOpenRouterCompletionWithRetry(request) { retryCount = it }
             }
-
-            val body = response.bodyAsText()
-            val responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds
-            if (!response.status.isSuccess()) {
-                val errorContent = formatApiError(
-                    provider = request.model.provider,
-                    statusCode = response.status.value,
-                    statusDescription = response.status.description,
-                    body = body,
-                )
-
-                return AgentResponse(
-                    messages = history.add(
-                        request.assistantMessage(
-                            content = errorContent,
-                            responseTimeMs = responseTimeMs,
-                        ),
-                    ),
-                )
-            }
-
-            val completion = json.decodeFromString<ChatCompletionResponse>(body)
-            val assistantContent = completion.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
-                ?: "${request.model.provider.title} вернул пустой ответ."
 
             AgentResponse(
                 messages = history.add(
                     request.assistantMessage(
-                        content = assistantContent,
-                        responseTimeMs = responseTimeMs,
+                        content = completion.content,
+                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
                         usage = completion.usage,
+                        retryCount = retryCount,
                     ),
                 ),
             )
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Throwable) {
-            val errorContent = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
             AgentResponse(
                 messages = history.add(
                     request.assistantMessage(
-                        content = errorContent,
+                        content = request.model.provider.formatException(exception),
                         responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                        retryCount = retryCount,
                     ),
                 ),
             )
         }
     }
 
+    private suspend fun sendNonStreamingCompletion(request: AiRequestData): CompletionResult {
+        val response = client.post(request.model.provider.chatCompletionsUrl) {
+            bearerAuth(request.apiKey)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+                request.chatCompletionRequest(
+                    stream = false,
+                    historyMessages = history.getMessages(),
+                ),
+            )
+        }
+
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            return CompletionResult(
+                content = formatApiError(
+                    provider = request.model.provider,
+                    statusCode = response.status.value,
+                    statusDescription = response.status.description,
+                    body = body,
+                ),
+            )
+        }
+
+        val completion = json.decodeFromString<ChatCompletionResponse>(body)
+        val assistantContent = completion.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
+            ?: "${request.model.provider.title} вернул пустой ответ."
+
+        return CompletionResult(
+            content = assistantContent,
+            usage = completion.usage,
+        )
+    }
+
+    private suspend fun sendOpenRouterCompletionWithRetry(
+        request: AiRequestData,
+        onRetryCountChanged: (Int) -> Unit,
+    ): CompletionResult {
+        var retryCount = 0
+
+        while (true) {
+            try {
+                val completion = sendOpenRouterStreamingCompletion(request)
+                if (completion.isRetryable && retryCount < OpenRouterMaxRetries) {
+                    retryCount += 1
+                    onRetryCountChanged(retryCount)
+                    delay(OpenRouterRetryDelayMillis)
+                    continue
+                }
+
+                return completion
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Throwable) {
+                if (exception.isOpenRouterRetryableTransportError() && retryCount < OpenRouterMaxRetries) {
+                    retryCount += 1
+                    onRetryCountChanged(retryCount)
+                    delay(OpenRouterRetryDelayMillis)
+                    continue
+                }
+
+                throw exception
+            }
+        }
+    }
+
+    private suspend fun sendOpenRouterStreamingCompletion(request: AiRequestData): CompletionResult {
+        val response = client.post(AiProvider.OpenRouter.chatCompletionsUrl) {
+            bearerAuth(request.apiKey)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            header(HttpHeaders.Accept, "text/event-stream")
+            timeout {
+                connectTimeoutMillis = ConnectTimeoutMillis
+                socketTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+                requestTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+            }
+            setBody(
+                request.chatCompletionRequest(
+                    stream = true,
+                    historyMessages = history.getMessages(),
+                ),
+            )
+        }
+
+        if (!response.status.isSuccess()) {
+            val body = response.bodyAsText()
+            return CompletionResult(
+                content = formatApiError(
+                    provider = AiProvider.OpenRouter,
+                    statusCode = response.status.value,
+                    statusDescription = response.status.description,
+                    body = body,
+                ),
+                isRetryable = response.status.isOpenRouterRetryableStatus(),
+            )
+        }
+
+        val stream = response.readOpenRouterStream()
+        val content = stream.content.takeIf { it.isNotBlank() }
+            ?: "${AiProvider.OpenRouter.title} вернул пустой ответ."
+
+        return CompletionResult(
+            content = content,
+            usage = stream.usage,
+        )
+    }
+
+    private suspend fun HttpResponse.readOpenRouterStream(): OpenRouterStreamResult {
+        val accumulator = OpenRouterStreamAccumulator(json)
+        val channel = bodyAsChannel()
+
+        while (true) {
+            val line = channel.readLine() ?: break
+            accumulator.acceptLine(line)
+        }
+
+        return accumulator.result()
+    }
+
     override suspend fun loadOpenRouterModels(apiKey: String): List<AiModel> {
         val response = client.get("https://openrouter.ai/api/v1/models") {
             bearerAuth(apiKey)
+            timeout {
+                connectTimeoutMillis = ConnectTimeoutMillis
+                socketTimeoutMillis = ModelsRequestTimeoutMillis
+                requestTimeoutMillis = ModelsRequestTimeoutMillis
+            }
         }
 
         val body = response.bodyAsText()
@@ -156,6 +258,17 @@ class KtorAiRepository(
     }
 }
 
+private data class CompletionResult(
+    val content: String,
+    val usage: AiResponseUsage? = null,
+    val isRetryable: Boolean = false,
+)
+
+private const val ConnectTimeoutMillis = 30_000L
+private const val DefaultRequestTimeoutMillis = 180_000L
+private const val OpenRouterChatRequestTimeoutMillis = 300_000L
+private const val ModelsRequestTimeoutMillis = 60_000L
+
 private val AiRequestData.apiKey: String
     get() = when (model.provider) {
         AiProvider.DeepSeek -> deepSeekApiKey
@@ -180,10 +293,33 @@ private val AiProvider.title: String
         AiProvider.OpenRouter -> "OpenRouter"
     }
 
+private fun AiProvider.formatException(exception: Throwable): String {
+    if (this == AiProvider.OpenRouter && exception.isTimeoutError()) {
+        return "OpenRouter timeout after ${OpenRouterChatRequestTimeoutMillis / 1_000}s"
+    }
+
+    return "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
+}
+
+private fun AiRequestData.chatCompletionRequest(
+    stream: Boolean,
+    historyMessages: List<ChatMessage>,
+): ChatCompletionRequest =
+    ChatCompletionRequest(
+        model = model.id,
+        messages = apiMessages(historyMessages),
+        stream = stream,
+        thinking = model.provider.thinking,
+        temperature = apiSettings.deepSeekTemperature(),
+        maxTokens = apiSettings.deepSeekMaxTokens(),
+        stop = apiSettings.deepSeekStop(),
+    )
+
 private fun AiRequestData.assistantMessage(
     content: String,
     responseTimeMs: Long,
     usage: AiResponseUsage? = null,
+    retryCount: Int = 0,
 ): ChatMessage =
     ChatMessage(
         role = ChatRole.Assistant,
@@ -195,6 +331,7 @@ private fun AiRequestData.assistantMessage(
             completionTokens = usage?.completionTokens,
             totalTokens = usage?.displayTotalTokens,
             cost = usage?.costFor(model),
+            retryCount = retryCount,
         ),
     )
 

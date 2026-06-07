@@ -1,5 +1,7 @@
 package com.sibgear.deepseek.data
 
+import com.sibgear.deepseek.domain.AiModel
+import com.sibgear.deepseek.domain.AiProvider
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -45,6 +47,16 @@ class AiResponseUsageTest {
             expected = 0.42,
             actual = usage.deepSeekCost("deepseek-chat") ?: 0.0,
             absoluteTolerance = 0.000000001,
+        )
+    }
+
+    @Test
+    fun keepsZeroOpenRouterCostForFreeModels() {
+        val usage = AiResponseUsage(cost = 0.0)
+
+        assertEquals(
+            expected = 0.0,
+            actual = usage.costFor(AiModel(id = "free-model", provider = AiProvider.OpenRouter)),
         )
     }
 }

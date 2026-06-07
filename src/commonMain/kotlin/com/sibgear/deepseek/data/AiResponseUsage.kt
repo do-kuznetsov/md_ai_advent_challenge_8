@@ -28,7 +28,7 @@ internal data class AiResponseUsage(
 internal fun AiResponseUsage.costFor(model: AiModel): Double? =
     when (model.provider) {
         AiProvider.DeepSeek -> deepSeekCost(model.id)
-        AiProvider.OpenRouter -> cost?.takeIf { it > 0.0 }
+        AiProvider.OpenRouter -> cost
     }
 
 internal fun AiResponseUsage.deepSeekCost(modelId: String): Double? {

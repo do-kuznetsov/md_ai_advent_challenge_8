@@ -129,6 +129,10 @@ private fun ChatMessageFooter.displayText(): String =
         }
 
         add("cost: ${cost?.formatUsdCost() ?: "unknown"}")
+
+        if (retryCount > 0) {
+            add("retry: $retryCount")
+        }
     }.joinToString(separator = " · ")
 
 private fun Long.formatDuration(): String {
