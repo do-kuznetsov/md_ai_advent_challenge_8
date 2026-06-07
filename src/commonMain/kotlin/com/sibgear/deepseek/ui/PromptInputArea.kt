@@ -13,6 +13,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 
 private val SendButtonWidth = 128.dp
@@ -51,7 +58,23 @@ fun PromptInputArea(
             OutlinedTextField(
                 value = state.prompt,
                 onValueChange = { onEvent(DeepSeekViewEvent.PromptChanged(it)) },
-                modifier = Modifier.weight(1f).height(96.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(96.dp)
+                    .onPreviewKeyEvent { event ->
+                        val isSendShortcut = event.key == Key.Enter &&
+                            event.type == KeyEventType.KeyDown &&
+                            (event.isCtrlPressed || event.isMetaPressed)
+
+                        if (isSendShortcut) {
+                            if (state.isSendEnabled) {
+                                onEvent(DeepSeekViewEvent.SendClicked)
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    },
                 minLines = 3,
                 maxLines = 3,
                 placeholder = { Text("Введите сообщение") },
