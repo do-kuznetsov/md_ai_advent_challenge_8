@@ -208,19 +208,10 @@ private fun AiModel.withTier(tier: OpenRouterModelTier): AiModel =
     copy(displayName = "[${tier.label}] $displayName")
 
 private fun List<AiModel>.bestModel(predicate: (AiModel) -> Boolean): AiModel? =
-    filter(predicate)
-        .sortedWith(
-            compareByDescending<AiModel> { it.isFreeNamed }
-                .thenByDescending { it.contextLength ?: 0 }
-                .thenBy { it.id },
-        )
-        .firstOrNull()
+    firstOrNull(predicate)
 
 private val AiModel.searchText: String
     get() = "$id $displayName $description"
-
-private val AiModel.isFreeNamed: Boolean
-    get() = "$id $displayName".contains("free", ignoreCase = true)
 
 private val AiModel.isMixtureOfExperts: Boolean
     get() {
