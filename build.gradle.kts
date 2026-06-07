@@ -15,6 +15,7 @@ group = "com.sibgear"
 version = "1.0.0"
 
 val deepSeekApiKey = readRequiredKey("deepseek_api_key")
+val openRouterAiKey = readRequiredKey("openrouter_ai_key")
 
 // @OptIn(ExperimentalWasmDsl::class)
 kotlin {
@@ -61,6 +62,7 @@ buildkonfig {
 
     defaultConfigs {
         buildConfigField(STRING, "DEEPSEEK_API_KEY", deepSeekApiKey, const = true)
+        buildConfigField(STRING, "OPENROUTER_AI_KEY", openRouterAiKey, const = true)
     }
 }
 

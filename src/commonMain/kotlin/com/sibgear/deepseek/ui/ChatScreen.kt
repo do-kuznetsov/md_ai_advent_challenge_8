@@ -14,9 +14,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun DeepSeekScreen(
-    state: DeepSeekViewState,
-    onEvent: (DeepSeekViewEvent) -> Unit,
+fun ChatScreen(
+    state: ChatViewState,
+    onEvent: (ChatEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

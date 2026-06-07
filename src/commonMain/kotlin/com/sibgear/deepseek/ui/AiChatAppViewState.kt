@@ -1,6 +1,6 @@
 package com.sibgear.deepseek.ui
 
-data class DeepSeekAppViewState(
+data class AiChatAppViewState(
     val tabs: List<ChatTab>,
     val activeTabNumber: Int,
 ) {

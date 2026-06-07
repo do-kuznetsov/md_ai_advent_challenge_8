@@ -1,14 +1,17 @@
 package com.sibgear.deepseek.data
 
 import com.sibgear.deepseek.domain.AgentResponse
+import com.sibgear.deepseek.domain.AiProvider
 import com.sibgear.deepseek.domain.ApiSettings
 import com.sibgear.deepseek.domain.ChatMessage
 import com.sibgear.deepseek.domain.ChatRole
-import com.sibgear.deepseek.domain.DeepSeekRepository
-import com.sibgear.deepseek.domain.DeepSeekRequestData
+import com.sibgear.deepseek.domain.AiModel
+import com.sibgear.deepseek.domain.AiRepository
+import com.sibgear.deepseek.domain.AiRequestData
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -21,9 +24,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-class KtorDeepSeekRepository(
+class KtorAiRepository(
     private val history: InMemoryChatHistory = InMemoryChatHistory(),
-) : DeepSeekRepository {
+) : AiRepository {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -36,11 +39,11 @@ class KtorDeepSeekRepository(
         }
     }
 
-    override suspend fun sendMessage(request: DeepSeekRequestData): AgentResponse {
+    override suspend fun sendMessage(request: AiRequestData): AgentResponse {
         history.add(ChatMessage(role = ChatRole.User, content = request.prompt))
 
         return try {
-            val response = client.post("https://api.deepseek.com/chat/completions") {
+            val response = client.post(request.model.provider.chatCompletionsUrl) {
                 bearerAuth(request.apiKey)
                 header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                 setBody(
@@ -48,7 +51,7 @@ class KtorDeepSeekRepository(
                         model = request.model.id,
                         messages = request.apiMessages(history.getMessages()),
                         stream = false,
-                        thinking = Thinking(type = "disabled"),
+                        thinking = request.model.provider.thinking,
                         temperature = request.apiSettings.deepSeekTemperature(),
                         maxTokens = request.apiSettings.deepSeekMaxTokens(),
                         stop = request.apiSettings.deepSeekStop(),
@@ -59,44 +62,112 @@ class KtorDeepSeekRepository(
             val body = response.bodyAsText()
             if (!response.status.isSuccess()) {
                 val errorContent = formatApiError(
-                        statusCode = response.status.value,
-                        statusDescription = response.status.description,
-                        body = body,
-                    )
+                    provider = request.model.provider,
+                    statusCode = response.status.value,
+                    statusDescription = response.status.description,
+                    body = body,
+                )
 
                 return AgentResponse(
-                    messages = history.add(ChatMessage(role = ChatRole.Assistant, content = errorContent)),
+                    messages = history.add(request.assistantMessage(errorContent)),
                 )
             }
 
             val completion = json.decodeFromString<ChatCompletionResponse>(body)
             val assistantContent = completion.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
-                ?: "DeepSeek вернул пустой ответ."
+                ?: "${request.model.provider.title} вернул пустой ответ."
 
             AgentResponse(
-                messages = history.add(ChatMessage(role = ChatRole.Assistant, content = assistantContent)),
+                messages = history.add(request.assistantMessage(assistantContent)),
             )
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Throwable) {
             val errorContent = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
             AgentResponse(
-                messages = history.add(ChatMessage(role = ChatRole.Assistant, content = errorContent)),
+                messages = history.add(request.assistantMessage(errorContent)),
             )
         }
     }
 
-    private fun formatApiError(statusCode: Int, statusDescription: String, body: String): String {
+    override suspend fun loadOpenRouterModels(apiKey: String): List<AiModel> {
+        val response = client.get("https://openrouter.ai/api/v1/models") {
+            bearerAuth(apiKey)
+        }
+
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                formatApiError(
+                    provider = AiProvider.OpenRouter,
+                    statusCode = response.status.value,
+                    statusDescription = response.status.description,
+                    body = body,
+                ),
+            )
+        }
+
+        return json.decodeFromString<OpenRouterModelsResponse>(body).data.mapNotNull { model ->
+            model.id?.let { id ->
+                AiModel(
+                    id = id,
+                    displayName = model.name?.takeIf { it.isNotBlank() } ?: id,
+                    provider = AiProvider.OpenRouter,
+                    description = model.description.orEmpty(),
+                    contextLength = model.contextLength,
+                    supportedParameters = model.supportedParameters.orEmpty(),
+                )
+            }
+        }
+    }
+
+    private fun formatApiError(
+        provider: AiProvider,
+        statusCode: Int,
+        statusDescription: String,
+        body: String,
+    ): String {
         val apiMessage = runCatching {
-            json.decodeFromString<DeepSeekErrorResponse>(body).error?.message
+            json.decodeFromString<ApiErrorResponse>(body).error?.message
         }.getOrNull()
 
         val message = apiMessage ?: body.take(600).ifBlank { "без тела ответа" }
-        return "Ошибка API: HTTP $statusCode $statusDescription\n$message"
+        return "Ошибка ${provider.title} API: HTTP $statusCode $statusDescription\n$message"
     }
 }
 
-private fun DeepSeekRequestData.apiMessages(historyMessages: List<ChatMessage>): List<ApiChatMessage> {
+private val AiRequestData.apiKey: String
+    get() = when (model.provider) {
+        AiProvider.DeepSeek -> deepSeekApiKey
+        AiProvider.OpenRouter -> openRouterApiKey
+    }
+
+private val AiProvider.chatCompletionsUrl: String
+    get() = when (this) {
+        AiProvider.DeepSeek -> "https://api.deepseek.com/chat/completions"
+        AiProvider.OpenRouter -> "https://openrouter.ai/api/v1/chat/completions"
+    }
+
+private val AiProvider.thinking: Thinking?
+    get() = when (this) {
+        AiProvider.DeepSeek -> Thinking(type = "disabled")
+        AiProvider.OpenRouter -> null
+    }
+
+private val AiProvider.title: String
+    get() = when (this) {
+        AiProvider.DeepSeek -> "DeepSeek"
+        AiProvider.OpenRouter -> "OpenRouter"
+    }
+
+private fun AiRequestData.assistantMessage(content: String): ChatMessage =
+    ChatMessage(
+        role = ChatRole.Assistant,
+        content = content,
+        sourceLabel = "${model.provider.title} / ${model.displayName}",
+    )
+
+private fun AiRequestData.apiMessages(historyMessages: List<ChatMessage>): List<ApiChatMessage> {
     val trimmedSystemPrompt = systemPrompt.trim()
     return buildList {
         if (trimmedSystemPrompt.isNotEmpty()) {
@@ -145,7 +216,7 @@ private data class ChatCompletionRequest(
     val model: String,
     val messages: List<ApiChatMessage>,
     val stream: Boolean,
-    val thinking: Thinking,
+    val thinking: Thinking? = null,
     val temperature: Float? = null,
     @kotlinx.serialization.SerialName("max_tokens")
     val maxTokens: Int? = null,
@@ -179,11 +250,27 @@ private data class AssistantMessage(
 )
 
 @Serializable
-private data class DeepSeekErrorResponse(
-    val error: DeepSeekError? = null,
+private data class ApiErrorResponse(
+    val error: ApiError? = null,
 )
 
 @Serializable
-private data class DeepSeekError(
+private data class ApiError(
     val message: String? = null,
+)
+
+@Serializable
+private data class OpenRouterModelsResponse(
+    val data: List<OpenRouterModelDto> = emptyList(),
+)
+
+@Serializable
+private data class OpenRouterModelDto(
+    val id: String? = null,
+    val name: String? = null,
+    val description: String? = null,
+    @kotlinx.serialization.SerialName("context_length")
+    val contextLength: Int? = null,
+    @kotlinx.serialization.SerialName("supported_parameters")
+    val supportedParameters: List<String>? = null,
 )

@@ -79,16 +79,28 @@ private fun ChatBubble(message: ChatMessage) {
         horizontalArrangement = horizontalArrangement,
     ) {
         SelectionContainer {
-            Text(
-                text = message.content,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth(0.78f)
                     .widthIn(min = 48.dp)
                     .background(backgroundColor, RoundedCornerShape(8.dp))
                     .padding(12.dp),
-                color = Color(0xFF202124),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                message.sourceLabel?.let { sourceLabel ->
+                    Text(
+                        text = sourceLabel,
+                        color = Color(0xFF5F6368),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+
+                Text(
+                    text = message.content,
+                    color = Color(0xFF202124),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }

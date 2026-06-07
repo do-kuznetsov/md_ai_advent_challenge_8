@@ -26,8 +26,8 @@ private val SendButtonWidth = 128.dp
 
 @Composable
 fun PromptInputArea(
-    state: DeepSeekViewState,
-    onEvent: (DeepSeekViewEvent) -> Unit,
+    state: ChatViewState,
+    onEvent: (ChatEvent) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -42,7 +42,7 @@ fun PromptInputArea(
 
             OutlinedTextField(
                 value = state.systemPrompt,
-                onValueChange = { onEvent(DeepSeekViewEvent.SystemPromptChanged(it)) },
+                onValueChange = { onEvent(ChatEvent.SystemPromptChanged(it)) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
             )
@@ -57,7 +57,7 @@ fun PromptInputArea(
         ) {
             OutlinedTextField(
                 value = state.prompt,
-                onValueChange = { onEvent(DeepSeekViewEvent.PromptChanged(it)) },
+                onValueChange = { onEvent(ChatEvent.PromptChanged(it)) },
                 modifier = Modifier
                     .weight(1f)
                     .height(96.dp)
@@ -68,7 +68,7 @@ fun PromptInputArea(
 
                         if (isSendShortcut) {
                             if (state.isSendEnabled) {
-                                onEvent(DeepSeekViewEvent.SendClicked)
+                                onEvent(ChatEvent.SendClicked)
                             }
                             true
                         } else {
@@ -81,7 +81,7 @@ fun PromptInputArea(
             )
 
             Button(
-                onClick = { onEvent(DeepSeekViewEvent.SendClicked) },
+                onClick = { onEvent(ChatEvent.SendClicked) },
                 enabled = state.isSendEnabled,
                 modifier = Modifier.width(SendButtonWidth).height(56.dp),
             ) {
