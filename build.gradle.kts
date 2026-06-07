@@ -4,11 +4,11 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import java.util.Properties
 
 plugins {
-    kotlin("multiplatform") version "2.3.21"
-    kotlin("plugin.serialization") version "2.3.21"
-    id("org.jetbrains.compose") version "1.11.0"
-    id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
-    id("com.codingfeline.buildkonfig") version "0.21.2"
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.jetbrains.compose)
+    alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.buildkonfig)
 }
 
 group = "com.sibgear"
@@ -35,22 +35,22 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
-            implementation("io.ktor:ktor-client-core:3.5.0")
-            implementation("io.ktor:ktor-client-content-negotiation:3.5.0")
-            implementation("io.ktor:ktor-serialization-kotlinx-json:3.5.0")
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
+            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.serialization.json)
         }
 
         val desktopMain by getting
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
-            implementation("io.ktor:ktor-client-cio:3.5.0")
+            implementation(libs.ktor.client.cio)
         }
 
 //        val wasmJsMain by getting
 //        wasmJsMain.dependencies {
-//            implementation("io.ktor:ktor-client-js:3.5.0")
+//            implementation(libs.ktor.client.js)
 //        }
     }
 }
