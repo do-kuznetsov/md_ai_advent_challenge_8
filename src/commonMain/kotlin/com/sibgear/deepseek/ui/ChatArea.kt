@@ -26,7 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.domain.ChatMessage
+import com.sibgear.deepseek.domain.ChatMessageFooter
 import com.sibgear.deepseek.domain.ChatRole
+import kotlin.math.roundToLong
 
 private val UserMessageColor = Color(0xFFDDF7DF)
 private val AssistantMessageColor = Color(0xFFEDE1FF)
@@ -100,7 +102,56 @@ private fun ChatBubble(message: ChatMessage) {
                     color = Color(0xFF202124),
                     style = MaterialTheme.typography.bodyMedium,
                 )
+
+                message.footer?.let { footer ->
+                    Text(
+                        text = footer.displayText(),
+                        color = Color(0xFF5F6368),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
             }
         }
     }
 }
+
+private fun ChatMessageFooter.displayText(): String =
+    buildList {
+        add("time: ${responseTimeMs.formatDuration()}")
+
+        totalTokens?.let { totalTokens ->
+            val tokenText = if (promptTokens != null && completionTokens != null) {
+                "tokens: $totalTokens (in $promptTokens / out $completionTokens)"
+            } else {
+                "tokens: $totalTokens"
+            }
+            add(tokenText)
+        }
+
+        add("cost: ${cost?.formatUsdCost() ?: "unknown"}")
+    }.joinToString(separator = " · ")
+
+private fun Long.formatDuration(): String {
+    if (this < 1000L) {
+        return "${this}ms"
+    }
+
+    val hundredths = (this + 5L) / 10L
+    val seconds = hundredths / 100L
+    val fraction = (hundredths % 100L).toString().padStart(2, '0')
+    return "$seconds.${fraction}s"
+}
+
+private fun Double.formatUsdCost(): String {
+    if (this == 0.0) {
+        return "free"
+    }
+
+    val scaledCost = (this * CostScale).roundToLong()
+    val whole = scaledCost / CostScale
+    val fraction = (scaledCost % CostScale).toString().padStart(CostFractionDigits, '0')
+    return "\$$whole.$fraction"
+}
+
+private const val CostScale = 1_000_000L
+private const val CostFractionDigits = 6

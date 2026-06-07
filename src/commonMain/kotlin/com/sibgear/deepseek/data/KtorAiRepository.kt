@@ -4,6 +4,7 @@ import com.sibgear.deepseek.domain.AgentResponse
 import com.sibgear.deepseek.domain.AiProvider
 import com.sibgear.deepseek.domain.ApiSettings
 import com.sibgear.deepseek.domain.ChatMessage
+import com.sibgear.deepseek.domain.ChatMessageFooter
 import com.sibgear.deepseek.domain.ChatRole
 import com.sibgear.deepseek.domain.AiModel
 import com.sibgear.deepseek.domain.AiRepository
@@ -23,6 +24,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlin.time.TimeSource
 
 class KtorAiRepository(
     private val history: InMemoryChatHistory = InMemoryChatHistory(),
@@ -41,6 +43,7 @@ class KtorAiRepository(
 
     override suspend fun sendMessage(request: AiRequestData): AgentResponse {
         history.add(ChatMessage(role = ChatRole.User, content = request.prompt))
+        val startedAt = TimeSource.Monotonic.markNow()
 
         return try {
             val response = client.post(request.model.provider.chatCompletionsUrl) {
@@ -60,6 +63,7 @@ class KtorAiRepository(
             }
 
             val body = response.bodyAsText()
+            val responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds
             if (!response.status.isSuccess()) {
                 val errorContent = formatApiError(
                     provider = request.model.provider,
@@ -69,7 +73,12 @@ class KtorAiRepository(
                 )
 
                 return AgentResponse(
-                    messages = history.add(request.assistantMessage(errorContent)),
+                    messages = history.add(
+                        request.assistantMessage(
+                            content = errorContent,
+                            responseTimeMs = responseTimeMs,
+                        ),
+                    ),
                 )
             }
 
@@ -78,14 +87,25 @@ class KtorAiRepository(
                 ?: "${request.model.provider.title} вернул пустой ответ."
 
             AgentResponse(
-                messages = history.add(request.assistantMessage(assistantContent)),
+                messages = history.add(
+                    request.assistantMessage(
+                        content = assistantContent,
+                        responseTimeMs = responseTimeMs,
+                        usage = completion.usage,
+                    ),
+                ),
             )
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Throwable) {
             val errorContent = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
             AgentResponse(
-                messages = history.add(request.assistantMessage(errorContent)),
+                messages = history.add(
+                    request.assistantMessage(
+                        content = errorContent,
+                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    ),
+                ),
             )
         }
     }
@@ -160,11 +180,22 @@ private val AiProvider.title: String
         AiProvider.OpenRouter -> "OpenRouter"
     }
 
-private fun AiRequestData.assistantMessage(content: String): ChatMessage =
+private fun AiRequestData.assistantMessage(
+    content: String,
+    responseTimeMs: Long,
+    usage: AiResponseUsage? = null,
+): ChatMessage =
     ChatMessage(
         role = ChatRole.Assistant,
         content = content,
         sourceLabel = "${model.provider.title} / ${model.displayName}",
+        footer = ChatMessageFooter(
+            responseTimeMs = responseTimeMs,
+            promptTokens = usage?.promptTokens,
+            completionTokens = usage?.completionTokens,
+            totalTokens = usage?.displayTotalTokens,
+            cost = usage?.costFor(model),
+        ),
     )
 
 private fun AiRequestData.apiMessages(historyMessages: List<ChatMessage>): List<ApiChatMessage> {
@@ -237,6 +268,7 @@ private data class Thinking(
 @Serializable
 private data class ChatCompletionResponse(
     val choices: List<Choice> = emptyList(),
+    val usage: AiResponseUsage? = null,
 )
 
 @Serializable
