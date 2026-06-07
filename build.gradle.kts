@@ -1,5 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+// import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 
 plugins {
     kotlin("multiplatform") version "2.3.21"
@@ -11,19 +11,19 @@ plugins {
 group = "com.sibgear"
 version = "1.0.0"
 
-@OptIn(ExperimentalWasmDsl::class)
+// @OptIn(ExperimentalWasmDsl::class)
 kotlin {
     jvm("desktop")
 
-    wasmJs {
-        outputModuleName.set("deepseek-client")
-        browser {
-            commonWebpackConfig {
-                outputFileName = "deepseek-client.js"
-            }
-        }
-        binaries.executable()
-    }
+//    wasmJs {
+//        outputModuleName.set("deepseek-client")
+//        browser {
+//            commonWebpackConfig {
+//                outputFileName = "deepseek-client.js"
+//            }
+//        }
+//        binaries.executable()
+//    }
 
     sourceSets {
         commonMain.dependencies {
@@ -43,10 +43,10 @@ kotlin {
             implementation("io.ktor:ktor-client-cio:3.5.0")
         }
 
-        val wasmJsMain by getting
-        wasmJsMain.dependencies {
-            implementation("io.ktor:ktor-client-js:3.5.0")
-        }
+//        val wasmJsMain by getting
+//        wasmJsMain.dependencies {
+//            implementation("io.ktor:ktor-client-js:3.5.0")
+//        }
     }
 }
 
