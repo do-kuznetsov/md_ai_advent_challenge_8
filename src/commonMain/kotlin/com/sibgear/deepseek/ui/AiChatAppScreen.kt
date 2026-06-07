@@ -11,9 +11,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun DeepSeekAppScreen(
-    state: DeepSeekAppViewState,
-    onEvent: (DeepSeekAppEvent) -> Unit,
+fun AiChatAppScreen(
+    state: AiChatAppViewState,
+    onEvent: (AiChatAppEvent) -> Unit,
 ) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -24,28 +24,20 @@ fun DeepSeekAppScreen(
                 ChatTabBar(
                     tabs = state.tabs,
                     activeTabNumber = state.activeTabNumber,
-                    onTabSelected = { onEvent(DeepSeekAppEvent.TabSelected(it)) },
-                    onTabClosed = { onEvent(DeepSeekAppEvent.TabClosed(it)) },
-                    onTabAdded = { onEvent(DeepSeekAppEvent.TabAdded) },
+                    onTabSelected = { onEvent(AiChatAppEvent.TabSelected(it)) },
+                    onTabClosed = { onEvent(AiChatAppEvent.TabClosed(it)) },
+                    onTabAdded = { onEvent(AiChatAppEvent.TabAdded) },
                     modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
                 )
 
                 state.activeTab?.let { tab ->
-                    DeepSeekScreen(
+                    ChatScreen(
                         state = tab.viewModel.state,
-                        onEvent = { onEvent(DeepSeekAppEvent.ActiveChatEvent(it)) },
+                        onEvent = { onEvent(AiChatAppEvent.ActiveChatEvent(it)) },
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
-        }
-
-        if (state.isApiKeyDialogVisible) {
-            ApiKeyDialog(
-                apiKey = state.apiKeyInput,
-                onApiKeyChanged = { onEvent(DeepSeekAppEvent.ApiKeyInputChanged(it)) },
-                onConfirmed = { onEvent(DeepSeekAppEvent.ApiKeyConfirmed) },
-            )
         }
     }
 }

@@ -25,8 +25,8 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun ApiSettingsPanel(
-    state: DeepSeekViewState,
-    onEvent: (DeepSeekViewEvent) -> Unit,
+    state: ChatViewState,
+    onEvent: (ChatEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isApiControlEnabled = state.apiSettings.isApiControlEnabled
@@ -44,10 +44,35 @@ fun ApiSettingsPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ApiSettingsLabel(
+                    text = "filter",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                OutlinedTextField(
+                    value = state.modelFilter,
+                    onValueChange = { onEvent(ChatEvent.ModelFilterChanged(it)) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                )
+            }
+
             ModelSelector(
                 state = state,
                 onEvent = onEvent,
             )
+
+            state.openRouterModelsStatus?.let { status ->
+                ApiSettingsLabel(
+                    text = status,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             HorizontalDivider(modifier = Modifier.fillMaxWidth())
 
@@ -58,7 +83,7 @@ fun ApiSettingsPanel(
             ) {
                 Checkbox(
                     checked = state.apiSettings.isApiControlEnabled,
-                    onCheckedChange = { onEvent(DeepSeekViewEvent.ApiControlChanged(it)) },
+                    onCheckedChange = { onEvent(ChatEvent.ApiControlChanged(it)) },
                 )
 
                 ApiSettingsLabel(
@@ -74,7 +99,7 @@ fun ApiSettingsPanel(
 
             Slider(
                 value = state.apiSettings.temperature,
-                onValueChange = { onEvent(DeepSeekViewEvent.TemperatureChanged(it)) },
+                onValueChange = { onEvent(ChatEvent.TemperatureChanged(it)) },
                 valueRange = 0f..1f,
                 enabled = isApiControlEnabled,
             )
@@ -86,7 +111,7 @@ fun ApiSettingsPanel(
 
             OutlinedTextField(
                 value = state.maxTokensInput,
-                onValueChange = { onEvent(DeepSeekViewEvent.MaxTokensChanged(it)) },
+                onValueChange = { onEvent(ChatEvent.MaxTokensChanged(it)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 enabled = isApiControlEnabled,
@@ -99,7 +124,7 @@ fun ApiSettingsPanel(
 
             OutlinedTextField(
                 value = state.apiSettings.stopWord,
-                onValueChange = { onEvent(DeepSeekViewEvent.StopWordChanged(it)) },
+                onValueChange = { onEvent(ChatEvent.StopWordChanged(it)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 enabled = isApiControlEnabled,
@@ -110,16 +135,16 @@ fun ApiSettingsPanel(
 
 @Composable
 private fun ModelSelector(
-    state: DeepSeekViewState,
-    onEvent: (DeepSeekViewEvent) -> Unit,
+    state: ChatViewState,
+    onEvent: (ChatEvent) -> Unit,
 ) {
     Box {
         OutlinedButton(
-            onClick = { onEvent(DeepSeekViewEvent.ModelMenuExpandedChanged(true)) },
+            onClick = { onEvent(ChatEvent.ModelMenuExpandedChanged(true)) },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
-                text = state.selectedModel.id,
+                text = state.selectedModel.displayName,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -128,13 +153,24 @@ private fun ModelSelector(
         DropdownMenu(
             expanded = state.isModelMenuExpanded,
             onDismissRequest = {
-                onEvent(DeepSeekViewEvent.ModelMenuExpandedChanged(false))
+                onEvent(ChatEvent.ModelMenuExpandedChanged(false))
             },
         ) {
-            state.availableModels.forEach { model ->
+            state.openRouterModels.forEach { model ->
                 DropdownMenuItem(
-                    text = { Text(model.id) },
-                    onClick = { onEvent(DeepSeekViewEvent.ModelSelected(model)) },
+                    text = { Text(model.displayName) },
+                    onClick = { onEvent(ChatEvent.ModelSelected(model)) },
+                )
+            }
+
+            if (state.openRouterModels.isNotEmpty()) {
+                HorizontalDivider()
+            }
+
+            state.deepSeekModels.forEach { model ->
+                DropdownMenuItem(
+                    text = { Text(model.displayName) },
+                    onClick = { onEvent(ChatEvent.ModelSelected(model)) },
                 )
             }
         }

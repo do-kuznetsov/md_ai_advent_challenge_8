@@ -3,10 +3,11 @@ package com.sibgear.deepseek.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.sibgear.deepseek.data.KtorDeepSeekRepository
+import com.sibgear.deepseek.config.BuildConfig
+import com.sibgear.deepseek.data.KtorAiRepository
 import kotlinx.coroutines.CoroutineScope
 
-class DeepSeekAppViewModel(
+class AiChatAppViewModel(
     private val coroutineScope: CoroutineScope,
 ) {
     private var nextTabNumber = 1
@@ -16,16 +17,12 @@ class DeepSeekAppViewModel(
     )
         private set
 
-    fun onEvent(event: DeepSeekAppEvent) {
+    fun onEvent(event: AiChatAppEvent) {
         when (event) {
-            is DeepSeekAppEvent.ActiveChatEvent -> handleChatEvent(event.event)
-            is DeepSeekAppEvent.ApiKeyInputChanged -> {
-                state = state.copy(apiKeyInput = event.apiKey)
-            }
-            DeepSeekAppEvent.ApiKeyConfirmed -> confirmApiKey()
-            DeepSeekAppEvent.TabAdded -> addTab()
-            is DeepSeekAppEvent.TabClosed -> closeTab(event.number)
-            is DeepSeekAppEvent.TabSelected -> {
+            is AiChatAppEvent.ActiveChatEvent -> handleChatEvent(event.event)
+            AiChatAppEvent.TabAdded -> addTab()
+            is AiChatAppEvent.TabClosed -> closeTab(event.number)
+            is AiChatAppEvent.TabSelected -> {
                 if (state.tabs.any { it.number == event.number }) {
                     state = state.copy(activeTabNumber = event.number)
                 }
@@ -33,9 +30,9 @@ class DeepSeekAppViewModel(
         }
     }
 
-    private fun createInitialState(): DeepSeekAppViewState {
+    private fun createInitialState(): AiChatAppViewState {
         val firstTab = createTab()
-        return DeepSeekAppViewState(
+        return AiChatAppViewState(
             tabs = listOf(firstTab),
             activeTabNumber = firstTab.number,
         )
@@ -44,24 +41,15 @@ class DeepSeekAppViewModel(
     private fun createTab(): ChatTab {
         val number = nextTabNumber
         nextTabNumber += 1
+        val viewModel = ChatViewModel(
+            repository = KtorAiRepository(),
+            coroutineScope = coroutineScope,
+        )
+        viewModel.loadOpenRouterModels(BuildConfig.OPENROUTER_AI_KEY)
+
         return ChatTab(
             number = number,
-            viewModel = DeepSeekViewModel(
-                repository = KtorDeepSeekRepository(),
-                coroutineScope = coroutineScope,
-            ),
-        )
-    }
-
-    private fun confirmApiKey() {
-        val trimmedApiKey = state.apiKeyInput.trim()
-        if (trimmedApiKey.isEmpty()) {
-            return
-        }
-
-        state = state.copy(
-            apiKey = trimmedApiKey,
-            isApiKeyDialogVisible = false,
+            viewModel = viewModel,
         )
     }
 
@@ -104,14 +92,13 @@ class DeepSeekAppViewModel(
         )
     }
 
-    private fun handleChatEvent(event: DeepSeekViewEvent) {
+    private fun handleChatEvent(event: ChatEvent) {
         val activeViewModel = state.activeTab?.viewModel ?: return
         when (event) {
-            DeepSeekViewEvent.SendClicked -> {
-                if (state.apiKey.isNotBlank()) {
-                    activeViewModel.sendPrompt(state.apiKey)
-                }
-            }
+            ChatEvent.SendClicked -> activeViewModel.sendPrompt(
+                deepSeekApiKey = BuildConfig.DEEPSEEK_API_KEY,
+                openRouterApiKey = BuildConfig.OPENROUTER_AI_KEY,
+            )
             else -> activeViewModel.onEvent(event)
         }
     }
