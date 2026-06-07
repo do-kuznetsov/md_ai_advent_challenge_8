@@ -30,6 +30,7 @@ replay_pid*
 .gradle/
 build/
 local.properties
+.keys.txt
 
 # IDEA
 .idea/

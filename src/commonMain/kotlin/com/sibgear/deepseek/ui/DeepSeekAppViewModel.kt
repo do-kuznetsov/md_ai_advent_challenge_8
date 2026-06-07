@@ -3,6 +3,7 @@ package com.sibgear.deepseek.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.sibgear.deepseek.config.BuildConfig
 import com.sibgear.deepseek.data.KtorDeepSeekRepository
 import kotlinx.coroutines.CoroutineScope
 
@@ -19,10 +20,6 @@ class DeepSeekAppViewModel(
     fun onEvent(event: DeepSeekAppEvent) {
         when (event) {
             is DeepSeekAppEvent.ActiveChatEvent -> handleChatEvent(event.event)
-            is DeepSeekAppEvent.ApiKeyInputChanged -> {
-                state = state.copy(apiKeyInput = event.apiKey)
-            }
-            DeepSeekAppEvent.ApiKeyConfirmed -> confirmApiKey()
             DeepSeekAppEvent.TabAdded -> addTab()
             is DeepSeekAppEvent.TabClosed -> closeTab(event.number)
             is DeepSeekAppEvent.TabSelected -> {
@@ -50,18 +47,6 @@ class DeepSeekAppViewModel(
                 repository = KtorDeepSeekRepository(),
                 coroutineScope = coroutineScope,
             ),
-        )
-    }
-
-    private fun confirmApiKey() {
-        val trimmedApiKey = state.apiKeyInput.trim()
-        if (trimmedApiKey.isEmpty()) {
-            return
-        }
-
-        state = state.copy(
-            apiKey = trimmedApiKey,
-            isApiKeyDialogVisible = false,
         )
     }
 
@@ -107,11 +92,7 @@ class DeepSeekAppViewModel(
     private fun handleChatEvent(event: DeepSeekViewEvent) {
         val activeViewModel = state.activeTab?.viewModel ?: return
         when (event) {
-            DeepSeekViewEvent.SendClicked -> {
-                if (state.apiKey.isNotBlank()) {
-                    activeViewModel.sendPrompt(state.apiKey)
-                }
-            }
+            DeepSeekViewEvent.SendClicked -> activeViewModel.sendPrompt(BuildConfig.DEEPSEEK_API_KEY)
             else -> activeViewModel.onEvent(event)
         }
     }

@@ -1,15 +1,20 @@
+import com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 // import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import java.util.Properties
 
 plugins {
     kotlin("multiplatform") version "2.3.21"
     kotlin("plugin.serialization") version "2.3.21"
     id("org.jetbrains.compose") version "1.11.0"
     id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
+    id("com.codingfeline.buildkonfig") version "0.21.2"
 }
 
 group = "com.sibgear"
 version = "1.0.0"
+
+val deepSeekApiKey = readRequiredKey("deepseek_api_key")
 
 // @OptIn(ExperimentalWasmDsl::class)
 kotlin {
@@ -50,6 +55,15 @@ kotlin {
     }
 }
 
+buildkonfig {
+    packageName = "com.sibgear.deepseek.config"
+    objectName = "BuildConfig"
+
+    defaultConfigs {
+        buildConfigField(STRING, "DEEPSEEK_API_KEY", deepSeekApiKey, const = true)
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "com.sibgear.deepseek.MainKt"
@@ -60,4 +74,25 @@ compose.desktop {
             packageVersion = "1.0.0"
         }
     }
+}
+
+fun readRequiredKey(keyName: String): String {
+    val keysFile = file(".keys.txt")
+    if (!keysFile.exists()) {
+        throw GradleException(
+            "Missing .keys.txt. Create it in the project root with: $keyName=<value>",
+        )
+    }
+
+    val properties = Properties()
+    keysFile.inputStream().use(properties::load)
+
+    val value = properties.getProperty(keyName)?.trim()
+    if (value.isNullOrEmpty()) {
+        throw GradleException(
+            "Missing $keyName in .keys.txt. Expected format: $keyName=<value>",
+        )
+    }
+
+    return value
 }

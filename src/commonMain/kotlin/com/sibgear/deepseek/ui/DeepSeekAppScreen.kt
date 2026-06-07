@@ -39,13 +39,5 @@ fun DeepSeekAppScreen(
                 }
             }
         }
-
-        if (state.isApiKeyDialogVisible) {
-            ApiKeyDialog(
-                apiKey = state.apiKeyInput,
-                onApiKeyChanged = { onEvent(DeepSeekAppEvent.ApiKeyInputChanged(it)) },
-                onConfirmed = { onEvent(DeepSeekAppEvent.ApiKeyConfirmed) },
-            )
-        }
     }
 }
