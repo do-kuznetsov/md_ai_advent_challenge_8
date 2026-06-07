@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,9 +21,11 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 private val SendButtonWidth = 128.dp
+private val SendButtonLoaderColor = Color(0xFF3B82F6)
 
 @Composable
 fun PromptInputArea(
@@ -85,11 +88,19 @@ fun PromptInputArea(
                 enabled = state.isSendEnabled,
                 modifier = Modifier.width(SendButtonWidth).height(56.dp),
             ) {
-                Text(
-                    text = if (state.isLoading) "ждите" else "отправить",
-                    maxLines = 1,
-                    softWrap = false,
-                )
+                if (state.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.width(24.dp).height(24.dp),
+                        color = SendButtonLoaderColor,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text(
+                        text = "отправить",
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
         }
     }
