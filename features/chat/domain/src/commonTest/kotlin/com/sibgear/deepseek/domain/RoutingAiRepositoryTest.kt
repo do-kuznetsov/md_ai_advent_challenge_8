@@ -14,7 +14,7 @@ class RoutingAiRepositoryTest {
                 AiProvider.DeepSeek to deepSeekRepository,
                 AiProvider.OpenRouter to openRouterRepository,
             ),
-            openRouterModelsRepository = null,
+            modelRepositories = emptyMap(),
         )
         val request = request(AiProvider.DeepSeek)
 
@@ -33,7 +33,7 @@ class RoutingAiRepositoryTest {
                 AiProvider.DeepSeek to deepSeekRepository,
                 AiProvider.OpenRouter to openRouterRepository,
             ),
-            openRouterModelsRepository = null,
+            modelRepositories = emptyMap(),
         )
         val request = request(AiProvider.OpenRouter)
 
@@ -44,14 +44,24 @@ class RoutingAiRepositoryTest {
     }
 
     @Test
-    fun loadsOpenRouterModelsThroughModelsRepository() = runTest {
+    fun loadsModelsThroughProviderModelsRepository() = runTest {
         val model = AiModel(id = "openrouter/test", provider = AiProvider.OpenRouter)
         val routingRepository = RoutingAiRepository(
             chatRepositories = emptyMap(),
-            openRouterModelsRepository = FakeModelsRepository(listOf(model)),
+            modelRepositories = mapOf(AiProvider.OpenRouter to FakeModelsRepository(listOf(model))),
         )
 
-        assertEquals(listOf(model), routingRepository.loadOpenRouterModels())
+        assertEquals(listOf(model), routingRepository.loadModels(AiProvider.OpenRouter))
+    }
+
+    @Test
+    fun returnsEmptyModelsWhenProviderModelsRepositoryIsMissing() = runTest {
+        val routingRepository = RoutingAiRepository(
+            chatRepositories = emptyMap(),
+            modelRepositories = emptyMap(),
+        )
+
+        assertEquals(emptyList(), routingRepository.loadModels(AiProvider.DeepSeek))
     }
 
     private fun request(provider: AiProvider): AiRequestData =

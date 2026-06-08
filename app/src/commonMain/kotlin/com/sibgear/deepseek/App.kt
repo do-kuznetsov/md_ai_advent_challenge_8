@@ -6,6 +6,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import com.sibgear.deepseek.config.BuildConfig
 import com.sibgear.deepseek.data.InMemoryChatHistoryRepository
 import com.sibgear.deepseek.data.deepseek.DeepSeekChatRepository
+import com.sibgear.deepseek.data.deepseek.DeepSeekModelsRepository
 import com.sibgear.deepseek.data.openrouter.OpenRouterChatRepository
 import com.sibgear.deepseek.data.openrouter.OpenRouterModelsRepository
 import com.sibgear.deepseek.domain.AiProvider
@@ -38,8 +39,11 @@ fun App() {
                             historyInteractor = historyInteractor,
                         ),
                     ),
-                    openRouterModelsRepository = OpenRouterModelsRepository(
-                        apiKey = BuildConfig.OPENROUTER_AI_KEY,
+                    modelRepositories = mapOf(
+                        AiProvider.DeepSeek to DeepSeekModelsRepository(),
+                        AiProvider.OpenRouter to OpenRouterModelsRepository(
+                            apiKey = BuildConfig.OPENROUTER_AI_KEY,
+                        ),
                     ),
                 )
                 val interactor = ChatInteractor(

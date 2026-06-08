@@ -12,8 +12,8 @@ class ChatInteractor(
             repository.sendMessage(request)
         }
 
-    suspend fun loadOpenRouterModels(): List<AiModel> =
+    suspend fun loadModels(provider: AiProvider): List<AiModel> =
         withContext(dispatcher) {
-            repository.loadOpenRouterModels()
+            repository.loadModels(provider)
         }
 }

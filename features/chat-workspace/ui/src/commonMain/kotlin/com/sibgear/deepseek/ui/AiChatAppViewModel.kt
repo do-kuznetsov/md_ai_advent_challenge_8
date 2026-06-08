@@ -39,7 +39,7 @@ class AiChatAppViewModel(
         val number = nextTabNumber
         nextTabNumber += 1
         val viewModel = createChatViewModel()
-        viewModel.loadOpenRouterModels()
+        viewModel.loadModels()
 
         return ChatTab(
             number = number,

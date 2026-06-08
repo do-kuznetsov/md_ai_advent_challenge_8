@@ -2,7 +2,7 @@ package com.sibgear.deepseek.domain
 
 class RoutingAiRepository(
     private val chatRepositories: Map<AiProvider, AiChatRepository>,
-    private val openRouterModelsRepository: AiModelsRepository?,
+    private val modelRepositories: Map<AiProvider, AiModelsRepository>,
 ) {
     suspend fun sendMessage(request: AiRequestData): AgentResponse {
         val repository = chatRepositories[request.model.provider]
@@ -18,6 +18,6 @@ class RoutingAiRepository(
         return repository.sendMessage(request)
     }
 
-    suspend fun loadOpenRouterModels(): List<AiModel> =
-        openRouterModelsRepository?.loadModels().orEmpty()
+    suspend fun loadModels(provider: AiProvider): List<AiModel> =
+        modelRepositories[provider]?.loadModels().orEmpty()
 }

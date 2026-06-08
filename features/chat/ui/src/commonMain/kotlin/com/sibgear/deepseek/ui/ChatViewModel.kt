@@ -8,7 +8,6 @@ import com.sibgear.deepseek.domain.ChatInteractor
 import com.sibgear.deepseek.domain.ChatMessage
 import com.sibgear.deepseek.domain.ChatRole
 import com.sibgear.deepseek.domain.AiModel
-import com.sibgear.deepseek.domain.DeepSeekModels
 import com.sibgear.deepseek.domain.AiRequestData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -85,12 +84,25 @@ class ChatViewModel(
         }
     }
 
-    fun loadOpenRouterModels() {
+    fun loadModels() {
         coroutineScope.launch {
             state = state.copy(openRouterModelsStatus = "OpenRouter: загрузка моделей...")
 
+            val deepSeekModels = runCatching {
+                interactor.loadModels(AiProvider.DeepSeek)
+            }.getOrDefault(emptyList())
+                .takeIf { it.isNotEmpty() }
+                ?: listOf(ChatDefaults.DefaultModel)
+
+            state = state.copy(
+                deepSeekModels = deepSeekModels,
+                selectedModel = state.selectedModel.takeIf { selectedModel ->
+                    deepSeekModels.any { it.provider == selectedModel.provider && it.id == selectedModel.id }
+                } ?: deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel,
+            )
+
             try {
-                allOpenRouterModels = interactor.loadOpenRouterModels()
+                allOpenRouterModels = interactor.loadModels(AiProvider.OpenRouter)
                 applyOpenRouterFilter()
             } catch (exception: CancellationException) {
                 throw exception
@@ -98,7 +110,8 @@ class ChatViewModel(
                 allOpenRouterModels = emptyList()
                 state = state.copy(
                     openRouterModels = emptyList(),
-                    selectedModel = DeepSeekModels.Default,
+                    selectedModel = state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id }
+                        ?: ChatDefaults.DefaultModel,
                     openRouterModelsStatus = "OpenRouter: ${exception.message ?: "ошибка загрузки моделей"}",
                 )
             }
@@ -156,7 +169,7 @@ class ChatViewModel(
         val selectedModel = if (state.selectedModel.provider == AiProvider.OpenRouter &&
             openRouterModels.none { it.id == state.selectedModel.id }
         ) {
-            DeepSeekModels.Default
+            state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel
         } else {
             state.selectedModel
         }
