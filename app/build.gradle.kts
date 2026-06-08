@@ -15,8 +15,11 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":features:chat:domain"))
-            implementation(project(":features:chat:data"))
+            implementation(project(":features:chat:data:deepseek"))
+            implementation(project(":features:chat:data:openrouter"))
             implementation(project(":features:chat:ui"))
+            implementation(project(":features:chat-history:data"))
+            implementation(project(":features:chat-history:domain"))
             implementation(project(":features:chat-workspace:ui"))
             implementation(compose.runtime)
             implementation(compose.foundation)

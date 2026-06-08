@@ -2,14 +2,14 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
 }
 
-group = "com.sibgear.features.chat"
+group = "com.sibgear.features.chat.history"
 
 kotlin {
     jvm()
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
+            implementation(project(":features:chat-history:domain"))
         }
 
         commonTest.dependencies {

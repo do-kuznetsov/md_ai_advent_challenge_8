@@ -4,7 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 
 class ChatInteractor(
-    private val repository: AiRepository,
+    private val repository: RoutingAiRepository,
     private val dispatcher: CoroutineDispatcher,
 ) {
     suspend fun sendMessage(request: AiRequestData): AgentResponse =
