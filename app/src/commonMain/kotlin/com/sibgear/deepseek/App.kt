@@ -4,18 +4,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import com.sibgear.deepseek.config.BuildConfig
-import com.sibgear.deepseek.data.InMemoryChatHistoryRepository
-import com.sibgear.deepseek.data.deepseek.DeepSeekChatRepository
-import com.sibgear.deepseek.data.deepseek.DeepSeekModelsRepository
-import com.sibgear.deepseek.data.openrouter.OpenRouterChatRepository
-import com.sibgear.deepseek.data.openrouter.OpenRouterModelsRepository
-import com.sibgear.deepseek.domain.AiProvider
-import com.sibgear.deepseek.domain.ChatInteractor
-import com.sibgear.deepseek.domain.RoutingAiRepository
-import com.sibgear.deepseek.history.domain.ChatHistoryInteractor
-import com.sibgear.deepseek.ui.AiChatAppScreen
-import com.sibgear.deepseek.ui.AiChatAppViewModel
-import com.sibgear.deepseek.ui.ChatViewModel
+import com.sibgear.deepseek.chat.history.data.external.repository.InMemoryChatHistoryRepository
+import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekChatRepository
+import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekModelsRepository
+import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterChatRepository
+import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterModelsRepository
+import com.sibgear.deepseek.chat.domain.model.AiProvider
+import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
+import com.sibgear.deepseek.chat.domain.repository.RoutingAiRepository
+import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
+import com.sibgear.deepseek.chat.workspace.ui.external.view.AiChatAppScreen
+import com.sibgear.deepseek.chat.workspace.ui.external.presentation.AiChatAppViewModel
+import com.sibgear.deepseek.chat.ui.external.presentation.ChatViewModel
 import kotlinx.coroutines.Dispatchers
 
 @Composable
