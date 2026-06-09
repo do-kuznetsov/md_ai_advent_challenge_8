@@ -9,7 +9,7 @@ fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
         state = WindowState(width = 1360.dp, height = 765.dp),
-        title = "DeepSeek Client",
+        title = "AI Clients",
     ) {
         App()
     }
