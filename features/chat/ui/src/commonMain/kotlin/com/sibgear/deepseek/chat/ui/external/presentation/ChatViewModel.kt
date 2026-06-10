@@ -20,10 +20,11 @@ import kotlinx.coroutines.launch
 class ChatViewModel(
     private val interactor: ChatInteractor,
     private val coroutineScope: CoroutineScope,
+    initialMessages: List<ChatMessage> = emptyList(),
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
 
-    var state by mutableStateOf(ChatViewState())
+    var state by mutableStateOf(ChatViewState(messages = initialMessages))
         private set
 
     fun onEvent(event: ChatEvent) {

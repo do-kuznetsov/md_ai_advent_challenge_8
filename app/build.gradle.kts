@@ -4,6 +4,7 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.jetbrains.compose)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.buildkonfig)
@@ -18,7 +19,8 @@ kotlin {
             implementation(project(":features:chat:data:deepseek"))
             implementation(project(":features:chat:data:openrouter"))
             implementation(project(":features:chat:ui"))
-            implementation(project(":features:chat-history:data"))
+            implementation(project(":features:chat-history:data:json-file"))
+            implementation(project(":features:chat-history:data:sqldelight"))
             implementation(project(":features:chat-history:domain"))
             implementation(project(":features:chat-workspace:ui"))
             implementation(compose.runtime)
@@ -26,6 +28,11 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.serialization.json)
+        }
+
+        commonTest.dependencies {
+            implementation(libs.kotlin.test)
         }
     }
 }
