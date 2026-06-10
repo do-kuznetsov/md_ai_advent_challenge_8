@@ -8,6 +8,18 @@ internal const val ChatHistoryFileVersion = 1
 @Serializable
 internal data class ChatHistoryFileDto(
     val version: Int = ChatHistoryFileVersion,
+    val chats: List<ChatHistoryDto> = emptyList(),
+)
+
+@Serializable
+internal data class LegacyChatHistoryFileDto(
+    val version: Int = ChatHistoryFileVersion,
+    val messages: List<HistoryMessageDto> = emptyList(),
+)
+
+@Serializable
+internal data class ChatHistoryDto(
+    val chatId: Int,
     val messages: List<HistoryMessageDto> = emptyList(),
 )
 

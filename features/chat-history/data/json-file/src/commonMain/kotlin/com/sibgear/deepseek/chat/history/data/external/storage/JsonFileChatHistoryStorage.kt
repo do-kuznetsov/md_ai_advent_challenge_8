@@ -1,62 +1,53 @@
-package com.sibgear.deepseek.chat.history.data.external.repository
+package com.sibgear.deepseek.chat.history.data.external.storage
 
+import com.sibgear.deepseek.chat.history.data.external.repository.FileChatHistoryRepository
+import com.sibgear.deepseek.chat.history.data.internal.mapper.toChatHistoriesFileDto
 import com.sibgear.deepseek.chat.history.data.internal.mapper.toHistoryMessages
 import com.sibgear.deepseek.chat.history.data.internal.mapper.toHistoryMessagesByChatId
-import com.sibgear.deepseek.chat.history.data.internal.mapper.toChatHistoriesFileDto
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
-import com.sibgear.deepseek.chat.history.domain.repository.ChatHistoryRepository
 import java.io.File
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-class FileChatHistoryRepository(
+class JsonFileChatHistoryStorage(
     private val file: File,
-    private val chatId: Int = 1,
-) : ChatHistoryRepository {
+) {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
         prettyPrint = true
     }
 
-    override suspend fun add(message: HistoryMessage): List<HistoryMessage> =
-        replace(getMessages() + message)
+    fun loadSavedChatIds(): List<Int> =
+        readMessagesByChatId().keys.sorted()
 
-    override suspend fun getMessages(): List<HistoryMessage> =
-        readMessagesByChatId()[chatId].orEmpty()
+    fun createRepository(chatId: Int): FileChatHistoryRepository =
+        FileChatHistoryRepository(
+            file = file,
+            chatId = chatId,
+        )
 
-    override suspend fun replace(messages: List<HistoryMessage>): List<HistoryMessage> {
-        val messagesByChatId = readMessagesByChatId().toMutableMap()
-        messagesByChatId[chatId] = messages
-        writeMessagesByChatId(messagesByChatId)
-        return messages
-    }
-
-    override suspend fun clear() {
+    fun deleteChat(chatId: Int) {
         val messagesByChatId = readMessagesByChatId().toMutableMap()
         messagesByChatId.remove(chatId)
         writeMessagesByChatId(messagesByChatId)
     }
 
-    private fun readMessagesByChatId(): Map<Int, List<HistoryMessage>> {
+    private fun readMessagesByChatId(): Map<Int, List<HistoryMessage>> =
         if (!file.exists()) {
-            return emptyMap()
-        }
-
-        return runCatching {
-            json.decodeFromString<ChatHistoryFileDto>(file.readText()).toHistoryMessagesByChatId()
-        }.recoverCatching {
-            mapOf(
-                LegacySingleChatId to json.decodeFromString<LegacyChatHistoryFileDto>(file.readText())
-                    .toHistoryMessages(),
-            )
-        }.getOrElse {
-            preserveCorruptFile()
             emptyMap()
+        } else {
+            runCatching {
+                json.decodeFromString<ChatHistoryFileDto>(file.readText()).toHistoryMessagesByChatId()
+            }.recoverCatching {
+                mapOf(
+                    LegacySingleChatId to json.decodeFromString<LegacyChatHistoryFileDto>(file.readText())
+                        .toHistoryMessages(),
+                )
+            }.getOrDefault(emptyMap())
         }
-    }
 
     private fun writeMessagesByChatId(messagesByChatId: Map<Int, List<HistoryMessage>>) {
         val parent = file.parentFile
@@ -73,13 +64,6 @@ class FileChatHistoryRepository(
         if (!tempFile.renameTo(file)) {
             tempFile.copyTo(file, overwrite = true)
             tempFile.delete()
-        }
-    }
-
-    private fun preserveCorruptFile() {
-        runCatching {
-            val corruptFile = File(file.parentFile, "${file.name}.corrupt")
-            file.copyTo(corruptFile, overwrite = true)
         }
     }
 

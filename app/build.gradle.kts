@@ -20,6 +20,7 @@ kotlin {
             implementation(project(":features:chat:data:openrouter"))
             implementation(project(":features:chat:ui"))
             implementation(project(":features:chat-history:data:json-file"))
+            implementation(project(":features:chat-history:data:sqldelight"))
             implementation(project(":features:chat-history:domain"))
             implementation(project(":features:chat-workspace:ui"))
             implementation(compose.runtime)

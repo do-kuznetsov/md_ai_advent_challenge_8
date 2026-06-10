@@ -1,5 +1,6 @@
 package com.sibgear.deepseek.persistence
 
+import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
@@ -15,9 +16,10 @@ class WorkspaceStorageTest {
 
         assertEquals(
             WorkspaceSnapshot(
-                tabs = listOf(WorkspaceTabSnapshot(number = 1, historyFileName = "tab-1.json")),
+                tabs = listOf(WorkspaceTabSnapshot(number = 1)),
                 activeTabNumber = 1,
                 nextTabNumber = 2,
+                selectedStorageType = ChatStorageType.Json,
             ),
             snapshot,
         )
@@ -30,21 +32,49 @@ class WorkspaceStorageTest {
 
         storage.save(
             tabs = listOf(
-                WorkspaceTabSnapshot(number = 1, historyFileName = "tab-1.json"),
-                WorkspaceTabSnapshot(number = 3, historyFileName = "tab-3.json"),
+                WorkspaceTabSnapshot(number = 1),
+                WorkspaceTabSnapshot(number = 3),
             ),
             activeTabNumber = 3,
             nextTabNumber = 4,
+            selectedStorageType = ChatStorageType.Database,
         )
 
         assertEquals(
             WorkspaceSnapshot(
                 tabs = listOf(
-                    WorkspaceTabSnapshot(number = 1, historyFileName = "tab-1.json"),
-                    WorkspaceTabSnapshot(number = 3, historyFileName = "tab-3.json"),
+                    WorkspaceTabSnapshot(number = 1),
+                    WorkspaceTabSnapshot(number = 3),
                 ),
                 activeTabNumber = 3,
                 nextTabNumber = 4,
+                selectedStorageType = ChatStorageType.Database,
+            ),
+            WorkspaceStorage(baseDir).load(),
+        )
+    }
+
+    @Test
+    fun legacyWorkspaceWithoutStorageTypeRestoresJsonStorage() {
+        val baseDir = tempBaseDir()
+        baseDir.mkdirs()
+        File(baseDir, "chats.json").writeText(
+            """
+            {
+              "version": 1,
+              "tabs": [{"number": 2, "historyFileName": "tab-2.json"}],
+              "activeTabNumber": 2,
+              "nextTabNumber": 3
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            WorkspaceSnapshot(
+                tabs = listOf(WorkspaceTabSnapshot(number = 2)),
+                activeTabNumber = 2,
+                nextTabNumber = 3,
+                selectedStorageType = ChatStorageType.Json,
             ),
             WorkspaceStorage(baseDir).load(),
         )
@@ -59,7 +89,38 @@ class WorkspaceStorageTest {
         val snapshot = WorkspaceStorage(baseDir).load()
 
         assertEquals(1, snapshot.tabs.single().number)
+        assertEquals(ChatStorageType.Json, snapshot.selectedStorageType)
         assertTrue(File(baseDir, "chats.json.corrupt").exists())
+    }
+
+    @Test
+    fun storageBaseDirIsPlacedNearDirectoryRuntimeLocation() {
+        val runtimeLocation = File("/opt/AI Clients")
+
+        assertEquals(
+            File("/opt/AI Clients/ai-clients-data"),
+            storageBaseDirNearExecutable(runtimeLocation),
+        )
+    }
+
+    @Test
+    fun storageBaseDirIsPlacedNearJarRuntimeLocation() {
+        val runtimeLocation = File("/opt/AI Clients/app.jar")
+
+        assertEquals(
+            File("/opt/AI Clients/ai-clients-data"),
+            storageBaseDirNearExecutable(runtimeLocation),
+        )
+    }
+
+    @Test
+    fun storageBaseDirIsPlacedNearMacAppBundle() {
+        val runtimeLocation = File("/Applications/AI Clients.app/Contents/Resources")
+
+        assertEquals(
+            File("/Applications/ai-clients-data"),
+            storageBaseDirNearExecutable(runtimeLocation),
+        )
     }
 
     private fun tempBaseDir(): File =

@@ -1,14 +1,14 @@
 package com.sibgear.deepseek.persistence
 
+import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 internal class WorkspaceStorage(
-    private val baseDir: File,
+    val baseDir: File,
 ) {
-    private val historiesDir = File(baseDir, "histories")
     private val workspaceFile = File(baseDir, "chats.json")
     private val json = Json {
         ignoreUnknownKeys = true
@@ -37,11 +37,12 @@ internal class WorkspaceStorage(
         tabs: List<WorkspaceTabSnapshot>,
         activeTabNumber: Int,
         nextTabNumber: Int,
+        selectedStorageType: ChatStorageType,
     ) {
         val safeTabs = tabs
-            .filter { it.number > 0 && it.historyFileName.isNotBlank() }
+            .filter { it.number > 0 }
             .distinctBy { it.number }
-            .ifEmpty { listOf(defaultTabSnapshot(number = 1)) }
+            .ifEmpty { listOf(WorkspaceTabSnapshot(number = 1)) }
         val safeActiveTabNumber = activeTabNumber
             .takeIf { number -> safeTabs.any { it.number == number } }
             ?: safeTabs.first().number
@@ -54,35 +55,31 @@ internal class WorkspaceStorage(
                 tabs = safeTabs,
                 activeTabNumber = safeActiveTabNumber,
                 nextTabNumber = safeNextTabNumber,
+                selectedStorageType = selectedStorageType,
             ),
         )
     }
 
-    fun historyFile(historyFileName: String): File =
-        File(historiesDir, historyFileName)
+    fun jsonHistoryFile(): File =
+        File(baseDir, "chat-history.json")
 
-    fun defaultHistoryFileName(tabNumber: Int): String =
-        "tab-$tabNumber.json"
+    fun databaseHistoryFile(): File =
+        File(baseDir, "chat-history.db")
+
+    fun storageDirectoryLabel(): String =
+        "storage: ${baseDir.absolutePath}"
 
     private fun fallbackSnapshot(): WorkspaceSnapshot =
         WorkspaceSnapshot(
-            tabs = listOf(defaultTabSnapshot(number = 1)),
+            tabs = listOf(WorkspaceTabSnapshot(number = 1)),
             activeTabNumber = 1,
             nextTabNumber = 2,
-        )
-
-    private fun defaultTabSnapshot(number: Int): WorkspaceTabSnapshot =
-        WorkspaceTabSnapshot(
-            number = number,
-            historyFileName = defaultHistoryFileName(number),
+            selectedStorageType = ChatStorageType.Json,
         )
 
     private fun writeWorkspace(snapshot: WorkspaceSnapshot) {
         if (!baseDir.exists()) {
             baseDir.mkdirs()
-        }
-        if (!historiesDir.exists()) {
-            historiesDir.mkdirs()
         }
 
         val tempFile = File(baseDir, "${workspaceFile.name}.tmp")
@@ -105,14 +102,9 @@ internal class WorkspaceStorage(
 
     private fun WorkspaceFileDto.toSnapshot(): WorkspaceSnapshot {
         val safeTabs = tabs
-            .filter { it.number > 0 && it.historyFileName.isNotBlank() }
+            .filter { it.number > 0 }
             .distinctBy { it.number }
-            .map {
-                WorkspaceTabSnapshot(
-                    number = it.number,
-                    historyFileName = it.historyFileName,
-                )
-            }
+            .map { WorkspaceTabSnapshot(number = it.number) }
         val active = activeTabNumber
             .takeIf { number -> safeTabs.any { it.number == number } }
             ?: safeTabs.firstOrNull()?.number
@@ -126,26 +118,21 @@ internal class WorkspaceStorage(
             tabs = safeTabs,
             activeTabNumber = active,
             nextTabNumber = next,
+            selectedStorageType = selectedStorageType.toChatStorageType(),
         )
     }
 
     private fun WorkspaceSnapshot.toDto(): WorkspaceFileDto =
         WorkspaceFileDto(
-            tabs = tabs.map {
-                WorkspaceTabDto(
-                    number = it.number,
-                    historyFileName = it.historyFileName,
-                )
-            },
+            tabs = tabs.map { WorkspaceTabDto(number = it.number) },
             activeTabNumber = activeTabNumber,
             nextTabNumber = nextTabNumber,
+            selectedStorageType = selectedStorageType.storageValue,
         )
 
     companion object {
         fun default(): WorkspaceStorage =
-            WorkspaceStorage(
-                baseDir = File(System.getProperty("user.home"), ".ai-clients"),
-            )
+            WorkspaceStorage(baseDir = defaultStorageBaseDir())
     }
 }
 
@@ -153,11 +140,11 @@ internal data class WorkspaceSnapshot(
     val tabs: List<WorkspaceTabSnapshot>,
     val activeTabNumber: Int,
     val nextTabNumber: Int,
+    val selectedStorageType: ChatStorageType,
 )
 
 internal data class WorkspaceTabSnapshot(
     val number: Int,
-    val historyFileName: String,
 )
 
 @Serializable
@@ -166,12 +153,66 @@ private data class WorkspaceFileDto(
     val tabs: List<WorkspaceTabDto> = emptyList(),
     val activeTabNumber: Int = 1,
     val nextTabNumber: Int = 2,
+    val selectedStorageType: String = JsonStorageValue,
 )
 
 @Serializable
 private data class WorkspaceTabDto(
     val number: Int,
-    val historyFileName: String,
+    val historyFileName: String? = null,
 )
 
 private const val WorkspaceFileVersion = 1
+private const val JsonStorageValue = "json"
+private const val DatabaseStorageValue = "db"
+
+private val ChatStorageType.storageValue: String
+    get() = when (this) {
+        ChatStorageType.Json -> JsonStorageValue
+        ChatStorageType.Database -> DatabaseStorageValue
+    }
+
+private fun String.toChatStorageType(): ChatStorageType =
+    when (this) {
+        DatabaseStorageValue -> ChatStorageType.Database
+        else -> ChatStorageType.Json
+    }
+
+internal fun defaultStorageBaseDir(): File {
+    val resourcesDir = System.getProperty("compose.application.resources.dir")
+        ?.takeIf { it.isNotBlank() }
+        ?.let(::File)
+    val codeSourceDir = runCatching {
+        WorkspaceStorage::class.java
+            .protectionDomain
+            .codeSource
+            .location
+            .toURI()
+            .let(::File)
+            .let { location -> if (location.isDirectory) location else location.parentFile }
+    }.getOrNull()
+    val fallbackDir = File(System.getProperty("user.dir", "."))
+
+    return storageBaseDirNearExecutable(
+        runtimeLocation = resourcesDir ?: codeSourceDir ?: fallbackDir,
+    )
+}
+
+internal fun storageBaseDirNearExecutable(runtimeLocation: File): File =
+    File(runtimeLocation.executableDirectory(), StorageDirectoryName)
+
+private fun File.executableDirectory(): File {
+    val normalized = absoluteFile
+    val appBundle = generateSequence(normalized) { it.parentFile }
+        .firstOrNull { it.name.endsWith(".app") }
+
+    return appBundle?.parentFile
+        ?: if (normalized.isFile || normalized.extension.equals("jar", ignoreCase = true)) {
+            normalized.parentFile
+        } else {
+            normalized
+        }
+        ?: File(".").absoluteFile
+}
+
+private const val StorageDirectoryName = "ai-clients-data"

@@ -10,6 +10,9 @@ import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 internal fun List<HistoryMessage>.toChatMessages(): List<ChatMessage> =
     map { it.toChatMessage() }
 
+internal fun List<ChatMessage>.toHistoryMessages(): List<HistoryMessage> =
+    map { it.toHistoryMessage() }
+
 private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
@@ -18,14 +21,38 @@ private fun HistoryMessage.toChatMessage(): ChatMessage =
         footer = footer?.toChatMessageFooter(),
     )
 
+private fun ChatMessage.toHistoryMessage(): HistoryMessage =
+    HistoryMessage(
+        role = role.toHistoryRole(),
+        content = content,
+        sourceLabel = sourceLabel,
+        footer = footer?.toHistoryMessageFooter(),
+    )
+
 private fun HistoryRole.toChatRole(): ChatRole =
     when (this) {
         HistoryRole.User -> ChatRole.User
         HistoryRole.Assistant -> ChatRole.Assistant
     }
 
+private fun ChatRole.toHistoryRole(): HistoryRole =
+    when (this) {
+        ChatRole.User -> HistoryRole.User
+        ChatRole.Assistant -> HistoryRole.Assistant
+    }
+
 private fun HistoryMessageFooter.toChatMessageFooter(): ChatMessageFooter =
     ChatMessageFooter(
+        responseTimeMs = responseTimeMs,
+        promptTokens = promptTokens,
+        completionTokens = completionTokens,
+        totalTokens = totalTokens,
+        cost = cost,
+        retryCount = retryCount,
+    )
+
+private fun ChatMessageFooter.toHistoryMessageFooter(): HistoryMessageFooter =
+    HistoryMessageFooter(
         responseTimeMs = responseTimeMs,
         promptTokens = promptTokens,
         completionTokens = completionTokens,
