@@ -1,0 +1,34 @@
+CREATE TABLE history_message (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source_label TEXT,
+    response_time_ms INTEGER,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    total_tokens INTEGER,
+    cost REAL,
+    retry_count INTEGER
+);
+
+selectAll:
+SELECT *
+FROM history_message
+ORDER BY id ASC;
+
+insertMessage:
+INSERT INTO history_message(
+    role,
+    content,
+    source_label,
+    response_time_ms,
+    prompt_tokens,
+    completion_tokens,
+    total_tokens,
+    cost,
+    retry_count
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteAll:
+DELETE FROM history_message;

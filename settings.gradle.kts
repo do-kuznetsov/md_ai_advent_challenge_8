@@ -23,6 +23,7 @@ include(
     ":features:chat:data:openrouter",
     ":features:chat:ui",
     ":features:chat-history:domain",
-    ":features:chat-history:data",
+    ":features:chat-history:data:json-file",
+    ":features:chat-history:data:sqldelight",
     ":features:chat-workspace:ui",
 )
