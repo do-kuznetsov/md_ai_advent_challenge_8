@@ -10,14 +10,32 @@ import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppViewState
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 
 class AiChatAppViewModel(
-    private val createChatViewModel: () -> ChatViewModel,
+    private val createChatViewModel: (tabNumber: Int) -> ChatViewModel,
+    initialTabNumbers: List<Int> = emptyList(),
+    initialActiveTabNumber: Int? = null,
+    initialNextTabNumber: Int? = null,
+    private val onWorkspaceChanged: (tabNumbers: List<Int>, activeTabNumber: Int, nextTabNumber: Int) -> Unit = { _, _, _ -> },
 ) {
-    private var nextTabNumber = 1
+    private val initialNumbers = initialTabNumbers
+        .filter { it > 0 }
+        .distinct()
+        .ifEmpty { listOf(1) }
+    private var nextTabNumber = maxOf(
+        initialNextTabNumber ?: ((initialNumbers.maxOrNull() ?: 0) + 1),
+        (initialNumbers.maxOrNull() ?: 0) + 1,
+    )
 
     var state by mutableStateOf(
-        createInitialState(),
+        createInitialState(
+            tabNumbers = initialNumbers,
+            activeTabNumber = initialActiveTabNumber,
+        ),
     )
         private set
+
+    init {
+        notifyWorkspaceChanged()
+    }
 
     fun onEvent(event: AiChatAppEvent) {
         when (event) {
@@ -27,23 +45,33 @@ class AiChatAppViewModel(
             is AiChatAppEvent.TabSelected -> {
                 if (state.tabs.any { it.number == event.number }) {
                     state = state.copy(activeTabNumber = event.number)
+                    notifyWorkspaceChanged()
                 }
             }
         }
     }
 
-    private fun createInitialState(): AiChatAppViewState {
-        val firstTab = createTab()
+    private fun createInitialState(
+        tabNumbers: List<Int>,
+        activeTabNumber: Int?,
+    ): AiChatAppViewState {
+        val tabs = tabNumbers.map { createTab(it) }
         return AiChatAppViewState(
-            tabs = listOf(firstTab),
-            activeTabNumber = firstTab.number,
+            tabs = tabs,
+            activeTabNumber = activeTabNumber
+                ?.takeIf { number -> tabs.any { it.number == number } }
+                ?: tabs.first().number,
         )
     }
 
-    private fun createTab(): ChatTab {
+    private fun createNewTab(): ChatTab {
         val number = nextTabNumber
         nextTabNumber += 1
-        val viewModel = createChatViewModel()
+        return createTab(number)
+    }
+
+    private fun createTab(number: Int): ChatTab {
+        val viewModel = createChatViewModel(number)
         viewModel.loadModels()
 
         return ChatTab(
@@ -53,11 +81,12 @@ class AiChatAppViewModel(
     }
 
     private fun addTab() {
-        val tab = createTab()
+        val tab = createNewTab()
         state = state.copy(
             tabs = state.tabs + tab,
             activeTabNumber = tab.number,
         )
+        notifyWorkspaceChanged()
     }
 
     private fun closeTab(number: Int) {
@@ -69,11 +98,12 @@ class AiChatAppViewModel(
 
         val remainingTabs = currentTabs.filterNot { it.number == number }
         if (remainingTabs.isEmpty()) {
-            val replacementTab = createTab()
+            val replacementTab = createNewTab()
             state = state.copy(
                 tabs = listOf(replacementTab),
                 activeTabNumber = replacementTab.number,
             )
+            notifyWorkspaceChanged()
             return
         }
 
@@ -89,6 +119,7 @@ class AiChatAppViewModel(
             tabs = remainingTabs,
             activeTabNumber = activeTabNumber,
         )
+        notifyWorkspaceChanged()
     }
 
     private fun handleChatEvent(event: ChatEvent) {
@@ -97,5 +128,13 @@ class AiChatAppViewModel(
             ChatEvent.SendClicked -> activeViewModel.sendPrompt()
             else -> activeViewModel.onEvent(event)
         }
+    }
+
+    private fun notifyWorkspaceChanged() {
+        onWorkspaceChanged(
+            state.tabs.map { it.number },
+            state.activeTabNumber,
+            nextTabNumber,
+        )
     }
 }

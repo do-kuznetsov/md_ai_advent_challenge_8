@@ -19,6 +19,11 @@ class ChatHistoryInteractor(
             repository.getMessages()
         }
 
+    suspend fun replace(messages: List<HistoryMessage>): List<HistoryMessage> =
+        withContext(dispatcher) {
+            repository.replace(messages)
+        }
+
     suspend fun clear() {
         withContext(dispatcher) {
             repository.clear()

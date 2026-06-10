@@ -30,4 +30,18 @@ class InMemoryChatHistoryRepositoryTest {
 
         assertTrue(repository.getMessages().isEmpty())
     }
+
+    @Test
+    fun replacesMessages() = runTest {
+        val repository = InMemoryChatHistoryRepository()
+        val replacement = listOf(
+            HistoryMessage(role = HistoryRole.Assistant, content = "restored"),
+        )
+
+        repository.add(HistoryMessage(role = HistoryRole.User, content = "hello"))
+        val messages = repository.replace(replacement)
+
+        assertEquals(replacement, messages)
+        assertEquals(replacement, repository.getMessages())
+    }
 }

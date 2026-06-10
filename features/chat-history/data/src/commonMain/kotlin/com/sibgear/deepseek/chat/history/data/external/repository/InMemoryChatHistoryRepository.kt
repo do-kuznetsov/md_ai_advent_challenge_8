@@ -13,6 +13,11 @@ class InMemoryChatHistoryRepository : ChatHistoryRepository {
 
     override suspend fun getMessages(): List<HistoryMessage> = messages
 
+    override suspend fun replace(messages: List<HistoryMessage>): List<HistoryMessage> {
+        this.messages = messages
+        return this.messages
+    }
+
     override suspend fun clear() {
         messages = emptyList()
     }
