@@ -11,6 +11,7 @@ import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
+import com.sibgear.deepseek.chat.ui.internal.mapper.buildContextUsageLabel
 import com.sibgear.deepseek.chat.ui.internal.mapper.selectOpenRouterModels
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
 import kotlinx.coroutines.CancellationException
@@ -60,7 +61,7 @@ class ChatViewModel(
                 state = state.copy(
                     selectedModel = event.model,
                     isModelMenuExpanded = false,
-                )
+                ).withContextUsageLabel()
             }
 
             is ChatEvent.PromptChanged -> {
@@ -104,7 +105,7 @@ class ChatViewModel(
                 selectedModel = state.selectedModel.takeIf { selectedModel ->
                     deepSeekModels.any { it.provider == selectedModel.provider && it.id == selectedModel.id }
                 } ?: deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel,
-            )
+            ).withContextUsageLabel()
 
             try {
                 allOpenRouterModels = interactor.loadModels(AiProvider.OpenRouter)
@@ -118,7 +119,7 @@ class ChatViewModel(
                     selectedModel = state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id }
                         ?: ChatDefaults.DefaultModel,
                     openRouterModelsStatus = "OpenRouter: ${exception.message ?: "ошибка загрузки моделей"}",
-                )
+                ).withContextUsageLabel()
             }
         }
     }
@@ -142,14 +143,14 @@ class ChatViewModel(
                 isLoading = true,
                 prompt = "",
                 messages = state.messages + userMessage,
-            )
+            ).withContextUsageLabel()
 
             try {
                 val response = interactor.sendMessage(request)
                 state = state.copy(
                     isLoading = false,
                     messages = response.messages,
-                )
+                ).withContextUsageLabel()
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -161,7 +162,7 @@ class ChatViewModel(
                 state = state.copy(
                     isLoading = false,
                     messages = state.messages + errorMessage,
-                )
+                ).withContextUsageLabel()
             }
         }
     }
@@ -188,6 +189,9 @@ class ChatViewModel(
             openRouterModels = openRouterModels,
             selectedModel = selectedModel,
             openRouterModelsStatus = status,
-        )
+        ).withContextUsageLabel()
     }
+
+    private fun ChatViewState.withContextUsageLabel(): ChatViewState =
+        copy(contextUsageLabel = buildContextUsageLabel(messages, selectedModel))
 }
