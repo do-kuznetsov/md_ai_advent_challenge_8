@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,7 @@ import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,9 +27,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.sibgear.deepseek.chat.ui.generated.resources.Res
+import com.sibgear.deepseek.chat.ui.generated.resources.ic_paperclip
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.ui.internal.mapper.formatMegabytes
+import org.jetbrains.compose.resources.painterResource
 import kotlin.math.roundToLong
 
 private val UserMessageColor = Color(0xFFDDF7DF)
@@ -102,6 +108,25 @@ private fun ChatBubble(message: ChatMessage) {
                     color = Color(0xFF202124),
                     style = MaterialTheme.typography.bodyMedium,
                 )
+
+                message.attachment?.let { attachment ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            painter = painterResource(Res.drawable.ic_paperclip),
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = Color(0xFF5F6368),
+                        )
+                        Text(
+                            text = "${attachment.fileName} · ${attachment.sizeBytes.formatMegabytes()}",
+                            color = Color(0xFF5F6368),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
 
                 message.footer?.let { footer ->
                     Text(

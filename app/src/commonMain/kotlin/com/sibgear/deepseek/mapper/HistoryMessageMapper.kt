@@ -1,9 +1,11 @@
 package com.sibgear.deepseek.mapper
 
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
+import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 
@@ -17,6 +19,8 @@ private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        apiContent = apiContent,
+        attachment = attachment?.toChatMessageAttachment(),
         sourceLabel = sourceLabel,
         footer = footer?.toChatMessageFooter(),
     )
@@ -25,6 +29,8 @@ private fun ChatMessage.toHistoryMessage(): HistoryMessage =
     HistoryMessage(
         role = role.toHistoryRole(),
         content = content,
+        apiContent = apiContent,
+        attachment = attachment?.toHistoryMessageAttachment(),
         sourceLabel = sourceLabel,
         footer = footer?.toHistoryMessageFooter(),
     )
@@ -59,4 +65,16 @@ private fun ChatMessageFooter.toHistoryMessageFooter(): HistoryMessageFooter =
         totalTokens = totalTokens,
         cost = cost,
         retryCount = retryCount,
+    )
+
+private fun HistoryMessageAttachment.toChatMessageAttachment(): ChatMessageAttachment =
+    ChatMessageAttachment(
+        fileName = fileName,
+        sizeBytes = sizeBytes,
+    )
+
+private fun ChatMessageAttachment.toHistoryMessageAttachment(): HistoryMessageAttachment =
+    HistoryMessageAttachment(
+        fileName = fileName,
+        sizeBytes = sizeBytes,
     )

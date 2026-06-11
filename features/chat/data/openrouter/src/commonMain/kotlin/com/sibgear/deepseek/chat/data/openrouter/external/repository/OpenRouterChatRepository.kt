@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.data.openrouter.external.repository
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMessages
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterAssistantHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterChatCompletionRequest
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterUserHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiErrorResponse
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterCompletionResult
 import com.sibgear.deepseek.chat.data.openrouter.internal.repository.OpenRouterMaxRetries
@@ -16,8 +17,6 @@ import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
-import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
-import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -61,7 +60,7 @@ class OpenRouterChatRepository(
     }
 
     override suspend fun sendMessage(request: AiRequestData): AgentResponse {
-        historyInteractor.add(HistoryMessage(role = HistoryRole.User, content = request.prompt))
+        historyInteractor.add(request.toOpenRouterUserHistoryMessage())
         val startedAt = TimeSource.Monotonic.markNow()
         var retryCount = 0
 

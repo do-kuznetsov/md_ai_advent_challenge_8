@@ -3,11 +3,13 @@ package com.sibgear.deepseek.chat.history.data.internal.mapper
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileVersion
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryDto
+import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageAttachmentDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageFooterDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryRoleDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 
@@ -53,6 +55,8 @@ private fun HistoryMessage.toDto(): HistoryMessageDto =
     HistoryMessageDto(
         role = role.toDto().value,
         content = content,
+        apiContent = apiContent,
+        attachment = attachment?.toDto(),
         sourceLabel = sourceLabel,
         footer = footer?.toDto(),
     )
@@ -62,6 +66,8 @@ private fun HistoryMessageDto.toDomain(): HistoryMessage? {
     return HistoryMessage(
         role = domainRole,
         content = content,
+        apiContent = apiContent,
+        attachment = attachment?.toDomain(),
         sourceLabel = sourceLabel,
         footer = footer?.toDomain(),
     )
@@ -88,6 +94,18 @@ private fun HistoryMessageFooter.toDto(): HistoryMessageFooterDto =
         totalTokens = totalTokens,
         cost = cost,
         retryCount = retryCount,
+    )
+
+private fun HistoryMessageAttachment.toDto(): HistoryMessageAttachmentDto =
+    HistoryMessageAttachmentDto(
+        fileName = fileName,
+        sizeBytes = sizeBytes,
+    )
+
+private fun HistoryMessageAttachmentDto.toDomain(): HistoryMessageAttachment =
+    HistoryMessageAttachment(
+        fileName = fileName,
+        sizeBytes = sizeBytes,
     )
 
 private fun HistoryMessageFooterDto.toDomain(): HistoryMessageFooter =

@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.history.data.sqldelight.external.repository
 
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.storage.SqldelightChatHistoryStorage
@@ -32,6 +33,11 @@ class SqldelightChatHistoryRepositoryTest {
         val message = HistoryMessage(
             role = HistoryRole.Assistant,
             content = "stored",
+            apiContent = "stored api content",
+            attachment = HistoryMessageAttachment(
+                fileName = "data.json",
+                sizeBytes = 512L,
+            ),
             sourceLabel = "DeepSeek / test",
             footer = HistoryMessageFooter(
                 responseTimeMs = 1_500,

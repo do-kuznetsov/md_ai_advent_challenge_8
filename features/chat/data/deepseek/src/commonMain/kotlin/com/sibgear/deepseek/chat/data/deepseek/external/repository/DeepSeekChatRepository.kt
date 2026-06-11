@@ -3,14 +3,13 @@ package com.sibgear.deepseek.chat.data.deepseek.external.repository
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toChatMessages
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekAssistantHistoryMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekChatCompletionRequest
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekUserHistoryMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiErrorResponse
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatCompletionResponse
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
-import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
-import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -49,7 +48,7 @@ class DeepSeekChatRepository(
     }
 
     override suspend fun sendMessage(request: AiRequestData): AgentResponse {
-        historyInteractor.add(HistoryMessage(role = HistoryRole.User, content = request.prompt))
+        historyInteractor.add(request.toDeepSeekUserHistoryMessage())
         val startedAt = TimeSource.Monotonic.markNow()
 
         return try {

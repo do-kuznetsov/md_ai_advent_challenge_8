@@ -3,6 +3,8 @@ package com.sibgear.deepseek.chat.domain.model
 data class ChatMessage(
     val role: ChatRole,
     val content: String,
+    val apiContent: String? = null,
+    val attachment: ChatMessageAttachment? = null,
     val sourceLabel: String? = null,
     val footer: ChatMessageFooter? = null,
 )
@@ -19,4 +21,9 @@ data class ChatMessageFooter(
     val totalTokens: Int? = null,
     val cost: Double? = null,
     val retryCount: Int = 0,
+)
+
+data class ChatMessageAttachment(
+    val fileName: String,
+    val sizeBytes: Long,
 )
