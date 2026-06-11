@@ -9,18 +9,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.isMetaPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
@@ -47,7 +39,7 @@ internal fun PromptInputArea(
         ) {
             Text("system prompt:")
 
-            OutlinedTextField(
+            ShortcutOutlinedTextField(
                 value = state.systemPrompt,
                 onValueChange = { onEvent(ChatEvent.SystemPromptChanged(it)) },
                 modifier = Modifier.weight(1f),
@@ -62,29 +54,20 @@ internal fun PromptInputArea(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            OutlinedTextField(
+            ShortcutOutlinedTextField(
                 value = state.prompt,
                 onValueChange = { onEvent(ChatEvent.PromptChanged(it)) },
                 modifier = Modifier
                     .weight(1f)
-                    .height(96.dp)
-                    .onPreviewKeyEvent { event ->
-                        val isSendShortcut = event.key == Key.Enter &&
-                            event.type == KeyEventType.KeyDown &&
-                            (event.isCtrlPressed || event.isMetaPressed)
-
-                        if (isSendShortcut) {
-                            if (state.isSendEnabled) {
-                                onEvent(ChatEvent.SendClicked)
-                            }
-                            true
-                        } else {
-                            false
-                        }
-                    },
+                    .height(96.dp),
                 minLines = 3,
                 maxLines = 3,
-                placeholder = { Text("Введите сообщение") },
+                placeholder = "Введите сообщение",
+                onSubmitShortcut = {
+                    if (state.isSendEnabled) {
+                        onEvent(ChatEvent.SendClicked)
+                    }
+                },
             )
 
             Button(
