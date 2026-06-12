@@ -2,6 +2,9 @@ CREATE TABLE history_message (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    api_content TEXT,
+    attachment_file_name TEXT,
+    attachment_size_bytes INTEGER,
     source_label TEXT,
     response_time_ms INTEGER,
     prompt_tokens INTEGER,
@@ -20,6 +23,9 @@ insertMessage:
 INSERT INTO history_message(
     role,
     content,
+    api_content,
+    attachment_file_name,
+    attachment_size_bytes,
     source_label,
     response_time_ms,
     prompt_tokens,
@@ -28,7 +34,7 @@ INSERT INTO history_message(
     cost,
     retry_count
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 deleteAll:
 DELETE FROM history_message;

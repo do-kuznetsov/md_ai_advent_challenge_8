@@ -3,6 +3,8 @@ package com.sibgear.deepseek.chat.history.domain.model
 data class HistoryMessage(
     val role: HistoryRole,
     val content: String,
+    val apiContent: String? = null,
+    val attachment: HistoryMessageAttachment? = null,
     val sourceLabel: String? = null,
     val footer: HistoryMessageFooter? = null,
 )
@@ -19,4 +21,9 @@ data class HistoryMessageFooter(
     val totalTokens: Int? = null,
     val cost: Double? = null,
     val retryCount: Int = 0,
+)
+
+data class HistoryMessageAttachment(
+    val fileName: String,
+    val sizeBytes: Long,
 )

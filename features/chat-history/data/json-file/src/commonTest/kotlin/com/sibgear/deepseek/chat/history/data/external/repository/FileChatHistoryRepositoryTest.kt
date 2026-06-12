@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.history.data.external.repository
 
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import com.sibgear.deepseek.chat.history.data.external.storage.JsonFileChatHistoryStorage
@@ -16,7 +17,15 @@ class FileChatHistoryRepositoryTest {
     fun storesAndRestoresMessagesInInsertionOrder() = runTest {
         val file = tempHistoryFile()
         val repository = FileChatHistoryRepository(file, chatId = 1)
-        val first = HistoryMessage(role = HistoryRole.User, content = "hello")
+        val first = HistoryMessage(
+            role = HistoryRole.User,
+            content = "hello",
+            apiContent = "hello\n\nAttached text file: notes.md (12 bytes)\n```text\nfile body\n```",
+            attachment = HistoryMessageAttachment(
+                fileName = "notes.md",
+                sizeBytes = 12L,
+            ),
+        )
         val second = HistoryMessage(
             role = HistoryRole.Assistant,
             content = "hi",

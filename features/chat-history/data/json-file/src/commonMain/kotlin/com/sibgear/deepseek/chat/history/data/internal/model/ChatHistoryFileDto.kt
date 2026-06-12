@@ -27,8 +27,16 @@ internal data class ChatHistoryDto(
 internal data class HistoryMessageDto(
     val role: String,
     val content: String,
+    val apiContent: String? = null,
+    val attachment: HistoryMessageAttachmentDto? = null,
     val sourceLabel: String? = null,
     val footer: HistoryMessageFooterDto? = null,
+)
+
+@Serializable
+internal data class HistoryMessageAttachmentDto(
+    val fileName: String,
+    val sizeBytes: Long,
 )
 
 @Serializable

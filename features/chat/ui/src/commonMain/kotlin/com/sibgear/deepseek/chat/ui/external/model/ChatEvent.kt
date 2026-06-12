@@ -1,10 +1,14 @@
 package com.sibgear.deepseek.chat.ui.external.model
 
 import com.sibgear.deepseek.chat.domain.model.AiModel
+import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 
 sealed interface ChatEvent {
     data class SystemPromptChanged(val systemPrompt: String) : ChatEvent
     data class PromptChanged(val prompt: String) : ChatEvent
+    data class AttachmentSelected(val attachment: PromptAttachment) : ChatEvent
+    data class AttachmentError(val message: String) : ChatEvent
+    data object AttachmentCleared : ChatEvent
     data class ModelFilterChanged(val filter: String) : ChatEvent
     data class ModelSelected(val model: AiModel) : ChatEvent
     data class ModelMenuExpandedChanged(val isExpanded: Boolean) : ChatEvent

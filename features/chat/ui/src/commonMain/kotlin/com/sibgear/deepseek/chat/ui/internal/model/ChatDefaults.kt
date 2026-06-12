@@ -7,5 +7,8 @@ internal object ChatDefaults {
     val DefaultModel = AiModel(
         id = "deepseek-v4-flash",
         provider = AiProvider.DeepSeek,
+        contextLength = DefaultDeepSeekContextLength,
     )
+
+    private const val DefaultDeepSeekContextLength = 1_000_000
 }

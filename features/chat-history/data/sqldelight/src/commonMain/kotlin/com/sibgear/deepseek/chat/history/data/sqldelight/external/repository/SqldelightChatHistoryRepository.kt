@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.history.data.sqldelight.external.repository
 
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import com.sibgear.deepseek.chat.history.domain.repository.ChatHistoryRepository
@@ -21,6 +22,7 @@ class SqldelightChatHistoryRepository(
             connection.createStatement().use { statement ->
                 statement.execute(createTableSql(tableName))
             }
+            connection.ensureAttachmentColumns(tableName)
         }
     }
 
@@ -86,21 +88,29 @@ class SqldelightChatHistoryRepository(
     private fun java.sql.PreparedStatement.bind(message: HistoryMessage) {
         setString(1, message.role.databaseValue)
         setString(2, message.content)
-        setString(3, message.sourceLabel)
-        message.footer?.let { footer ->
-            setLong(4, footer.responseTimeMs)
-            footer.promptTokens?.let { setLong(5, it.toLong()) } ?: setObject(5, null)
-            footer.completionTokens?.let { setLong(6, it.toLong()) } ?: setObject(6, null)
-            footer.totalTokens?.let { setLong(7, it.toLong()) } ?: setObject(7, null)
-            footer.cost?.let { setDouble(8, it) } ?: setObject(8, null)
-            setLong(9, footer.retryCount.toLong())
+        setString(3, message.apiContent)
+        message.attachment?.let { attachment ->
+            setString(4, attachment.fileName)
+            setLong(5, attachment.sizeBytes)
         } ?: run {
             setObject(4, null)
             setObject(5, null)
-            setObject(6, null)
+        }
+        setString(6, message.sourceLabel)
+        message.footer?.let { footer ->
+            setLong(7, footer.responseTimeMs)
+            footer.promptTokens?.let { setLong(8, it.toLong()) } ?: setObject(8, null)
+            footer.completionTokens?.let { setLong(9, it.toLong()) } ?: setObject(9, null)
+            footer.totalTokens?.let { setLong(10, it.toLong()) } ?: setObject(10, null)
+            footer.cost?.let { setDouble(11, it) } ?: setObject(11, null)
+            setLong(12, footer.retryCount.toLong())
+        } ?: run {
             setObject(7, null)
             setObject(8, null)
             setObject(9, null)
+            setObject(10, null)
+            setObject(11, null)
+            setObject(12, null)
         }
     }
 
@@ -108,6 +118,13 @@ class SqldelightChatHistoryRepository(
         HistoryMessage(
             role = getString("role").toHistoryRole(),
             content = getString("content"),
+            apiContent = getString("api_content"),
+            attachment = getString("attachment_file_name")?.let { fileName ->
+                HistoryMessageAttachment(
+                    fileName = fileName,
+                    sizeBytes = getNullableLong("attachment_size_bytes") ?: 0L,
+                )
+            },
             sourceLabel = getString("source_label"),
             footer = getNullableLong("response_time_ms")?.let { responseTimeMs ->
                 HistoryMessageFooter(
@@ -161,6 +178,9 @@ internal fun createTableSql(tableName: String): String =
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
+        api_content TEXT,
+        attachment_file_name TEXT,
+        attachment_size_bytes INTEGER,
         source_label TEXT,
         response_time_ms INTEGER,
         prompt_tokens INTEGER,
@@ -176,6 +196,9 @@ internal fun insertSql(tableName: String): String =
     INSERT INTO $tableName(
         role,
         content,
+        api_content,
+        attachment_file_name,
+        attachment_size_bytes,
         source_label,
         response_time_ms,
         prompt_tokens,
@@ -184,7 +207,7 @@ internal fun insertSql(tableName: String): String =
         cost,
         retry_count
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """.trimIndent()
 
 internal fun selectAllSql(tableName: String): String =
@@ -192,3 +215,34 @@ internal fun selectAllSql(tableName: String): String =
 
 internal fun deleteAllSql(tableName: String): String =
     "DELETE FROM $tableName"
+
+private fun Connection.ensureAttachmentColumns(tableName: String) {
+    val existingColumns = createStatement().use { statement ->
+        statement.executeQuery("PRAGMA table_info($tableName)").use { resultSet ->
+            buildSet {
+                while (resultSet.next()) {
+                    add(resultSet.getString("name"))
+                }
+            }
+        }
+    }
+
+    createStatement().use { statement ->
+        MissingColumns.forEach { column ->
+            if (column.name !in existingColumns) {
+                statement.execute("ALTER TABLE $tableName ADD COLUMN ${column.name} ${column.type}")
+            }
+        }
+    }
+}
+
+private data class MissingColumn(
+    val name: String,
+    val type: String,
+)
+
+private val MissingColumns = listOf(
+    MissingColumn("api_content", "TEXT"),
+    MissingColumn("attachment_file_name", "TEXT"),
+    MissingColumn("attachment_size_bytes", "INTEGER"),
+)

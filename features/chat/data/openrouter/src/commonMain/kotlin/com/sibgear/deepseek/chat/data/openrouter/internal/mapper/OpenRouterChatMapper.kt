@@ -6,9 +6,12 @@ import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterRespon
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
+import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 
@@ -24,7 +27,7 @@ internal fun AiRequestData.toOpenRouterChatCompletionRequest(
             }
 
             historyMessages.forEach { message ->
-                add(OpenRouterApiChatMessage(role = message.role.apiRole, content = message.content))
+                add(OpenRouterApiChatMessage(role = message.role.apiRole, content = message.apiContent ?: message.content))
             }
         },
         stream = true,
@@ -54,6 +57,19 @@ internal fun AiRequestData.toOpenRouterAssistantHistoryMessage(
         ),
     )
 
+internal fun AiRequestData.toOpenRouterUserHistoryMessage(): HistoryMessage =
+    HistoryMessage(
+        role = HistoryRole.User,
+        content = prompt,
+        apiContent = userApiContent(),
+        attachment = attachment?.let {
+            HistoryMessageAttachment(
+                fileName = it.fileName,
+                sizeBytes = it.sizeBytes,
+            )
+        },
+    )
+
 internal fun List<HistoryMessage>.toChatMessages(): List<ChatMessage> =
     map { it.toChatMessage() }
 
@@ -61,6 +77,8 @@ private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        apiContent = apiContent,
+        attachment = attachment?.toChatMessageAttachment(),
         sourceLabel = sourceLabel,
         footer = footer?.toChatMessageFooter(),
     )
@@ -79,6 +97,12 @@ private fun HistoryMessageFooter.toChatMessageFooter(): ChatMessageFooter =
         totalTokens = totalTokens,
         cost = cost,
         retryCount = retryCount,
+    )
+
+private fun HistoryMessageAttachment.toChatMessageAttachment(): ChatMessageAttachment =
+    ChatMessageAttachment(
+        fileName = fileName,
+        sizeBytes = sizeBytes,
     )
 
 private val HistoryRole.apiRole: String

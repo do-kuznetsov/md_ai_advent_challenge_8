@@ -6,11 +6,14 @@ import androidx.compose.runtime.setValue
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
+import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
+import com.sibgear.deepseek.chat.ui.internal.mapper.buildContextUsageLabel
 import com.sibgear.deepseek.chat.ui.internal.mapper.selectOpenRouterModels
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
 import kotlinx.coroutines.CancellationException
@@ -29,6 +32,24 @@ class ChatViewModel(
 
     fun onEvent(event: ChatEvent) {
         when (event) {
+            ChatEvent.AttachmentCleared -> {
+                state = state.copy(
+                    attachment = null,
+                    attachmentError = null,
+                )
+            }
+
+            is ChatEvent.AttachmentError -> {
+                state = state.copy(attachmentError = event.message)
+            }
+
+            is ChatEvent.AttachmentSelected -> {
+                state = state.copy(
+                    attachment = event.attachment,
+                    attachmentError = null,
+                )
+            }
+
             is ChatEvent.ApiControlChanged -> {
                 state = state.copy(
                     apiSettings = state.apiSettings.copy(
@@ -60,7 +81,7 @@ class ChatViewModel(
                 state = state.copy(
                     selectedModel = event.model,
                     isModelMenuExpanded = false,
-                )
+                ).withContextUsageLabel()
             }
 
             is ChatEvent.PromptChanged -> {
@@ -104,7 +125,7 @@ class ChatViewModel(
                 selectedModel = state.selectedModel.takeIf { selectedModel ->
                     deepSeekModels.any { it.provider == selectedModel.provider && it.id == selectedModel.id }
                 } ?: deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel,
-            )
+            ).withContextUsageLabel()
 
             try {
                 allOpenRouterModels = interactor.loadModels(AiProvider.OpenRouter)
@@ -118,7 +139,7 @@ class ChatViewModel(
                     selectedModel = state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id }
                         ?: ChatDefaults.DefaultModel,
                     openRouterModelsStatus = "OpenRouter: ${exception.message ?: "ошибка загрузки моделей"}",
-                )
+                ).withContextUsageLabel()
             }
         }
     }
@@ -132,24 +153,37 @@ class ChatViewModel(
         val request = AiRequestData(
             systemPrompt = state.systemPrompt,
             prompt = prompt,
+            attachment = state.attachment,
             model = state.selectedModel,
             apiSettings = state.apiSettings,
         )
-        val userMessage = ChatMessage(role = ChatRole.User, content = prompt)
+        val userMessage = ChatMessage(
+            role = ChatRole.User,
+            content = prompt,
+            apiContent = request.userApiContent(),
+            attachment = request.attachment?.let {
+                ChatMessageAttachment(
+                    fileName = it.fileName,
+                    sizeBytes = it.sizeBytes,
+                )
+            },
+        )
 
         coroutineScope.launch {
             state = state.copy(
                 isLoading = true,
                 prompt = "",
+                attachment = null,
+                attachmentError = null,
                 messages = state.messages + userMessage,
-            )
+            ).withContextUsageLabel()
 
             try {
                 val response = interactor.sendMessage(request)
                 state = state.copy(
                     isLoading = false,
                     messages = response.messages,
-                )
+                ).withContextUsageLabel()
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -161,7 +195,7 @@ class ChatViewModel(
                 state = state.copy(
                     isLoading = false,
                     messages = state.messages + errorMessage,
-                )
+                ).withContextUsageLabel()
             }
         }
     }
@@ -188,6 +222,9 @@ class ChatViewModel(
             openRouterModels = openRouterModels,
             selectedModel = selectedModel,
             openRouterModelsStatus = status,
-        )
+        ).withContextUsageLabel()
     }
+
+    private fun ChatViewState.withContextUsageLabel(): ChatViewState =
+        copy(contextUsageLabel = buildContextUsageLabel(messages, selectedModel))
 }

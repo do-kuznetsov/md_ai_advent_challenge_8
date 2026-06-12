@@ -13,7 +13,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,7 +55,7 @@ internal fun ApiSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                OutlinedTextField(
+                ShortcutOutlinedTextField(
                     value = state.modelFilter,
                     onValueChange = { onEvent(ChatEvent.ModelFilterChanged(it)) },
                     modifier = Modifier.weight(1f),
@@ -111,7 +110,7 @@ internal fun ApiSettingsPanel(
                 color = labelColor,
             )
 
-            OutlinedTextField(
+            ShortcutOutlinedTextField(
                 value = state.maxTokensInput,
                 onValueChange = { onEvent(ChatEvent.MaxTokensChanged(it)) },
                 modifier = Modifier.fillMaxWidth(),
@@ -124,7 +123,7 @@ internal fun ApiSettingsPanel(
                 color = labelColor,
             )
 
-            OutlinedTextField(
+            ShortcutOutlinedTextField(
                 value = state.apiSettings.stopWord,
                 onValueChange = { onEvent(ChatEvent.StopWordChanged(it)) },
                 modifier = Modifier.fillMaxWidth(),
