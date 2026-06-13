@@ -9,6 +9,9 @@ sealed interface ChatEvent {
     data class AttachmentSelected(val attachment: PromptAttachment) : ChatEvent
     data class AttachmentError(val message: String) : ChatEvent
     data object AttachmentCleared : ChatEvent
+    data class CompressionEnabledChanged(val isEnabled: Boolean) : ChatEvent
+    data class CompressionIntervalChanged(val interval: String) : ChatEvent
+    data class CompressionSummaryToggled(val messageIndex: Int) : ChatEvent
     data class ModelFilterChanged(val filter: String) : ChatEvent
     data class ModelSelected(val model: AiModel) : ChatEvent
     data class ModelMenuExpandedChanged(val isExpanded: Boolean) : ChatEvent

@@ -10,26 +10,35 @@ import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
+import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 
 internal fun AiRequestData.toDeepSeekChatCompletionRequest(
-    historyMessages: List<HistoryMessage>,
+    contextMessages: List<ContextMessage>,
+    includeSystemPrompt: Boolean = true,
+    servicePrompt: String? = null,
 ): DeepSeekChatCompletionRequest {
     val trimmedSystemPrompt = systemPrompt.trim()
     return DeepSeekChatCompletionRequest(
         model = model.id,
         messages = buildList {
-            if (trimmedSystemPrompt.isNotEmpty()) {
+            if (includeSystemPrompt && trimmedSystemPrompt.isNotEmpty()) {
                 add(DeepSeekApiChatMessage(role = "system", content = trimmedSystemPrompt))
             }
 
-            historyMessages.forEach { message ->
-                add(DeepSeekApiChatMessage(role = message.role.apiRole, content = message.apiContent ?: message.content))
+            contextMessages.forEach { message ->
+                add(DeepSeekApiChatMessage(role = message.role.apiRole, content = message.content))
+            }
+
+            servicePrompt?.let { prompt ->
+                add(DeepSeekApiChatMessage(role = "user", content = prompt))
             }
         },
         stream = false,
@@ -48,6 +57,26 @@ internal fun AiRequestData.toDeepSeekAssistantHistoryMessage(
     HistoryMessage(
         role = HistoryRole.Assistant,
         content = content,
+        kind = HistoryMessageKind.Regular,
+        sourceLabel = "DeepSeek / ${model.displayName}",
+        footer = HistoryMessageFooter(
+            responseTimeMs = responseTimeMs,
+            promptTokens = usage?.promptTokens,
+            completionTokens = usage?.completionTokens,
+            totalTokens = usage?.displayTotalTokens,
+            cost = usage?.deepSeekCost(model.id),
+        ),
+    )
+
+internal fun AiRequestData.toDeepSeekCompressionSummaryHistoryMessage(
+    content: String,
+    responseTimeMs: Long,
+    usage: DeepSeekResponseUsage? = null,
+): HistoryMessage =
+    HistoryMessage(
+        role = HistoryRole.Assistant,
+        content = content,
+        kind = HistoryMessageKind.CompressionSummary,
         sourceLabel = "DeepSeek / ${model.displayName}",
         footer = HistoryMessageFooter(
             responseTimeMs = responseTimeMs,
@@ -74,10 +103,21 @@ internal fun AiRequestData.toDeepSeekUserHistoryMessage(): HistoryMessage =
 internal fun List<HistoryMessage>.toChatMessages(): List<ChatMessage> =
     map { it.toChatMessage() }
 
+internal fun List<HistoryMessage>.toContextMessages(): List<ContextMessage> =
+    map { it.toContextMessage() }
+
+private fun HistoryMessage.toContextMessage(): ContextMessage =
+    ContextMessage(
+        role = role.toChatRole(),
+        kind = kind.toChatMessageKind(),
+        content = apiContent ?: content,
+    )
+
 private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        kind = kind.toChatMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toChatMessageAttachment(),
         sourceLabel = sourceLabel,
@@ -88,6 +128,12 @@ private fun HistoryRole.toChatRole(): ChatRole =
     when (this) {
         HistoryRole.User -> ChatRole.User
         HistoryRole.Assistant -> ChatRole.Assistant
+    }
+
+private fun HistoryMessageKind.toChatMessageKind(): ChatMessageKind =
+    when (this) {
+        HistoryMessageKind.Regular -> ChatMessageKind.Regular
+        HistoryMessageKind.CompressionSummary -> ChatMessageKind.CompressionSummary
     }
 
 private fun HistoryMessageFooter.toChatMessageFooter(): ChatMessageFooter =
@@ -106,10 +152,10 @@ private fun HistoryMessageAttachment.toChatMessageAttachment(): ChatMessageAttac
         sizeBytes = sizeBytes,
     )
 
-private val HistoryRole.apiRole: String
+private val ChatRole.apiRole: String
     get() = when (this) {
-        HistoryRole.User -> "user"
-        HistoryRole.Assistant -> "assistant"
+        ChatRole.User -> "user"
+        ChatRole.Assistant -> "assistant"
     }
 
 private fun ApiSettings.deepSeekTemperature(): Float? {

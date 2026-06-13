@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.history.data.external.repository
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import com.sibgear.deepseek.chat.history.data.external.storage.JsonFileChatHistoryStorage
 import java.io.File
@@ -29,6 +30,7 @@ class FileChatHistoryRepositoryTest {
         val second = HistoryMessage(
             role = HistoryRole.Assistant,
             content = "hi",
+            kind = HistoryMessageKind.CompressionSummary,
             sourceLabel = "OpenRouter / test",
             footer = HistoryMessageFooter(
                 responseTimeMs = 1_250,

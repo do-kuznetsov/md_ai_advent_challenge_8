@@ -27,6 +27,7 @@ internal data class ChatHistoryDto(
 internal data class HistoryMessageDto(
     val role: String,
     val content: String,
+    val kind: String = HistoryMessageKindDto.Regular.value,
     val apiContent: String? = null,
     val attachment: HistoryMessageAttachmentDto? = null,
     val sourceLabel: String? = null,
@@ -55,4 +56,12 @@ internal enum class HistoryRoleDto(val value: String) {
 
     @SerialName("assistant")
     Assistant("assistant"),
+}
+
+internal enum class HistoryMessageKindDto(val value: String) {
+    @SerialName("regular")
+    Regular("regular"),
+
+    @SerialName("compression_summary")
+    CompressionSummary("compression_summary"),
 }

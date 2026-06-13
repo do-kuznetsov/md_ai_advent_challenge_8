@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.history.domain.model
 data class HistoryMessage(
     val role: HistoryRole,
     val content: String,
+    val kind: HistoryMessageKind = HistoryMessageKind.Regular,
     val apiContent: String? = null,
     val attachment: HistoryMessageAttachment? = null,
     val sourceLabel: String? = null,
@@ -12,6 +13,11 @@ data class HistoryMessage(
 enum class HistoryRole {
     User,
     Assistant,
+}
+
+enum class HistoryMessageKind {
+    Regular,
+    CompressionSummary,
 }
 
 data class HistoryMessageFooter(

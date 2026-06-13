@@ -6,11 +6,13 @@ import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageAttachmentDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageFooterDto
+import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageKindDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryRoleDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 
 internal fun List<HistoryMessage>.toChatHistoryFileDto(): ChatHistoryFileDto =
@@ -55,6 +57,7 @@ private fun HistoryMessage.toDto(): HistoryMessageDto =
     HistoryMessageDto(
         role = role.toDto().value,
         content = content,
+        kind = kind.toDto().value,
         apiContent = apiContent,
         attachment = attachment?.toDto(),
         sourceLabel = sourceLabel,
@@ -66,6 +69,7 @@ private fun HistoryMessageDto.toDomain(): HistoryMessage? {
     return HistoryMessage(
         role = domainRole,
         content = content,
+        kind = kind.toHistoryMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toDomain(),
         sourceLabel = sourceLabel,
@@ -77,6 +81,18 @@ private fun HistoryRole.toDto(): HistoryRoleDto =
     when (this) {
         HistoryRole.User -> HistoryRoleDto.User
         HistoryRole.Assistant -> HistoryRoleDto.Assistant
+    }
+
+private fun HistoryMessageKind.toDto(): HistoryMessageKindDto =
+    when (this) {
+        HistoryMessageKind.Regular -> HistoryMessageKindDto.Regular
+        HistoryMessageKind.CompressionSummary -> HistoryMessageKindDto.CompressionSummary
+    }
+
+private fun String.toHistoryMessageKind(): HistoryMessageKind =
+    when (this) {
+        HistoryMessageKindDto.CompressionSummary.value -> HistoryMessageKind.CompressionSummary
+        else -> HistoryMessageKind.Regular
     }
 
 private fun String.toHistoryRole(): HistoryRole? =
