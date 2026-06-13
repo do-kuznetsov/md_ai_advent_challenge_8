@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.ui.external.model
 
 import com.sibgear.deepseek.chat.domain.model.AiModel
+import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 
 sealed interface ChatEvent {
@@ -9,8 +10,10 @@ sealed interface ChatEvent {
     data class AttachmentSelected(val attachment: PromptAttachment) : ChatEvent
     data class AttachmentError(val message: String) : ChatEvent
     data object AttachmentCleared : ChatEvent
-    data class CompressionEnabledChanged(val isEnabled: Boolean) : ChatEvent
-    data class CompressionIntervalChanged(val interval: String) : ChatEvent
+    data class ContextManagementPanelExpandedChanged(val isExpanded: Boolean) : ChatEvent
+    data class ContextManagementModeSelected(val mode: ContextManagementMode) : ChatEvent
+    data class SummaryIntervalChanged(val interval: String) : ChatEvent
+    data class SlidingWindowMessagesChanged(val messages: String) : ChatEvent
     data class CompressionSummaryToggled(val messageIndex: Int) : ChatEvent
     data class ModelFilterChanged(val filter: String) : ChatEvent
     data class ModelSelected(val model: AiModel) : ChatEvent

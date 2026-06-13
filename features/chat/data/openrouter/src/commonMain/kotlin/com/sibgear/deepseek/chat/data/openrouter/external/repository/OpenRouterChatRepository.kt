@@ -75,7 +75,7 @@ class OpenRouterChatRepository(
                 request = request,
                 contextMessages = contextPlanner.plan(
                     messages = historyInteractor.getMessages().toContextMessages(),
-                    compressionSettings = request.compressionSettings,
+                    contextManagementSettings = request.contextManagementSettings,
                 ).apiMessages,
                 includeSystemPrompt = true,
                 servicePrompt = null,
@@ -156,7 +156,7 @@ class OpenRouterChatRepository(
     ): List<HistoryMessage> {
         val compressionRequest = contextPlanner.plan(
             messages = currentMessages.toContextMessages(),
-            compressionSettings = request.compressionSettings,
+            contextManagementSettings = request.contextManagementSettings,
         ).compressionRequest ?: return currentMessages
 
         val startedAt = TimeSource.Monotonic.markNow()

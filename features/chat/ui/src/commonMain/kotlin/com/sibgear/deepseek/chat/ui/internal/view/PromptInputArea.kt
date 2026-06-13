@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,7 +24,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.chat.ui.generated.resources.Res
 import com.sibgear.deepseek.chat.ui.generated.resources.ic_paperclip
@@ -46,37 +44,10 @@ internal fun PromptInputArea(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = state.contextUsageLabel,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = state.isCompressionEnabled,
-                    onCheckedChange = { onEvent(ChatEvent.CompressionEnabledChanged(it)) },
-                )
-                Text("сжимать историю каждые")
-                ShortcutOutlinedTextField(
-                    value = state.compressionIntervalInput,
-                    onValueChange = { onEvent(ChatEvent.CompressionIntervalChanged(it)) },
-                    modifier = Modifier.width(56.dp),
-                    singleLine = true,
-                    enabled = state.isCompressionEnabled,
-                )
-                Text("сообщений")
-            }
-        }
+        ContextManagementPanel(
+            state = state,
+            onEvent = onEvent,
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),

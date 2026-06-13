@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.ui.internal.view
 
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,11 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -43,17 +44,21 @@ import kotlin.math.roundToLong
 private val UserMessageColor = Color(0xFFDDF7DF)
 private val AssistantMessageColor = Color(0xFFEDE1FF)
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ChatArea(
     messages: List<ChatMessage>,
+    pinnedContextMessageIndex: Int?,
     expandedCompressionMessageIndexes: Set<Int>,
     onCompressionSummaryToggled: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scrollState = rememberScrollState()
+    val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
-        scrollState.animateScrollTo(scrollState.maxValue)
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
     }
 
     Box(
@@ -61,25 +66,40 @@ internal fun ChatArea(
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(16.dp),
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             messages.forEachIndexed { index, message ->
                 if (message.kind == ChatMessageKind.CompressionSummary) {
-                    CompressionSummaryBlock(
-                        message = message,
-                        isExpanded = index in expandedCompressionMessageIndexes,
-                        onToggle = { onCompressionSummaryToggled(index) },
-                    )
+                    item(key = "compression-$index") {
+                        CompressionSummaryBlock(
+                            message = message,
+                            isExpanded = index in expandedCompressionMessageIndexes,
+                            onToggle = { onCompressionSummaryToggled(index) },
+                        )
+                    }
+                } else if (index == pinnedContextMessageIndex) {
+                    stickyHeader(key = "pinned-$index") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                        ) {
+                            ChatBubble(message = message)
+                        }
+                    }
                 } else {
-                    ChatBubble(message = message)
+                    item(key = "message-$index") {
+                        ChatBubble(message = message)
+                    }
                 }
             }
         }
 
         VerticalScrollbar(
-            adapter = rememberScrollbarAdapter(scrollState),
+            adapter = rememberScrollbarAdapter(listState),
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(8.dp),
         )
     }

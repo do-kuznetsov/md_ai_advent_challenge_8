@@ -6,7 +6,7 @@ data class AiRequestData(
     val attachment: PromptAttachment? = null,
     val model: AiModel,
     val apiSettings: ApiSettings,
-    val compressionSettings: ChatCompressionSettings = ChatCompressionSettings(),
+    val contextManagementSettings: ContextManagementSettings = ContextManagementSettings(),
 )
 
 data class PromptAttachment(
@@ -15,10 +15,17 @@ data class PromptAttachment(
     val content: String,
 )
 
-data class ChatCompressionSettings(
-    val isEnabled: Boolean = false,
-    val intervalMessages: Int = DefaultCompressionIntervalMessages,
+data class ContextManagementSettings(
+    val mode: ContextManagementMode = ContextManagementMode.None,
+    val summaryIntervalMessages: Int = DefaultContextManagementMessages,
+    val slidingWindowMessages: Int = DefaultContextManagementMessages,
 )
+
+enum class ContextManagementMode {
+    None,
+    ContextSummary,
+    SlidingWindow,
+}
 
 fun AiRequestData.userApiContent(): String? {
     val attachedFile = attachment ?: return null
@@ -36,4 +43,4 @@ fun AiRequestData.userApiContent(): String? {
     }
 }
 
-const val DefaultCompressionIntervalMessages = 10
+const val DefaultContextManagementMessages = 10
