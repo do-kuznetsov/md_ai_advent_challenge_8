@@ -6,12 +6,18 @@ data class AiRequestData(
     val attachment: PromptAttachment? = null,
     val model: AiModel,
     val apiSettings: ApiSettings,
+    val compressionSettings: ChatCompressionSettings = ChatCompressionSettings(),
 )
 
 data class PromptAttachment(
     val fileName: String,
     val sizeBytes: Long,
     val content: String,
+)
+
+data class ChatCompressionSettings(
+    val isEnabled: Boolean = false,
+    val intervalMessages: Int = DefaultCompressionIntervalMessages,
 )
 
 fun AiRequestData.userApiContent(): String? {
@@ -29,3 +35,5 @@ fun AiRequestData.userApiContent(): String? {
         append("```")
     }
 }
+
+const val DefaultCompressionIntervalMessages = 10

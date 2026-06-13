@@ -2,6 +2,7 @@ package com.sibgear.deepseek.chat.ui.internal.view
 
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,11 +28,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.chat.ui.generated.resources.Res
 import com.sibgear.deepseek.chat.ui.generated.resources.ic_paperclip
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
+import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.ui.internal.mapper.formatMegabytes
 import org.jetbrains.compose.resources.painterResource
@@ -42,6 +46,8 @@ private val AssistantMessageColor = Color(0xFFEDE1FF)
 @Composable
 internal fun ChatArea(
     messages: List<ChatMessage>,
+    expandedCompressionMessageIndexes: Set<Int>,
+    onCompressionSummaryToggled: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -59,8 +65,16 @@ internal fun ChatArea(
             modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            messages.forEach { message ->
-                ChatBubble(message = message)
+            messages.forEachIndexed { index, message ->
+                if (message.kind == ChatMessageKind.CompressionSummary) {
+                    CompressionSummaryBlock(
+                        message = message,
+                        isExpanded = index in expandedCompressionMessageIndexes,
+                        onToggle = { onCompressionSummaryToggled(index) },
+                    )
+                } else {
+                    ChatBubble(message = message)
+                }
             }
         }
 
@@ -72,7 +86,38 @@ internal fun ChatArea(
 }
 
 @Composable
-private fun ChatBubble(message: ChatMessage) {
+private fun CompressionSummaryBlock(
+    message: ChatMessage,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "сжатие выполнено",
+            color = Color(0xFF5F6368),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        HorizontalDivider(color = Color(0xFF9AA0A6))
+        ChatBubble(
+            message = message,
+            isCompressionSummary = true,
+            isCompressionExpanded = isExpanded,
+            onCompressionToggle = onToggle,
+        )
+    }
+}
+
+@Composable
+private fun ChatBubble(
+    message: ChatMessage,
+    isCompressionSummary: Boolean = false,
+    isCompressionExpanded: Boolean = true,
+    onCompressionToggle: (() -> Unit)? = null,
+) {
     val horizontalArrangement = when (message.role) {
         ChatRole.User -> Arrangement.Start
         ChatRole.Assistant -> Arrangement.End
@@ -105,9 +150,29 @@ private fun ChatBubble(message: ChatMessage) {
 
                 Text(
                     text = message.content,
-                    color = Color(0xFF202124),
+                    modifier = if (isCompressionSummary && onCompressionToggle != null) {
+                        Modifier.clickable(onClick = onCompressionToggle)
+                    } else {
+                        Modifier
+                    },
+                    color = if (isCompressionSummary) Color(0xFF5F6368) else Color(0xFF202124),
                     style = MaterialTheme.typography.bodyMedium,
+                    maxLines = if (isCompressionSummary && !isCompressionExpanded) 1 else Int.MAX_VALUE,
+                    overflow = if (isCompressionSummary && !isCompressionExpanded) {
+                        TextOverflow.Ellipsis
+                    } else {
+                        TextOverflow.Clip
+                    },
                 )
+
+                if (isCompressionSummary && onCompressionToggle != null) {
+                    Text(
+                        text = if (isCompressionExpanded) "свернуть" else "развернуть",
+                        modifier = Modifier.clickable(onClick = onCompressionToggle),
+                        color = Color(0xFF5F6368),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
 
                 message.attachment?.let { attachment ->
                     Row(

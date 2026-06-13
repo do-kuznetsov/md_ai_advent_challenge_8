@@ -8,26 +8,35 @@ import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
+import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 
 internal fun AiRequestData.toOpenRouterChatCompletionRequest(
-    historyMessages: List<HistoryMessage>,
+    contextMessages: List<ContextMessage>,
+    includeSystemPrompt: Boolean = true,
+    servicePrompt: String? = null,
 ): OpenRouterChatCompletionRequest {
     val trimmedSystemPrompt = systemPrompt.trim()
     return OpenRouterChatCompletionRequest(
         model = model.id,
         messages = buildList {
-            if (trimmedSystemPrompt.isNotEmpty()) {
+            if (includeSystemPrompt && trimmedSystemPrompt.isNotEmpty()) {
                 add(OpenRouterApiChatMessage(role = "system", content = trimmedSystemPrompt))
             }
 
-            historyMessages.forEach { message ->
-                add(OpenRouterApiChatMessage(role = message.role.apiRole, content = message.apiContent ?: message.content))
+            contextMessages.forEach { message ->
+                add(OpenRouterApiChatMessage(role = message.role.apiRole, content = message.content))
+            }
+
+            servicePrompt?.let { prompt ->
+                add(OpenRouterApiChatMessage(role = "user", content = prompt))
             }
         },
         stream = true,
@@ -46,6 +55,28 @@ internal fun AiRequestData.toOpenRouterAssistantHistoryMessage(
     HistoryMessage(
         role = HistoryRole.Assistant,
         content = content,
+        kind = HistoryMessageKind.Regular,
+        sourceLabel = "OpenRouter / ${model.displayName}",
+        footer = HistoryMessageFooter(
+            responseTimeMs = responseTimeMs,
+            promptTokens = usage?.promptTokens,
+            completionTokens = usage?.completionTokens,
+            totalTokens = usage?.displayTotalTokens,
+            cost = usage?.cost,
+            retryCount = retryCount,
+        ),
+    )
+
+internal fun AiRequestData.toOpenRouterCompressionSummaryHistoryMessage(
+    content: String,
+    responseTimeMs: Long,
+    usage: OpenRouterResponseUsage? = null,
+    retryCount: Int = 0,
+): HistoryMessage =
+    HistoryMessage(
+        role = HistoryRole.Assistant,
+        content = content,
+        kind = HistoryMessageKind.CompressionSummary,
         sourceLabel = "OpenRouter / ${model.displayName}",
         footer = HistoryMessageFooter(
             responseTimeMs = responseTimeMs,
@@ -73,10 +104,21 @@ internal fun AiRequestData.toOpenRouterUserHistoryMessage(): HistoryMessage =
 internal fun List<HistoryMessage>.toChatMessages(): List<ChatMessage> =
     map { it.toChatMessage() }
 
+internal fun List<HistoryMessage>.toContextMessages(): List<ContextMessage> =
+    map { it.toContextMessage() }
+
+private fun HistoryMessage.toContextMessage(): ContextMessage =
+    ContextMessage(
+        role = role.toChatRole(),
+        kind = kind.toChatMessageKind(),
+        content = apiContent ?: content,
+    )
+
 private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        kind = kind.toChatMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toChatMessageAttachment(),
         sourceLabel = sourceLabel,
@@ -87,6 +129,12 @@ private fun HistoryRole.toChatRole(): ChatRole =
     when (this) {
         HistoryRole.User -> ChatRole.User
         HistoryRole.Assistant -> ChatRole.Assistant
+    }
+
+private fun HistoryMessageKind.toChatMessageKind(): ChatMessageKind =
+    when (this) {
+        HistoryMessageKind.Regular -> ChatMessageKind.Regular
+        HistoryMessageKind.CompressionSummary -> ChatMessageKind.CompressionSummary
     }
 
 private fun HistoryMessageFooter.toChatMessageFooter(): ChatMessageFooter =
@@ -105,10 +153,10 @@ private fun HistoryMessageAttachment.toChatMessageAttachment(): ChatMessageAttac
         sizeBytes = sizeBytes,
     )
 
-private val HistoryRole.apiRole: String
+private val ChatRole.apiRole: String
     get() = when (this) {
-        HistoryRole.User -> "user"
-        HistoryRole.Assistant -> "assistant"
+        ChatRole.User -> "user"
+        ChatRole.Assistant -> "assistant"
     }
 
 private fun ApiSettings.openRouterTemperature(): Float? {

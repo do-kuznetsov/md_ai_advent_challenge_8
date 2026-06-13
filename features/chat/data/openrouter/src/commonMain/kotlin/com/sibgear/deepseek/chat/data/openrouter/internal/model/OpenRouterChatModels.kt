@@ -7,6 +7,7 @@ internal data class OpenRouterCompletionResult(
     val content: String,
     val usage: OpenRouterResponseUsage? = null,
     val isRetryable: Boolean = false,
+    val isError: Boolean = false,
 )
 
 @Serializable

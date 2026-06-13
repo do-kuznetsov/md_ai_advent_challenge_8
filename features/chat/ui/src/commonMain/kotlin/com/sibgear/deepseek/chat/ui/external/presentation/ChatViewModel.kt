@@ -7,7 +7,9 @@ import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
+import com.sibgear.deepseek.chat.domain.model.ChatCompressionSettings
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.DefaultCompressionIntervalMessages
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.userApiContent
@@ -55,6 +57,20 @@ class ChatViewModel(
                     apiSettings = state.apiSettings.copy(
                         isApiControlEnabled = event.isEnabled,
                     ),
+                )
+            }
+
+            is ChatEvent.CompressionEnabledChanged -> {
+                state = state.copy(isCompressionEnabled = event.isEnabled)
+            }
+
+            is ChatEvent.CompressionIntervalChanged -> {
+                state = state.copy(compressionIntervalInput = event.interval.filter { it.isDigit() })
+            }
+
+            is ChatEvent.CompressionSummaryToggled -> {
+                state = state.copy(
+                    expandedCompressionMessageIndexes = state.expandedCompressionMessageIndexes.toggle(event.messageIndex),
                 )
             }
 
@@ -156,6 +172,12 @@ class ChatViewModel(
             attachment = state.attachment,
             model = state.selectedModel,
             apiSettings = state.apiSettings,
+            compressionSettings = ChatCompressionSettings(
+                isEnabled = state.isCompressionEnabled,
+                intervalMessages = state.compressionIntervalInput.toIntOrNull()
+                    ?.coerceAtLeast(1)
+                    ?: DefaultCompressionIntervalMessages,
+            ),
         )
         val userMessage = ChatMessage(
             role = ChatRole.User,
@@ -228,3 +250,6 @@ class ChatViewModel(
     private fun ChatViewState.withContextUsageLabel(): ChatViewState =
         copy(contextUsageLabel = buildContextUsageLabel(messages, selectedModel))
 }
+
+private fun Set<Int>.toggle(value: Int): Set<Int> =
+    if (value in this) this - value else this + value

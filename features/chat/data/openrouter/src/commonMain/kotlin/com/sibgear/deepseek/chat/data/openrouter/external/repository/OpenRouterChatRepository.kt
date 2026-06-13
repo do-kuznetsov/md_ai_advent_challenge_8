@@ -1,8 +1,10 @@
 package com.sibgear.deepseek.chat.data.openrouter.external.repository
 
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMessages
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toContextMessages
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterAssistantHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterChatCompletionRequest
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterCompressionSummaryHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterUserHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiErrorResponse
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterCompletionResult
@@ -13,10 +15,13 @@ import com.sibgear.deepseek.chat.data.openrouter.internal.repository.OpenRouterS
 import com.sibgear.deepseek.chat.data.openrouter.internal.repository.isOpenRouterRetryableStatus
 import com.sibgear.deepseek.chat.data.openrouter.internal.repository.isOpenRouterRetryableTransportError
 import com.sibgear.deepseek.chat.data.openrouter.internal.repository.isTimeoutError
+import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -41,6 +46,7 @@ import kotlin.time.TimeSource
 class OpenRouterChatRepository(
     private val apiKey: String,
     private val historyInteractor: ChatHistoryInteractor,
+    private val contextPlanner: ChatContextPlanner = ChatContextPlanner(),
 ) : AiChatRepository {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -65,16 +71,29 @@ class OpenRouterChatRepository(
         var retryCount = 0
 
         return try {
-            val completion = sendCompletionWithRetry(request) { retryCount = it }
+            val completion = sendCompletionWithRetry(
+                request = request,
+                contextMessages = contextPlanner.plan(
+                    messages = historyInteractor.getMessages().toContextMessages(),
+                    compressionSettings = request.compressionSettings,
+                ).apiMessages,
+                includeSystemPrompt = true,
+                servicePrompt = null,
+            ) { retryCount = it }
+            val messagesWithAssistant = historyInteractor.add(
+                request.toOpenRouterAssistantHistoryMessage(
+                    content = completion.content,
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    usage = completion.usage,
+                    retryCount = retryCount,
+                ),
+            )
             AgentResponse(
-                messages = historyInteractor.add(
-                    request.toOpenRouterAssistantHistoryMessage(
-                        content = completion.content,
-                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
-                        usage = completion.usage,
-                        retryCount = retryCount,
-                    ),
-                ).toChatMessages(),
+                messages = if (completion.isError) {
+                    messagesWithAssistant
+                } else {
+                    maybeCompressContext(request, messagesWithAssistant)
+                }.toChatMessages(),
             )
         } catch (exception: CancellationException) {
             throw exception
@@ -93,13 +112,21 @@ class OpenRouterChatRepository(
 
     private suspend fun sendCompletionWithRetry(
         request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
         onRetryCountChanged: (Int) -> Unit,
     ): OpenRouterCompletionResult {
         var retryCount = 0
 
         while (true) {
             try {
-                val completion = sendStreamingCompletion(request)
+                val completion = sendStreamingCompletion(
+                    request = request,
+                    contextMessages = contextMessages,
+                    includeSystemPrompt = includeSystemPrompt,
+                    servicePrompt = servicePrompt,
+                )
                 if (completion.isRetryable && retryCount < OpenRouterMaxRetries) {
                     retryCount += 1
                     onRetryCountChanged(retryCount)
@@ -123,7 +150,61 @@ class OpenRouterChatRepository(
         }
     }
 
-    private suspend fun sendStreamingCompletion(request: AiRequestData): OpenRouterCompletionResult {
+    private suspend fun maybeCompressContext(
+        request: AiRequestData,
+        currentMessages: List<HistoryMessage>,
+    ): List<HistoryMessage> {
+        val compressionRequest = contextPlanner.plan(
+            messages = currentMessages.toContextMessages(),
+            compressionSettings = request.compressionSettings,
+        ).compressionRequest ?: return currentMessages
+
+        val startedAt = TimeSource.Monotonic.markNow()
+        var retryCount = 0
+        return try {
+            val compression = sendCompletionWithRetry(
+                request = request,
+                contextMessages = compressionRequest.messages,
+                includeSystemPrompt = false,
+                servicePrompt = compressionRequest.prompt,
+            ) { retryCount = it }
+            if (compression.isError) {
+                historyInteractor.add(
+                    request.toOpenRouterAssistantHistoryMessage(
+                        content = "Ошибка сжатия истории: ${compression.content}",
+                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                        retryCount = retryCount,
+                    ),
+                )
+            } else {
+                historyInteractor.add(
+                    request.toOpenRouterCompressionSummaryHistoryMessage(
+                        content = compression.content,
+                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                        usage = compression.usage,
+                        retryCount = retryCount,
+                    ),
+                )
+            }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Throwable) {
+            historyInteractor.add(
+                request.toOpenRouterAssistantHistoryMessage(
+                    content = "Ошибка сжатия истории: ${formatException(exception)}",
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    retryCount = retryCount,
+                ),
+            )
+        }
+    }
+
+    private suspend fun sendStreamingCompletion(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+    ): OpenRouterCompletionResult {
         val response = client.post(ChatCompletionsUrl) {
             bearerAuth(apiKey)
             header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
@@ -135,7 +216,9 @@ class OpenRouterChatRepository(
             }
             setBody(
                 request.toOpenRouterChatCompletionRequest(
-                    historyMessages = historyInteractor.getMessages(),
+                    contextMessages = contextMessages,
+                    includeSystemPrompt = includeSystemPrompt,
+                    servicePrompt = servicePrompt,
                 ),
             )
         }
@@ -149,6 +232,7 @@ class OpenRouterChatRepository(
                     body = body,
                 ),
                 isRetryable = response.status.isOpenRouterRetryableStatus(),
+                isError = true,
             )
         }
 
@@ -159,6 +243,7 @@ class OpenRouterChatRepository(
         return OpenRouterCompletionResult(
             content = content,
             usage = stream.usage,
+            isError = stream.hasStreamError,
         )
     }
 

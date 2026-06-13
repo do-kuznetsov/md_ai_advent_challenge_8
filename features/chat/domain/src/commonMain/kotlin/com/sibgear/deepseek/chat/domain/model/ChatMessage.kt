@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.domain.model
 data class ChatMessage(
     val role: ChatRole,
     val content: String,
+    val kind: ChatMessageKind = ChatMessageKind.Regular,
     val apiContent: String? = null,
     val attachment: ChatMessageAttachment? = null,
     val sourceLabel: String? = null,
@@ -12,6 +13,11 @@ data class ChatMessage(
 enum class ChatRole {
     User,
     Assistant,
+}
+
+enum class ChatMessageKind {
+    Regular,
+    CompressionSummary,
 }
 
 data class ChatMessageFooter(

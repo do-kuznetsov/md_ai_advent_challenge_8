@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.history.data.sqldelight.external.repository
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import com.sibgear.deepseek.chat.history.domain.repository.ChatHistoryRepository
 import java.io.File
@@ -88,29 +89,30 @@ class SqldelightChatHistoryRepository(
     private fun java.sql.PreparedStatement.bind(message: HistoryMessage) {
         setString(1, message.role.databaseValue)
         setString(2, message.content)
-        setString(3, message.apiContent)
+        setString(3, message.kind.databaseValue)
+        setString(4, message.apiContent)
         message.attachment?.let { attachment ->
-            setString(4, attachment.fileName)
-            setLong(5, attachment.sizeBytes)
+            setString(5, attachment.fileName)
+            setLong(6, attachment.sizeBytes)
         } ?: run {
-            setObject(4, null)
             setObject(5, null)
+            setObject(6, null)
         }
-        setString(6, message.sourceLabel)
+        setString(7, message.sourceLabel)
         message.footer?.let { footer ->
-            setLong(7, footer.responseTimeMs)
-            footer.promptTokens?.let { setLong(8, it.toLong()) } ?: setObject(8, null)
-            footer.completionTokens?.let { setLong(9, it.toLong()) } ?: setObject(9, null)
-            footer.totalTokens?.let { setLong(10, it.toLong()) } ?: setObject(10, null)
-            footer.cost?.let { setDouble(11, it) } ?: setObject(11, null)
-            setLong(12, footer.retryCount.toLong())
+            setLong(8, footer.responseTimeMs)
+            footer.promptTokens?.let { setLong(9, it.toLong()) } ?: setObject(9, null)
+            footer.completionTokens?.let { setLong(10, it.toLong()) } ?: setObject(10, null)
+            footer.totalTokens?.let { setLong(11, it.toLong()) } ?: setObject(11, null)
+            footer.cost?.let { setDouble(12, it) } ?: setObject(12, null)
+            setLong(13, footer.retryCount.toLong())
         } ?: run {
-            setObject(7, null)
             setObject(8, null)
             setObject(9, null)
             setObject(10, null)
             setObject(11, null)
             setObject(12, null)
+            setObject(13, null)
         }
     }
 
@@ -118,6 +120,7 @@ class SqldelightChatHistoryRepository(
         HistoryMessage(
             role = getString("role").toHistoryRole(),
             content = getString("content"),
+            kind = getString("kind").toHistoryMessageKind(),
             apiContent = getString("api_content"),
             attachment = getString("attachment_file_name")?.let { fileName ->
                 HistoryMessageAttachment(
@@ -154,6 +157,12 @@ class SqldelightChatHistoryRepository(
             HistoryRole.Assistant -> AssistantRole
         }
 
+    private val HistoryMessageKind.databaseValue: String
+        get() = when (this) {
+            HistoryMessageKind.Regular -> RegularKind
+            HistoryMessageKind.CompressionSummary -> CompressionSummaryKind
+        }
+
     private fun String.toHistoryRole(): HistoryRole =
         when (this) {
             UserRole -> HistoryRole.User
@@ -161,9 +170,17 @@ class SqldelightChatHistoryRepository(
             else -> error("Unknown history message role: $this")
         }
 
+    private fun String?.toHistoryMessageKind(): HistoryMessageKind =
+        when (this) {
+            CompressionSummaryKind -> HistoryMessageKind.CompressionSummary
+            else -> HistoryMessageKind.Regular
+        }
+
     private companion object {
         const val UserRole = "user"
         const val AssistantRole = "assistant"
+        const val RegularKind = "regular"
+        const val CompressionSummaryKind = "compression_summary"
     }
 }
 
@@ -178,6 +195,7 @@ internal fun createTableSql(tableName: String): String =
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'regular',
         api_content TEXT,
         attachment_file_name TEXT,
         attachment_size_bytes INTEGER,
@@ -196,6 +214,7 @@ internal fun insertSql(tableName: String): String =
     INSERT INTO $tableName(
         role,
         content,
+        kind,
         api_content,
         attachment_file_name,
         attachment_size_bytes,
@@ -207,7 +226,7 @@ internal fun insertSql(tableName: String): String =
         cost,
         retry_count
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """.trimIndent()
 
 internal fun selectAllSql(tableName: String): String =
@@ -242,6 +261,7 @@ private data class MissingColumn(
 )
 
 private val MissingColumns = listOf(
+    MissingColumn("kind", "TEXT DEFAULT 'regular'"),
     MissingColumn("api_content", "TEXT"),
     MissingColumn("attachment_file_name", "TEXT"),
     MissingColumn("attachment_size_bytes", "INTEGER"),

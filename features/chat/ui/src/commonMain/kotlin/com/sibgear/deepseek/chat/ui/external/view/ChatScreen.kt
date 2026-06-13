@@ -35,6 +35,8 @@ fun ChatScreen(
             ) {
                 ChatArea(
                     messages = state.messages,
+                    expandedCompressionMessageIndexes = state.expandedCompressionMessageIndexes,
+                    onCompressionSummaryToggled = { onEvent(ChatEvent.CompressionSummaryToggled(it)) },
                     modifier = Modifier.weight(0.8f).fillMaxHeight(),
                 )
 
