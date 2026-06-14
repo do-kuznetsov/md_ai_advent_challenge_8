@@ -17,6 +17,7 @@ import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
 import com.sibgear.deepseek.chat.ui.internal.view.ApiSettingsPanel
 import com.sibgear.deepseek.chat.ui.internal.view.ChatArea
 import com.sibgear.deepseek.chat.ui.internal.view.PromptInputArea
+import com.sibgear.deepseek.chat.ui.internal.view.SendButtonArea
 
 @Composable
 fun ChatScreen(
@@ -25,33 +26,45 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
+        Row(
             modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            Column(
+                modifier = Modifier.weight(0.8f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 ChatArea(
                     messages = state.messages,
                     pinnedContextMessageIndex = state.pinnedContextMessageIndex,
                     expandedCompressionMessageIndexes = state.expandedCompressionMessageIndexes,
                     onCompressionSummaryToggled = { onEvent(ChatEvent.CompressionSummaryToggled(it)) },
-                    modifier = Modifier.weight(0.8f).fillMaxHeight(),
+                    modifier = Modifier.weight(1f),
                 )
 
-                ApiSettingsPanel(
+                PromptInputArea(
                     state = state,
                     onEvent = onEvent,
-                    modifier = Modifier.weight(0.2f).fillMaxHeight(),
                 )
             }
 
-            PromptInputArea(
-                state = state,
-                onEvent = onEvent,
-            )
+            Column(
+                modifier = Modifier.weight(0.2f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ApiSettingsPanel(
+                    state = state,
+                    onEvent = onEvent,
+                    modifier = Modifier.weight(1f),
+                )
+
+                SendButtonArea(
+                    isLoading = state.isLoading,
+                    isSendEnabled = state.isSendEnabled,
+                    onSendClicked = { onEvent(ChatEvent.SendClicked) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

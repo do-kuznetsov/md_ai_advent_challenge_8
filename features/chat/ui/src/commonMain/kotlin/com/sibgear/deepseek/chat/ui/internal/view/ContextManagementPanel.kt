@@ -33,12 +33,12 @@ internal fun ContextManagementPanel(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = state.contextUsageLabel,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f, fill = false),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -53,7 +53,7 @@ internal fun ContextManagementPanel(
                 },
             ) {
                 Text(
-                    text = "${state.contextManagementMode.displayTitle()} ↑",
+                    text = "${state.contextManagementMode.displayTitle()} ${state.contextManagementArrow()}",
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -158,3 +158,6 @@ private fun ContextManagementMode.displayTitle(): String =
         ContextManagementMode.ContextSummary -> "Context Summary"
         ContextManagementMode.SlidingWindow -> "Sliding Window"
     }
+
+private fun ChatViewState.contextManagementArrow(): String =
+    if (isContextManagementPanelExpanded) "↓" else "↑"
