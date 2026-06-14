@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.history.domain.model
 data class HistoryMessage(
     val role: HistoryRole,
     val content: String,
+    val branchId: Int? = null,
     val kind: HistoryMessageKind = HistoryMessageKind.Regular,
     val apiContent: String? = null,
     val attachment: HistoryMessageAttachment? = null,
@@ -37,4 +38,11 @@ data class HistoryMessageAttachment(
 data class HistoryFact(
     val key: String,
     val value: String,
+)
+
+data class HistoryBranch(
+    val id: Int,
+    val parentId: Int? = null,
+    val title: String,
+    val summary: String,
 )

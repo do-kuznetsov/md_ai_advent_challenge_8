@@ -5,7 +5,9 @@ import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
@@ -35,10 +37,31 @@ internal fun List<StickyFact>.toHistoryFacts(): List<HistoryFact> =
         )
     }
 
+internal fun List<HistoryBranch>.toChatBranches(): List<ChatBranch> =
+    map { branch ->
+        ChatBranch(
+            id = branch.id,
+            parentId = branch.parentId,
+            title = branch.title,
+            summary = branch.summary,
+        )
+    }
+
+internal fun List<ChatBranch>.toHistoryBranches(): List<HistoryBranch> =
+    map { branch ->
+        HistoryBranch(
+            id = branch.id,
+            parentId = branch.parentId,
+            title = branch.title,
+            summary = branch.summary,
+        )
+    }
+
 private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        branchId = branchId,
         kind = kind.toChatMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toChatMessageAttachment(),
@@ -50,6 +73,7 @@ private fun ChatMessage.toHistoryMessage(): HistoryMessage =
     HistoryMessage(
         role = role.toHistoryRole(),
         content = content,
+        branchId = branchId,
         kind = kind.toHistoryMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toHistoryMessageAttachment(),

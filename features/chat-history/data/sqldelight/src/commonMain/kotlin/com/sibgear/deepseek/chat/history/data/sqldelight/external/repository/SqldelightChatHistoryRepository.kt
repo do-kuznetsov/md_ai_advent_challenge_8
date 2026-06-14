@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.history.data.sqldelight.external.repository
 
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
@@ -18,6 +19,7 @@ class SqldelightChatHistoryRepository(
 ) : ChatHistoryRepository {
     private val tableName = chatId.toTableName()
     private val factsTableName = chatId.toFactsTableName()
+    private val branchesTableName = chatId.toBranchesTableName()
 
     init {
         databaseFile.parentFile?.mkdirs()
@@ -25,6 +27,7 @@ class SqldelightChatHistoryRepository(
             connection.createStatement().use { statement ->
                 statement.execute(createTableSql(tableName))
                 statement.execute(createFactsTableSql(factsTableName))
+                statement.execute(createBranchesTableSql(branchesTableName))
             }
             connection.ensureAttachmentColumns(tableName)
         }
@@ -122,11 +125,60 @@ class SqldelightChatHistoryRepository(
         return getFacts()
     }
 
+    override suspend fun getBranches(): List<HistoryBranch> =
+        withConnection { connection ->
+            connection.prepareStatement(selectAllBranchesSql(branchesTableName)).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(
+                                HistoryBranch(
+                                    id = resultSet.getLong("branch_id").toInt(),
+                                    parentId = resultSet.getNullableLong("parent_branch_id")?.toInt(),
+                                    title = resultSet.getString("title"),
+                                    summary = resultSet.getString("summary"),
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+    override suspend fun replaceBranches(branches: List<HistoryBranch>): List<HistoryBranch> {
+        withConnection { connection ->
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(deleteAllSql(branchesTableName))
+                }
+                connection.prepareStatement(insertBranchSql(branchesTableName)).use { statement ->
+                    branches.forEach { branch ->
+                        statement.setLong(1, branch.id.toLong())
+                        branch.parentId?.let { statement.setLong(2, it.toLong()) } ?: statement.setObject(2, null)
+                        statement.setString(3, branch.title)
+                        statement.setString(4, branch.summary)
+                        statement.addBatch()
+                    }
+                    statement.executeBatch()
+                }
+                connection.commit()
+            } catch (exception: Throwable) {
+                connection.rollback()
+                throw exception
+            } finally {
+                connection.autoCommit = true
+            }
+        }
+        return getBranches()
+    }
+
     override suspend fun clear() {
         withConnection { connection ->
             connection.createStatement().use { statement ->
                 statement.executeUpdate(deleteAllSql(tableName))
                 statement.executeUpdate(deleteAllSql(factsTableName))
+                statement.executeUpdate(deleteAllSql(branchesTableName))
             }
         }
     }
@@ -138,29 +190,30 @@ class SqldelightChatHistoryRepository(
         setString(1, message.role.databaseValue)
         setString(2, message.content)
         setString(3, message.kind.databaseValue)
-        setString(4, message.apiContent)
+        message.branchId?.let { setLong(4, it.toLong()) } ?: setObject(4, null)
+        setString(5, message.apiContent)
         message.attachment?.let { attachment ->
-            setString(5, attachment.fileName)
-            setLong(6, attachment.sizeBytes)
+            setString(6, attachment.fileName)
+            setLong(7, attachment.sizeBytes)
         } ?: run {
-            setObject(5, null)
             setObject(6, null)
+            setObject(7, null)
         }
-        setString(7, message.sourceLabel)
+        setString(8, message.sourceLabel)
         message.footer?.let { footer ->
-            setLong(8, footer.responseTimeMs)
-            footer.promptTokens?.let { setLong(9, it.toLong()) } ?: setObject(9, null)
-            footer.completionTokens?.let { setLong(10, it.toLong()) } ?: setObject(10, null)
-            footer.totalTokens?.let { setLong(11, it.toLong()) } ?: setObject(11, null)
-            footer.cost?.let { setDouble(12, it) } ?: setObject(12, null)
-            setLong(13, footer.retryCount.toLong())
+            setLong(9, footer.responseTimeMs)
+            footer.promptTokens?.let { setLong(10, it.toLong()) } ?: setObject(10, null)
+            footer.completionTokens?.let { setLong(11, it.toLong()) } ?: setObject(11, null)
+            footer.totalTokens?.let { setLong(12, it.toLong()) } ?: setObject(12, null)
+            footer.cost?.let { setDouble(13, it) } ?: setObject(13, null)
+            setLong(14, footer.retryCount.toLong())
         } ?: run {
-            setObject(8, null)
             setObject(9, null)
             setObject(10, null)
             setObject(11, null)
             setObject(12, null)
             setObject(13, null)
+            setObject(14, null)
         }
     }
 
@@ -168,6 +221,7 @@ class SqldelightChatHistoryRepository(
         HistoryMessage(
             role = getString("role").toHistoryRole(),
             content = getString("content"),
+            branchId = getNullableLong("branch_id")?.toInt(),
             kind = getString("kind").toHistoryMessageKind(),
             apiContent = getString("api_content"),
             attachment = getString("attachment_file_name")?.let { fileName ->
@@ -242,6 +296,11 @@ internal fun Int.toFactsTableName(): String {
     return "history_fact_tab_$this"
 }
 
+internal fun Int.toBranchesTableName(): String {
+    require(this > 0) { "chatId must be positive" }
+    return "history_branch_tab_$this"
+}
+
 internal fun createTableSql(tableName: String): String =
     """
     CREATE TABLE IF NOT EXISTS $tableName (
@@ -249,6 +308,7 @@ internal fun createTableSql(tableName: String): String =
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         kind TEXT NOT NULL DEFAULT 'regular',
+        branch_id INTEGER,
         api_content TEXT,
         attachment_file_name TEXT,
         attachment_size_bytes INTEGER,
@@ -271,12 +331,23 @@ internal fun createFactsTableSql(tableName: String): String =
     )
     """.trimIndent()
 
+internal fun createBranchesTableSql(tableName: String): String =
+    """
+    CREATE TABLE IF NOT EXISTS $tableName (
+        branch_id INTEGER NOT NULL PRIMARY KEY,
+        parent_branch_id INTEGER,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL
+    )
+    """.trimIndent()
+
 internal fun insertSql(tableName: String): String =
     """
     INSERT INTO $tableName(
         role,
         content,
         kind,
+        branch_id,
         api_content,
         attachment_file_name,
         attachment_size_bytes,
@@ -288,7 +359,7 @@ internal fun insertSql(tableName: String): String =
         cost,
         retry_count
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """.trimIndent()
 
 internal fun selectAllSql(tableName: String): String =
@@ -297,6 +368,9 @@ internal fun selectAllSql(tableName: String): String =
 internal fun selectAllFactsSql(tableName: String): String =
     "SELECT * FROM $tableName ORDER BY id ASC"
 
+internal fun selectAllBranchesSql(tableName: String): String =
+    "SELECT * FROM $tableName ORDER BY branch_id ASC"
+
 internal fun insertFactSql(tableName: String): String =
     """
     INSERT INTO $tableName(
@@ -304,6 +378,17 @@ internal fun insertFactSql(tableName: String): String =
         fact_value
     )
     VALUES (?, ?)
+    """.trimIndent()
+
+internal fun insertBranchSql(tableName: String): String =
+    """
+    INSERT INTO $tableName(
+        branch_id,
+        parent_branch_id,
+        title,
+        summary
+    )
+    VALUES (?, ?, ?, ?)
     """.trimIndent()
 
 internal fun deleteAllSql(tableName: String): String =
@@ -336,6 +421,7 @@ private data class MissingColumn(
 
 private val MissingColumns = listOf(
     MissingColumn("kind", "TEXT DEFAULT 'regular'"),
+    MissingColumn("branch_id", "INTEGER"),
     MissingColumn("api_content", "TEXT"),
     MissingColumn("attachment_file_name", "TEXT"),
     MissingColumn("attachment_size_bytes", "INTEGER"),

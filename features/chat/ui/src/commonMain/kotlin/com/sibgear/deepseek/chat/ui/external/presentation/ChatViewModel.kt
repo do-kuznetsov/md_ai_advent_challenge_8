@@ -7,6 +7,7 @@ import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
@@ -29,6 +30,7 @@ class ChatViewModel(
     private val coroutineScope: CoroutineScope,
     initialMessages: List<ChatMessage> = emptyList(),
     initialStickyFacts: List<StickyFact> = emptyList(),
+    initialBranches: List<ChatBranch> = emptyList(),
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
 
@@ -36,6 +38,8 @@ class ChatViewModel(
         ChatViewState(
             messages = initialMessages,
             stickyFacts = initialStickyFacts,
+            branches = initialBranches,
+            activeBranchId = initialMessages.lastOrNull { it.branchId != null }?.branchId,
         ),
     )
         private set
@@ -238,6 +242,9 @@ class ChatViewModel(
                     stickyFactsStatus = response.stickyFacts
                         .takeIf { it.isNotEmpty() }
                         ?.let { "facts: ${it.size}" },
+                    branches = response.branches,
+                    activeBranchId = response.activeBranchId,
+                    branchingStatus = response.activeBranchId?.let { "branch: $it" },
                 ).withContextPresentation()
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)

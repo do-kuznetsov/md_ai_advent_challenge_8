@@ -22,6 +22,7 @@ internal data class ChatHistoryDto(
     val chatId: Int,
     val messages: List<HistoryMessageDto> = emptyList(),
     val facts: List<HistoryFactDto> = emptyList(),
+    val branches: List<HistoryBranchDto> = emptyList(),
 )
 
 @Serializable
@@ -31,9 +32,18 @@ internal data class HistoryFactDto(
 )
 
 @Serializable
+internal data class HistoryBranchDto(
+    val id: Int,
+    val parentId: Int? = null,
+    val title: String,
+    val summary: String,
+)
+
+@Serializable
 internal data class HistoryMessageDto(
     val role: String,
     val content: String,
+    val branchId: Int? = null,
     val kind: String = HistoryMessageKindDto.Regular.value,
     val apiContent: String? = null,
     val attachment: HistoryMessageAttachmentDto? = null,

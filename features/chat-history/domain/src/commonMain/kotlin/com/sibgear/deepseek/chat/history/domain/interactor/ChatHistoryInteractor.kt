@@ -2,6 +2,7 @@ package com.sibgear.deepseek.chat.history.domain.interactor
 
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.repository.ChatHistoryRepository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -33,6 +34,16 @@ class ChatHistoryInteractor(
     suspend fun replaceFacts(facts: List<HistoryFact>): List<HistoryFact> =
         withContext(dispatcher) {
             repository.replaceFacts(facts)
+        }
+
+    suspend fun getBranches(): List<HistoryBranch> =
+        withContext(dispatcher) {
+            repository.getBranches()
+        }
+
+    suspend fun replaceBranches(branches: List<HistoryBranch>): List<HistoryBranch> =
+        withContext(dispatcher) {
+            repository.replaceBranches(branches)
         }
 
     suspend fun clear() {

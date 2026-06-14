@@ -6,6 +6,7 @@ import com.sibgear.deepseek.chat.history.data.internal.mapper.toChatHistoriesDat
 import com.sibgear.deepseek.chat.history.data.internal.mapper.toHistoryMessages
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.repository.ChatHistoryRepository
@@ -46,6 +47,17 @@ class FileChatHistoryRepository(
         dataByChatId[chatId] = currentData.copy(facts = facts)
         writeChatDataByChatId(dataByChatId)
         return facts
+    }
+
+    override suspend fun getBranches(): List<HistoryBranch> =
+        readChatDataByChatId()[chatId]?.branches.orEmpty()
+
+    override suspend fun replaceBranches(branches: List<HistoryBranch>): List<HistoryBranch> {
+        val dataByChatId = readChatDataByChatId().toMutableMap()
+        val currentData = dataByChatId[chatId] ?: ChatHistoryData()
+        dataByChatId[chatId] = currentData.copy(branches = branches)
+        writeChatDataByChatId(dataByChatId)
+        return branches
     }
 
     override suspend fun clear() {

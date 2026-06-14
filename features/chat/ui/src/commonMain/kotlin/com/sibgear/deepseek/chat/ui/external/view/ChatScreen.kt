@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
 import com.sibgear.deepseek.chat.ui.internal.view.ApiSettingsPanel
+import com.sibgear.deepseek.chat.ui.internal.view.BranchTreePanel
 import com.sibgear.deepseek.chat.ui.internal.view.ChatArea
 import com.sibgear.deepseek.chat.ui.internal.view.PromptInputArea
 import com.sibgear.deepseek.chat.ui.internal.view.SendButtonArea
@@ -36,6 +37,7 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 StickyFactsPanel(state = state)
+                BranchTreePanel(state = state)
 
                 ChatArea(
                     messages = state.messages,

@@ -1,12 +1,14 @@
 package com.sibgear.deepseek.chat.history.data.external.repository
 
 import com.sibgear.deepseek.chat.history.domain.repository.ChatHistoryRepository
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 
 class InMemoryChatHistoryRepository : ChatHistoryRepository {
     private var messages: List<HistoryMessage> = emptyList()
     private var facts: List<HistoryFact> = emptyList()
+    private var branches: List<HistoryBranch> = emptyList()
 
     override suspend fun add(message: HistoryMessage): List<HistoryMessage> {
         messages = messages + message
@@ -27,8 +29,16 @@ class InMemoryChatHistoryRepository : ChatHistoryRepository {
         return this.facts
     }
 
+    override suspend fun getBranches(): List<HistoryBranch> = branches
+
+    override suspend fun replaceBranches(branches: List<HistoryBranch>): List<HistoryBranch> {
+        this.branches = branches
+        return this.branches
+    }
+
     override suspend fun clear() {
         messages = emptyList()
         facts = emptyList()
+        branches = emptyList()
     }
 }

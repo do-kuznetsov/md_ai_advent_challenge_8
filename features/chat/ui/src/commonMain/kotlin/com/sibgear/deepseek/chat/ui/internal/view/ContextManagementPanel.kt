@@ -143,6 +143,17 @@ internal fun ContextManagementPanel(
                     }
                 }
 
+                ModeRow(
+                    mode = ContextManagementMode.Branching,
+                    selectedMode = state.contextManagementMode,
+                    onSelected = { onEvent(ChatEvent.ContextManagementModeSelected(it)) },
+                ) {
+                    Text(
+                        text = "ветки диалога",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -180,6 +191,7 @@ private fun ContextManagementMode.displayTitle(): String =
         ContextManagementMode.ContextSummary -> "Context Summary"
         ContextManagementMode.SlidingWindow -> "Sliding Window"
         ContextManagementMode.StickyFacts -> "Sticky Facts"
+        ContextManagementMode.Branching -> "Branching"
     }
 
 private fun ChatViewState.contextManagementArrow(): String =

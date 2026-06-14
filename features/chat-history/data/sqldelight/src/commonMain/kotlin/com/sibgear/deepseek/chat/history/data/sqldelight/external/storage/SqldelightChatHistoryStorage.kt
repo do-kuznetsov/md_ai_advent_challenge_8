@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.history.data.sqldelight.external.storage
 
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.repository.SqldelightChatHistoryRepository
+import com.sibgear.deepseek.chat.history.data.sqldelight.external.repository.toBranchesTableName
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.repository.toFactsTableName
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.repository.toTableName
 import java.io.File
@@ -44,6 +45,7 @@ class SqldelightChatHistoryStorage(
             connection.createStatement().use { statement ->
                 statement.executeUpdate("DROP TABLE IF EXISTS ${chatId.toTableName()}")
                 statement.executeUpdate("DROP TABLE IF EXISTS ${chatId.toFactsTableName()}")
+                statement.executeUpdate("DROP TABLE IF EXISTS ${chatId.toBranchesTableName()}")
             }
         }
     }

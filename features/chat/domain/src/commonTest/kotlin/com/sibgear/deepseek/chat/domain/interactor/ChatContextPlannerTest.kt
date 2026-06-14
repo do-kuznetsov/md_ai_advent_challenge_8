@@ -1,5 +1,8 @@
 package com.sibgear.deepseek.chat.domain.interactor
 
+import com.sibgear.deepseek.chat.domain.model.BranchRoutingDecision
+import com.sibgear.deepseek.chat.domain.model.BranchSummaryUpdatePrompt
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.CompressionSummaryPrompt
@@ -246,14 +249,109 @@ class ChatContextPlannerTest {
         assertEquals(listOf("second"), plan.apiMessages.map { it.content })
     }
 
+    @Test
+    fun branchingReturnsMessagesFromActiveBranchAndAncestorsOnly() {
+        val branches = listOf(
+            ChatBranch(id = 1, title = "tech", summary = "tech"),
+            ChatBranch(id = 2, parentId = 1, title = "cars", summary = "cars"),
+            ChatBranch(id = 3, parentId = 2, title = "sports", summary = "sports"),
+            ChatBranch(id = 4, parentId = 2, title = "pickups", summary = "pickups"),
+        )
+
+        val plan = planner.plan(
+            messages = listOf(
+                message("tech user", branchId = 1),
+                message("cars assistant", role = ChatRole.Assistant, branchId = 2),
+                message("sports user", branchId = 3),
+                message("pickups sibling", branchId = 4),
+                message("old unbranched"),
+            ),
+            contextManagementSettings = ContextManagementSettings(mode = ContextManagementMode.Branching),
+            branches = branches,
+            activeBranchId = 3,
+        )
+
+        assertEquals(listOf("tech user", "cars assistant", "sports user"), plan.apiMessages.map { it.content })
+    }
+
+    @Test
+    fun branchingWithoutActiveBranchFallsBackToRegularMessages() {
+        val plan = planner.plan(
+            messages = listOf(
+                message("first"),
+                message("second", role = ChatRole.Assistant),
+            ),
+            contextManagementSettings = ContextManagementSettings(mode = ContextManagementMode.Branching),
+            branches = emptyList(),
+            activeBranchId = null,
+        )
+
+        assertEquals(listOf("first", "second"), plan.apiMessages.map { it.content })
+    }
+
+    @Test
+    fun branchRoutingRequestContainsBranchTreeAndPrompt() {
+        val request = planner.branchRoutingRequest(
+            branches = listOf(
+                ChatBranch(id = 1, title = "техника", summary = "про технику"),
+                ChatBranch(id = 2, parentId = 1, title = "автомобили", summary = "про автомобили"),
+            ),
+            userPrompt = "Хочу обсудить пикапы",
+        )
+
+        assertEquals(true, request.prompt.contains("id=1; title=техника; summary=про технику"))
+        assertEquals(true, request.prompt.contains("  - id=2; title=автомобили; summary=про автомобили"))
+        assertEquals(true, request.prompt.contains("Хочу обсудить пикапы"))
+    }
+
+    @Test
+    fun selectBranchCreatesNestedBranchForNewDecision() {
+        val selection = planner.selectBranch(
+            branches = listOf(ChatBranch(id = 1, title = "техника", summary = "про технику")),
+            decision = BranchRoutingDecision.New(
+                parentBranchId = 1,
+                title = "автомобили",
+                summary = "про автомобили",
+            ),
+        )
+
+        assertEquals(2, selection.activeBranchId)
+        assertEquals(
+            ChatBranch(id = 2, parentId = 1, title = "автомобили", summary = "про автомобили"),
+            selection.branches.last(),
+        )
+    }
+
+    @Test
+    fun branchSummaryUpdateRequestUsesLastUserAssistantPairFromActiveBranch() {
+        val branches = listOf(ChatBranch(id = 1, title = "tech", summary = "old summary"))
+        val plan = planner.plan(
+            messages = listOf(
+                message("sibling", branchId = 2),
+                message("branch user", branchId = 1),
+                message("branch assistant", role = ChatRole.Assistant, branchId = 1),
+            ),
+            contextManagementSettings = ContextManagementSettings(mode = ContextManagementMode.Branching),
+            branches = branches,
+            activeBranchId = 1,
+        )
+
+        val request = assertNotNull(plan.branchSummaryUpdateRequest)
+        assertEquals(listOf("branch user", "branch assistant"), request.messages.map { it.content })
+        assertEquals(true, request.prompt.contains("Текущая ветка: tech"))
+        assertEquals(true, request.prompt.contains(BranchSummaryUpdatePrompt.trim()))
+    }
+
     private fun message(
         content: String,
         role: ChatRole = ChatRole.User,
         kind: ChatMessageKind = ChatMessageKind.Regular,
+        branchId: Int? = null,
     ): ContextMessage =
         ContextMessage(
             role = role,
             kind = kind,
             content = content,
+            branchId = branchId,
         )
 }

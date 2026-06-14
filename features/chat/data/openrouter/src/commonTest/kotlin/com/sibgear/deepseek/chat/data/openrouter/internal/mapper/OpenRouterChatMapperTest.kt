@@ -4,6 +4,7 @@ import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.ApiSettings
+import com.sibgear.deepseek.chat.domain.model.BranchRoutingDecision
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
@@ -12,6 +13,7 @@ import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -103,5 +105,30 @@ class OpenRouterChatMapperTest {
         assertEquals("system", apiRequest.messages[0].content)
         assertEquals("Sticky facts:\n- goal: test", apiRequest.messages[1].content)
         assertEquals("visible prompt", apiRequest.messages[2].content)
+    }
+
+    @Test
+    fun parsesExistingBranchRoutingDecision() {
+        val decision = """{"type":"existing","branchId":3}""".toBranchRoutingDecision(Json)
+
+        assertEquals(BranchRoutingDecision.Existing(branchId = 3), decision)
+    }
+
+    @Test
+    fun parsesNewBranchRoutingDecision() {
+        val decision = """
+            ```json
+            {"type":"new","parentBranchId":2,"title":"sports","summary":"sport cars"}
+            ```
+        """.trimIndent().toBranchRoutingDecision(Json)
+
+        assertEquals(
+            BranchRoutingDecision.New(
+                parentBranchId = 2,
+                title = "sports",
+                summary = "sport cars",
+            ),
+            decision,
+        )
     }
 }

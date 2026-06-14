@@ -24,6 +24,8 @@ import com.sibgear.deepseek.chat.workspace.ui.external.presentation.AiChatAppVie
 import com.sibgear.deepseek.chat.workspace.ui.external.view.AiChatAppScreen
 import com.sibgear.deepseek.config.BuildConfig
 import com.sibgear.deepseek.mapper.toChatMessages
+import com.sibgear.deepseek.mapper.toChatBranches
+import com.sibgear.deepseek.mapper.toHistoryBranches
 import com.sibgear.deepseek.mapper.toHistoryFacts
 import com.sibgear.deepseek.mapper.toHistoryMessages
 import com.sibgear.deepseek.mapper.toStickyFacts
@@ -76,6 +78,9 @@ fun App() {
             val restoredFacts = runBlocking {
                 historyInteractor.getFacts()
             }
+            val restoredBranches = runBlocking {
+                historyInteractor.getBranches()
+            }
             val repository = RoutingAiRepository(
                 chatRepositories = mapOf(
                     AiProvider.DeepSeek to DeepSeekChatRepository(
@@ -104,6 +109,7 @@ fun App() {
                 coroutineScope = scope,
                 initialMessages = restoredMessages.toChatMessages(),
                 initialStickyFacts = restoredFacts.toStickyFacts(),
+                initialBranches = restoredBranches.toChatBranches(),
             )
         }
 
@@ -143,6 +149,7 @@ fun App() {
                         val targetRepository = targetStorage.createRepository(tab.number)
                         targetRepository.replace(tab.viewModel.state.messages.toHistoryMessages())
                         targetRepository.replaceFacts(tab.viewModel.state.stickyFacts.toHistoryFacts())
+                        targetRepository.replaceBranches(tab.viewModel.state.branches.toHistoryBranches())
                     }
                 }
 

@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.ui.external.model
 import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.AiModel
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
@@ -32,6 +33,9 @@ data class ChatViewState(
     val stickyFactsWindowInput: String = DefaultContextManagementMessages.toString(),
     val stickyFacts: List<StickyFact> = emptyList(),
     val stickyFactsStatus: String? = null,
+    val branches: List<ChatBranch> = emptyList(),
+    val activeBranchId: Int? = null,
+    val branchingStatus: String? = null,
     val pinnedContextMessageIndex: Int? = buildPinnedContextMessageIndex(
         messages = messages,
         mode = contextManagementMode,

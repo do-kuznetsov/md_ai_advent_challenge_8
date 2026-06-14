@@ -6,6 +6,9 @@ import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekAssista
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekChatCompletionRequest
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekCompressionSummaryHistoryMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekUserHistoryMessage
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toBranchRoutingDecision
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toChatBranches
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryBranches
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryFacts
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toStickyFacts
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.mergeStickyFacts
@@ -15,6 +18,8 @@ import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekResponseUs
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.BranchSelection
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.StickyFact
@@ -59,7 +64,14 @@ class DeepSeekChatRepository(
         }
     }
 
-    override suspend fun sendMessage(request: AiRequestData): AgentResponse {
+    override suspend fun sendMessage(request: AiRequestData): AgentResponse =
+        if (request.contextManagementSettings.mode == ContextManagementMode.Branching) {
+            sendBranchingMessage(request)
+        } else {
+            sendLinearMessage(request)
+        }
+
+    private suspend fun sendLinearMessage(request: AiRequestData): AgentResponse {
         historyInteractor.add(request.toDeepSeekUserHistoryMessage())
         val startedAt = TimeSource.Monotonic.markNow()
 
@@ -97,20 +109,183 @@ class DeepSeekChatRepository(
                     maybeCompressContext(request, messagesWithAssistant)
                 }.toChatMessages(),
                 stickyFacts = updatedStickyFacts,
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = messagesWithAssistant.lastOrNull { it.branchId != null }?.branchId,
             )
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Throwable) {
+            val messages = historyInteractor.add(
+                request.toDeepSeekAssistantHistoryMessage(
+                    content = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                ),
+            )
             AgentResponse(
-                messages = historyInteractor.add(
-                    request.toDeepSeekAssistantHistoryMessage(
-                        content = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
-                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
-                    ),
-                ).toChatMessages(),
+                messages = messages.toChatMessages(),
                 stickyFacts = historyInteractor.getFacts().toStickyFacts(),
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = messages.lastOrNull { it.branchId != null }?.branchId,
             )
         }
+    }
+
+    private suspend fun sendBranchingMessage(request: AiRequestData): AgentResponse {
+        val startedAt = TimeSource.Monotonic.markNow()
+        val historyBeforeUser = historyInteractor.getMessages()
+        var branchSelection = resolveBranch(
+            request = request,
+            branches = historyInteractor.getBranches().toChatBranches(),
+            fallbackActiveBranchId = historyBeforeUser.lastOrNull { it.branchId != null }?.branchId,
+        )
+        historyInteractor.replaceBranches(branchSelection.branches.toHistoryBranches())
+        historyInteractor.add(request.toDeepSeekUserHistoryMessage(branchId = branchSelection.activeBranchId))
+
+        return try {
+            val historyMessages = historyInteractor.getMessages()
+            val completion = sendCompletion(
+                request = request,
+                contextMessages = contextPlanner.plan(
+                    messages = historyMessages.toContextMessages(),
+                    contextManagementSettings = request.contextManagementSettings,
+                    branches = branchSelection.branches,
+                    activeBranchId = branchSelection.activeBranchId,
+                ).apiMessages,
+                includeSystemPrompt = true,
+            )
+            val messagesWithAssistant = historyInteractor.add(
+                request.toDeepSeekAssistantHistoryMessage(
+                    content = completion.content,
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    usage = completion.usage,
+                    branchId = branchSelection.activeBranchId,
+                ),
+            )
+            branchSelection = if (completion.isError) {
+                branchSelection
+            } else {
+                branchSelection.copy(
+                    branches = updateBranchSummary(
+                        request = request,
+                        currentMessages = messagesWithAssistant,
+                        branches = branchSelection.branches,
+                        activeBranchId = branchSelection.activeBranchId,
+                    ),
+                )
+            }
+
+            AgentResponse(
+                messages = messagesWithAssistant.toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
+                branches = branchSelection.branches,
+                activeBranchId = branchSelection.activeBranchId,
+            )
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Throwable) {
+            val messages = historyInteractor.add(
+                request.toDeepSeekAssistantHistoryMessage(
+                    content = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    branchId = branchSelection.activeBranchId,
+                ),
+            )
+            AgentResponse(
+                messages = messages.toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = branchSelection.activeBranchId,
+            )
+        }
+    }
+
+    private suspend fun resolveBranch(
+        request: AiRequestData,
+        branches: List<ChatBranch>,
+        fallbackActiveBranchId: Int?,
+    ): BranchSelection {
+        val routingRequest = contextPlanner.branchRoutingRequest(
+            branches = branches,
+            userPrompt = request.prompt,
+        )
+        val decision = runCatching {
+            sendCompletion(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = routingRequest.prompt,
+            )
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return fallbackBranch(branches, fallbackActiveBranchId)
+        }
+
+        if (decision.isError) {
+            return fallbackBranch(branches, fallbackActiveBranchId)
+        }
+
+        return contextPlanner.selectBranch(
+            branches = branches,
+            decision = decision.content.toBranchRoutingDecision(json),
+        )
+    }
+
+    private fun fallbackBranch(
+        branches: List<ChatBranch>,
+        fallbackActiveBranchId: Int?,
+    ): BranchSelection {
+        if (fallbackActiveBranchId != null && branches.any { it.id == fallbackActiveBranchId }) {
+            return BranchSelection(
+                branches = branches,
+                activeBranchId = fallbackActiveBranchId,
+            )
+        }
+
+        return contextPlanner.fallbackBranch(branches)
+    }
+
+    private suspend fun updateBranchSummary(
+        request: AiRequestData,
+        currentMessages: List<HistoryMessage>,
+        branches: List<ChatBranch>,
+        activeBranchId: Int,
+    ): List<ChatBranch> {
+        val updateRequest = contextPlanner.plan(
+            messages = currentMessages.toContextMessages(),
+            contextManagementSettings = request.contextManagementSettings,
+            branches = branches,
+            activeBranchId = activeBranchId,
+        ).branchSummaryUpdateRequest ?: return branches
+
+        val update = runCatching {
+            sendCompletion(
+                request = request,
+                contextMessages = updateRequest.messages,
+                includeSystemPrompt = false,
+                servicePrompt = updateRequest.prompt,
+            )
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return branches
+        }
+        if (update.isError) {
+            return branches
+        }
+
+        val summary = update.content.trim().takeIf { it.isNotEmpty() } ?: return branches
+        val updatedBranches = branches.map { branch ->
+            if (branch.id == activeBranchId) {
+                branch.copy(summary = summary)
+            } else {
+                branch
+            }
+        }
+        historyInteractor.replaceBranches(updatedBranches.toHistoryBranches())
+        return updatedBranches
     }
 
     private suspend fun updateStickyFacts(

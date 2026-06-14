@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.history.data.internal.mapper
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileVersion
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryDto
+import com.sibgear.deepseek.chat.history.data.internal.model.HistoryBranchDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryFactDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageAttachmentDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageDto
@@ -10,6 +11,7 @@ import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageFoote
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageKindDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryRoleDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
@@ -57,6 +59,7 @@ internal fun ChatHistoryFileDto.toChatDataByChatId(): Map<Int, ChatHistoryData> 
         chat.chatId to ChatHistoryData(
             messages = chat.messages.mapNotNull { it.toDomain() },
             facts = chat.facts.mapNotNull { it.toDomain() },
+            branches = chat.branches.mapNotNull { it.toDomain() },
         )
     }
 
@@ -70,6 +73,7 @@ internal fun Map<Int, ChatHistoryData>.toChatHistoriesDataFileDto(): ChatHistory
                     chatId = chatId,
                     messages = data.messages.map { it.toDto() },
                     facts = data.facts.map { it.toDto() },
+                    branches = data.branches.map { it.toDto() },
                 )
             },
     )
@@ -81,12 +85,36 @@ private fun HistoryMessage.toDto(): HistoryMessageDto =
     HistoryMessageDto(
         role = role.toDto().value,
         content = content,
+        branchId = branchId,
         kind = kind.toDto().value,
         apiContent = apiContent,
         attachment = attachment?.toDto(),
         sourceLabel = sourceLabel,
         footer = footer?.toDto(),
     )
+
+private fun HistoryBranch.toDto(): HistoryBranchDto =
+    HistoryBranchDto(
+        id = id,
+        parentId = parentId,
+        title = title,
+        summary = summary,
+    )
+
+private fun HistoryBranchDto.toDomain(): HistoryBranch? {
+    if (id <= 0) {
+        return null
+    }
+
+    val trimmedTitle = title.trim()
+    val trimmedSummary = summary.trim()
+    return HistoryBranch(
+        id = id,
+        parentId = parentId?.takeIf { it > 0 },
+        title = trimmedTitle.takeIf { it.isNotEmpty() } ?: "Branch $id",
+        summary = trimmedSummary.takeIf { it.isNotEmpty() } ?: trimmedTitle.ifBlank { "Branch $id" },
+    )
+}
 
 private fun HistoryFact.toDto(): HistoryFactDto =
     HistoryFactDto(
@@ -112,6 +140,7 @@ private fun HistoryMessageDto.toDomain(): HistoryMessage? {
     return HistoryMessage(
         role = domainRole,
         content = content,
+        branchId = branchId,
         kind = kind.toHistoryMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toDomain(),
@@ -182,4 +211,5 @@ private const val LegacySingleChatId = 1
 internal data class ChatHistoryData(
     val messages: List<HistoryMessage> = emptyList(),
     val facts: List<HistoryFact> = emptyList(),
+    val branches: List<HistoryBranch> = emptyList(),
 )

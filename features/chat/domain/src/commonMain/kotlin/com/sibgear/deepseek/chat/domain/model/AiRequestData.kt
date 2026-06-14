@@ -27,6 +27,7 @@ enum class ContextManagementMode {
     ContextSummary,
     SlidingWindow,
     StickyFacts,
+    Branching,
 }
 
 fun AiRequestData.userApiContent(): String? {
