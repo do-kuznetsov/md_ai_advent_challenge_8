@@ -5,6 +5,7 @@ import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.storage.SqldelightChatHistoryStorage
 import java.io.File
 import java.nio.file.Files
@@ -34,6 +35,7 @@ class SqldelightChatHistoryRepositoryTest {
         val message = HistoryMessage(
             role = HistoryRole.Assistant,
             content = "stored",
+            branchId = 2,
             kind = HistoryMessageKind.CompressionSummary,
             apiContent = "stored api content",
             attachment = HistoryMessageAttachment(
@@ -85,6 +87,20 @@ class SqldelightChatHistoryRepositoryTest {
 
         assertEquals(replacement, messages)
         assertEquals(replacement, repository.getMessages())
+    }
+
+    @Test
+    fun storesAndRestoresBranchesFromSameDatabaseFile() = runTest {
+        val file = tempDatabaseFile()
+        val repository = SqldelightChatHistoryRepository(file, chatId = 1)
+        val branches = listOf(
+            HistoryBranch(id = 1, title = "техника", summary = "про технику"),
+            HistoryBranch(id = 2, parentId = 1, title = "автомобили", summary = "про автомобили"),
+        )
+
+        repository.replaceBranches(branches)
+
+        assertEquals(branches, SqldelightChatHistoryRepository(file, chatId = 1).getBranches())
     }
 
     @Test

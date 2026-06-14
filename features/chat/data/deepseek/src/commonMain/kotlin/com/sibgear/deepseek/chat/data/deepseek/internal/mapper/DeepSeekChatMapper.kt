@@ -12,8 +12,12 @@ import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
+import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.model.userApiContent
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
+import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
@@ -53,10 +57,12 @@ internal fun AiRequestData.toDeepSeekAssistantHistoryMessage(
     content: String,
     responseTimeMs: Long,
     usage: DeepSeekResponseUsage? = null,
+    branchId: Int? = null,
 ): HistoryMessage =
     HistoryMessage(
         role = HistoryRole.Assistant,
         content = content,
+        branchId = branchId,
         kind = HistoryMessageKind.Regular,
         sourceLabel = "DeepSeek / ${model.displayName}",
         footer = HistoryMessageFooter(
@@ -87,10 +93,11 @@ internal fun AiRequestData.toDeepSeekCompressionSummaryHistoryMessage(
         ),
     )
 
-internal fun AiRequestData.toDeepSeekUserHistoryMessage(): HistoryMessage =
+internal fun AiRequestData.toDeepSeekUserHistoryMessage(branchId: Int? = null): HistoryMessage =
     HistoryMessage(
         role = HistoryRole.User,
         content = prompt,
+        branchId = branchId,
         apiContent = userApiContent(),
         attachment = attachment?.let {
             HistoryMessageAttachment(
@@ -106,17 +113,55 @@ internal fun List<HistoryMessage>.toChatMessages(): List<ChatMessage> =
 internal fun List<HistoryMessage>.toContextMessages(): List<ContextMessage> =
     map { it.toContextMessage() }
 
+internal fun List<HistoryFact>.toStickyFacts(): List<StickyFact> =
+    map { fact ->
+        StickyFact(
+            key = fact.key,
+            value = fact.value,
+        )
+    }
+
+internal fun List<StickyFact>.toHistoryFacts(): List<HistoryFact> =
+    map { fact ->
+        HistoryFact(
+            key = fact.key,
+            value = fact.value,
+        )
+    }
+
+internal fun List<HistoryBranch>.toChatBranches(): List<ChatBranch> =
+    map { branch ->
+        ChatBranch(
+            id = branch.id,
+            parentId = branch.parentId,
+            title = branch.title,
+            summary = branch.summary,
+        )
+    }
+
+internal fun List<ChatBranch>.toHistoryBranches(): List<HistoryBranch> =
+    map { branch ->
+        HistoryBranch(
+            id = branch.id,
+            parentId = branch.parentId,
+            title = branch.title,
+            summary = branch.summary,
+        )
+    }
+
 private fun HistoryMessage.toContextMessage(): ContextMessage =
     ContextMessage(
         role = role.toChatRole(),
         kind = kind.toChatMessageKind(),
         content = apiContent ?: content,
+        branchId = branchId,
     )
 
 private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        branchId = branchId,
         kind = kind.toChatMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toChatMessageAttachment(),

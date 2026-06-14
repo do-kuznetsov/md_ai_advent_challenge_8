@@ -1,5 +1,6 @@
 package com.sibgear.deepseek.chat.history.data.external.repository
 
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import kotlinx.coroutines.test.runTest
@@ -43,5 +44,19 @@ class InMemoryChatHistoryRepositoryTest {
 
         assertEquals(replacement, messages)
         assertEquals(replacement, repository.getMessages())
+    }
+
+    @Test
+    fun storesAndClearsBranches() = runTest {
+        val repository = InMemoryChatHistoryRepository()
+        val branches = listOf(
+            HistoryBranch(id = 1, title = "main", summary = "main"),
+        )
+
+        repository.replaceBranches(branches)
+        assertEquals(branches, repository.getBranches())
+
+        repository.clear()
+        assertTrue(repository.getBranches().isEmpty())
     }
 }

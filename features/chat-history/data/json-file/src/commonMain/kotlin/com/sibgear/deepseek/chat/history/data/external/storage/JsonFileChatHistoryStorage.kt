@@ -1,9 +1,10 @@
 package com.sibgear.deepseek.chat.history.data.external.storage
 
 import com.sibgear.deepseek.chat.history.data.external.repository.FileChatHistoryRepository
-import com.sibgear.deepseek.chat.history.data.internal.mapper.toChatHistoriesFileDto
+import com.sibgear.deepseek.chat.history.data.internal.mapper.ChatHistoryData
+import com.sibgear.deepseek.chat.history.data.internal.mapper.toChatDataByChatId
+import com.sibgear.deepseek.chat.history.data.internal.mapper.toChatHistoriesDataFileDto
 import com.sibgear.deepseek.chat.history.data.internal.mapper.toHistoryMessages
-import com.sibgear.deepseek.chat.history.data.internal.mapper.toHistoryMessagesByChatId
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
@@ -21,7 +22,7 @@ class JsonFileChatHistoryStorage(
     }
 
     fun loadSavedChatIds(): List<Int> =
-        readMessagesByChatId().keys.sorted()
+        readChatDataByChatId().keys.sorted()
 
     fun createRepository(chatId: Int): FileChatHistoryRepository =
         FileChatHistoryRepository(
@@ -30,33 +31,35 @@ class JsonFileChatHistoryStorage(
         )
 
     fun deleteChat(chatId: Int) {
-        val messagesByChatId = readMessagesByChatId().toMutableMap()
-        messagesByChatId.remove(chatId)
-        writeMessagesByChatId(messagesByChatId)
+        val dataByChatId = readChatDataByChatId().toMutableMap()
+        dataByChatId.remove(chatId)
+        writeChatDataByChatId(dataByChatId)
     }
 
-    private fun readMessagesByChatId(): Map<Int, List<HistoryMessage>> =
+    private fun readChatDataByChatId(): Map<Int, ChatHistoryData> =
         if (!file.exists()) {
             emptyMap()
         } else {
             runCatching {
-                json.decodeFromString<ChatHistoryFileDto>(file.readText()).toHistoryMessagesByChatId()
+                json.decodeFromString<ChatHistoryFileDto>(file.readText()).toChatDataByChatId()
             }.recoverCatching {
                 mapOf(
-                    LegacySingleChatId to json.decodeFromString<LegacyChatHistoryFileDto>(file.readText())
-                        .toHistoryMessages(),
+                    LegacySingleChatId to ChatHistoryData(
+                        messages = json.decodeFromString<LegacyChatHistoryFileDto>(file.readText())
+                            .toHistoryMessages(),
+                    ),
                 )
             }.getOrDefault(emptyMap())
         }
 
-    private fun writeMessagesByChatId(messagesByChatId: Map<Int, List<HistoryMessage>>) {
+    private fun writeChatDataByChatId(dataByChatId: Map<Int, ChatHistoryData>) {
         val parent = file.parentFile
         if (parent != null && !parent.exists()) {
             parent.mkdirs()
         }
 
         val tempFile = File(parent ?: File("."), "${file.name}.tmp")
-        tempFile.writeText(json.encodeToString(messagesByChatId.toChatHistoriesFileDto()))
+        tempFile.writeText(json.encodeToString(dataByChatId.toChatHistoriesDataFileDto()))
         if (file.exists() && !file.delete()) {
             tempFile.delete()
             error("Cannot replace chat history file: ${file.absolutePath}")

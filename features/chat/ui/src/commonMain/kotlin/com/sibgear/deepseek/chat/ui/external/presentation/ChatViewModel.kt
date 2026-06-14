@@ -7,15 +7,18 @@ import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
-import com.sibgear.deepseek.chat.domain.model.ChatCompressionSettings
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ChatRole
-import com.sibgear.deepseek.chat.domain.model.DefaultCompressionIntervalMessages
+import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
+import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildContextUsageLabel
+import com.sibgear.deepseek.chat.ui.internal.mapper.buildPinnedContextMessageIndex
 import com.sibgear.deepseek.chat.ui.internal.mapper.selectOpenRouterModels
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
 import kotlinx.coroutines.CancellationException
@@ -26,10 +29,19 @@ class ChatViewModel(
     private val interactor: ChatInteractor,
     private val coroutineScope: CoroutineScope,
     initialMessages: List<ChatMessage> = emptyList(),
+    initialStickyFacts: List<StickyFact> = emptyList(),
+    initialBranches: List<ChatBranch> = emptyList(),
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
 
-    var state by mutableStateOf(ChatViewState(messages = initialMessages))
+    var state by mutableStateOf(
+        ChatViewState(
+            messages = initialMessages,
+            stickyFacts = initialStickyFacts,
+            branches = initialBranches,
+            activeBranchId = initialMessages.lastOrNull { it.branchId != null }?.branchId,
+        ),
+    )
         private set
 
     fun onEvent(event: ChatEvent) {
@@ -60,12 +72,27 @@ class ChatViewModel(
                 )
             }
 
-            is ChatEvent.CompressionEnabledChanged -> {
-                state = state.copy(isCompressionEnabled = event.isEnabled)
+            is ChatEvent.ContextManagementModeSelected -> {
+                state = state.copy(contextManagementMode = event.mode).withContextPresentation()
             }
 
-            is ChatEvent.CompressionIntervalChanged -> {
-                state = state.copy(compressionIntervalInput = event.interval.filter { it.isDigit() })
+            is ChatEvent.ContextManagementPanelExpandedChanged -> {
+                state = state.copy(isContextManagementPanelExpanded = event.isExpanded)
+            }
+
+            is ChatEvent.SummaryIntervalChanged -> {
+                state = state.copy(summaryIntervalInput = event.interval.filter { it.isDigit() })
+                    .withContextPresentation()
+            }
+
+            is ChatEvent.SlidingWindowMessagesChanged -> {
+                state = state.copy(slidingWindowMessagesInput = event.messages.filter { it.isDigit() })
+                    .withContextPresentation()
+            }
+
+            is ChatEvent.StickyFactsWindowMessagesChanged -> {
+                state = state.copy(stickyFactsWindowInput = event.messages.filter { it.isDigit() })
+                    .withContextPresentation()
             }
 
             is ChatEvent.CompressionSummaryToggled -> {
@@ -97,7 +124,7 @@ class ChatViewModel(
                 state = state.copy(
                     selectedModel = event.model,
                     isModelMenuExpanded = false,
-                ).withContextUsageLabel()
+                ).withContextPresentation()
             }
 
             is ChatEvent.PromptChanged -> {
@@ -141,7 +168,7 @@ class ChatViewModel(
                 selectedModel = state.selectedModel.takeIf { selectedModel ->
                     deepSeekModels.any { it.provider == selectedModel.provider && it.id == selectedModel.id }
                 } ?: deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel,
-            ).withContextUsageLabel()
+            ).withContextPresentation()
 
             try {
                 allOpenRouterModels = interactor.loadModels(AiProvider.OpenRouter)
@@ -155,7 +182,7 @@ class ChatViewModel(
                     selectedModel = state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id }
                         ?: ChatDefaults.DefaultModel,
                     openRouterModelsStatus = "OpenRouter: ${exception.message ?: "ошибка загрузки моделей"}",
-                ).withContextUsageLabel()
+                ).withContextPresentation()
             }
         }
     }
@@ -172,13 +199,19 @@ class ChatViewModel(
             attachment = state.attachment,
             model = state.selectedModel,
             apiSettings = state.apiSettings,
-            compressionSettings = ChatCompressionSettings(
-                isEnabled = state.isCompressionEnabled,
-                intervalMessages = state.compressionIntervalInput.toIntOrNull()
+            contextManagementSettings = ContextManagementSettings(
+                mode = state.contextManagementMode,
+                summaryIntervalMessages = state.summaryIntervalInput.toIntOrNull()
                     ?.coerceAtLeast(1)
-                    ?: DefaultCompressionIntervalMessages,
-            ),
-        )
+                    ?: DefaultContextManagementMessages,
+                    slidingWindowMessages = state.slidingWindowMessagesInput.toIntOrNull()
+                        ?.coerceAtLeast(1)
+                        ?: DefaultContextManagementMessages,
+                    stickyFactsWindowMessages = state.stickyFactsWindowInput.toIntOrNull()
+                        ?.coerceAtLeast(1)
+                        ?: DefaultContextManagementMessages,
+                ),
+            )
         val userMessage = ChatMessage(
             role = ChatRole.User,
             content = prompt,
@@ -198,14 +231,21 @@ class ChatViewModel(
                 attachment = null,
                 attachmentError = null,
                 messages = state.messages + userMessage,
-            ).withContextUsageLabel()
+            ).withContextPresentation()
 
             try {
                 val response = interactor.sendMessage(request)
                 state = state.copy(
                     isLoading = false,
                     messages = response.messages,
-                ).withContextUsageLabel()
+                    stickyFacts = response.stickyFacts,
+                    stickyFactsStatus = response.stickyFacts
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { "facts: ${it.size}" },
+                    branches = response.branches,
+                    activeBranchId = response.activeBranchId,
+                    branchingStatus = response.activeBranchId?.let { "branch: $it" },
+                ).withContextPresentation()
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -217,7 +257,7 @@ class ChatViewModel(
                 state = state.copy(
                     isLoading = false,
                     messages = state.messages + errorMessage,
-                ).withContextUsageLabel()
+                ).withContextPresentation()
             }
         }
     }
@@ -244,11 +284,18 @@ class ChatViewModel(
             openRouterModels = openRouterModels,
             selectedModel = selectedModel,
             openRouterModelsStatus = status,
-        ).withContextUsageLabel()
+        ).withContextPresentation()
     }
 
-    private fun ChatViewState.withContextUsageLabel(): ChatViewState =
-        copy(contextUsageLabel = buildContextUsageLabel(messages, selectedModel))
+    private fun ChatViewState.withContextPresentation(): ChatViewState =
+        copy(
+            contextUsageLabel = buildContextUsageLabel(messages, selectedModel),
+            pinnedContextMessageIndex = buildPinnedContextMessageIndex(
+                messages = messages,
+                mode = contextManagementMode,
+                slidingWindowMessagesInput = slidingWindowMessagesInput,
+            ),
+        )
 }
 
 private fun Set<Int>.toggle(value: Int): Set<Int> =

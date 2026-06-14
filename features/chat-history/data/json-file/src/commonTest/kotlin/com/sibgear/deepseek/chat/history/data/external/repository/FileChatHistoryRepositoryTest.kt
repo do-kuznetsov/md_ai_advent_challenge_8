@@ -5,6 +5,7 @@ import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
+import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.data.external.storage.JsonFileChatHistoryStorage
 import java.io.File
 import java.nio.file.Files
@@ -21,6 +22,7 @@ class FileChatHistoryRepositoryTest {
         val first = HistoryMessage(
             role = HistoryRole.User,
             content = "hello",
+            branchId = 1,
             apiContent = "hello\n\nAttached text file: notes.md (12 bytes)\n```text\nfile body\n```",
             attachment = HistoryMessageAttachment(
                 fileName = "notes.md",
@@ -78,6 +80,20 @@ class FileChatHistoryRepositoryTest {
 
         assertEquals(replacement, messages)
         assertEquals(replacement, FileChatHistoryRepository(file, chatId = 1).getMessages())
+    }
+
+    @Test
+    fun storesAndRestoresBranches() = runTest {
+        val file = tempHistoryFile()
+        val repository = FileChatHistoryRepository(file, chatId = 1)
+        val branches = listOf(
+            HistoryBranch(id = 1, title = "техника", summary = "про технику"),
+            HistoryBranch(id = 2, parentId = 1, title = "автомобили", summary = "про автомобили"),
+        )
+
+        repository.replaceBranches(branches)
+
+        assertEquals(branches, FileChatHistoryRepository(file, chatId = 1).getBranches())
     }
 
     @Test
