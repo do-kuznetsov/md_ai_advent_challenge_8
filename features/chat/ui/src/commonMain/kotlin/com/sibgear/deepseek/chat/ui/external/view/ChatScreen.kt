@@ -18,6 +18,7 @@ import com.sibgear.deepseek.chat.ui.internal.view.ApiSettingsPanel
 import com.sibgear.deepseek.chat.ui.internal.view.ChatArea
 import com.sibgear.deepseek.chat.ui.internal.view.PromptInputArea
 import com.sibgear.deepseek.chat.ui.internal.view.SendButtonArea
+import com.sibgear.deepseek.chat.ui.internal.view.StickyFactsPanel
 
 @Composable
 fun ChatScreen(
@@ -34,6 +35,8 @@ fun ChatScreen(
                 modifier = Modifier.weight(0.8f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                StickyFactsPanel(state = state)
+
                 ChatArea(
                     messages = state.messages,
                     pinnedContextMessageIndex = state.pinnedContextMessageIndex,

@@ -19,12 +19,14 @@ data class ContextManagementSettings(
     val mode: ContextManagementMode = ContextManagementMode.None,
     val summaryIntervalMessages: Int = DefaultContextManagementMessages,
     val slidingWindowMessages: Int = DefaultContextManagementMessages,
+    val stickyFactsWindowMessages: Int = DefaultContextManagementMessages,
 )
 
 enum class ContextManagementMode {
     None,
     ContextSummary,
     SlidingWindow,
+    StickyFacts,
 }
 
 fun AiRequestData.userApiContent(): String? {

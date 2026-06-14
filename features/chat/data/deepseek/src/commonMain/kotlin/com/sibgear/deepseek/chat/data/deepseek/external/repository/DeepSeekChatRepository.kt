@@ -6,13 +6,18 @@ import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekAssista
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekChatCompletionRequest
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekCompressionSummaryHistoryMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekUserHistoryMessage
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryFacts
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toStickyFacts
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.mergeStickyFacts
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiErrorResponse
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatCompletionResponse
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekResponseUsage
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
+import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
@@ -59,11 +64,14 @@ class DeepSeekChatRepository(
         val startedAt = TimeSource.Monotonic.markNow()
 
         return try {
+            val historyMessages = historyInteractor.getMessages()
+            val stickyFacts = historyInteractor.getFacts().toStickyFacts()
             val completion = sendCompletion(
                 request = request,
                 contextMessages = contextPlanner.plan(
-                    messages = historyInteractor.getMessages().toContextMessages(),
+                    messages = historyMessages.toContextMessages(),
                     contextManagementSettings = request.contextManagementSettings,
+                    stickyFacts = stickyFacts,
                 ).apiMessages,
                 includeSystemPrompt = true,
             )
@@ -74,6 +82,13 @@ class DeepSeekChatRepository(
                     usage = completion.usage,
                 )
             )
+            val updatedStickyFacts = if (!completion.isError &&
+                request.contextManagementSettings.mode == ContextManagementMode.StickyFacts
+            ) {
+                updateStickyFacts(request, messagesWithAssistant, stickyFacts)
+            } else {
+                stickyFacts
+            }
 
             AgentResponse(
                 messages = if (completion.isError) {
@@ -81,6 +96,7 @@ class DeepSeekChatRepository(
                 } else {
                     maybeCompressContext(request, messagesWithAssistant)
                 }.toChatMessages(),
+                stickyFacts = updatedStickyFacts,
             )
         } catch (exception: CancellationException) {
             throw exception
@@ -92,8 +108,42 @@ class DeepSeekChatRepository(
                         responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
                     ),
                 ).toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
             )
         }
+    }
+
+    private suspend fun updateStickyFacts(
+        request: AiRequestData,
+        currentMessages: List<HistoryMessage>,
+        currentFacts: List<StickyFact>,
+    ): List<StickyFact> {
+        val updateRequest = contextPlanner.plan(
+            messages = currentMessages.toContextMessages(),
+            contextManagementSettings = request.contextManagementSettings,
+            stickyFacts = currentFacts,
+        ).stickyFactsUpdateRequest ?: return currentFacts
+
+        val update = runCatching {
+            sendCompletion(
+                request = request,
+                contextMessages = updateRequest.messages,
+                includeSystemPrompt = false,
+                servicePrompt = updateRequest.prompt,
+            )
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return currentFacts
+        }
+        if (update.isError) {
+            return currentFacts
+        }
+
+        val updatedFacts = update.content.mergeStickyFacts(currentFacts, json) ?: return currentFacts
+        historyInteractor.replaceFacts(updatedFacts.toHistoryFacts())
+        return updatedFacts
     }
 
     private suspend fun maybeCompressContext(

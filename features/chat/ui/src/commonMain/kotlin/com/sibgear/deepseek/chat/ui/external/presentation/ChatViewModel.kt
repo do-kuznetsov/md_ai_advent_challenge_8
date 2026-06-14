@@ -12,6 +12,7 @@ import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
@@ -27,10 +28,16 @@ class ChatViewModel(
     private val interactor: ChatInteractor,
     private val coroutineScope: CoroutineScope,
     initialMessages: List<ChatMessage> = emptyList(),
+    initialStickyFacts: List<StickyFact> = emptyList(),
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
 
-    var state by mutableStateOf(ChatViewState(messages = initialMessages))
+    var state by mutableStateOf(
+        ChatViewState(
+            messages = initialMessages,
+            stickyFacts = initialStickyFacts,
+        ),
+    )
         private set
 
     fun onEvent(event: ChatEvent) {
@@ -76,6 +83,11 @@ class ChatViewModel(
 
             is ChatEvent.SlidingWindowMessagesChanged -> {
                 state = state.copy(slidingWindowMessagesInput = event.messages.filter { it.isDigit() })
+                    .withContextPresentation()
+            }
+
+            is ChatEvent.StickyFactsWindowMessagesChanged -> {
+                state = state.copy(stickyFactsWindowInput = event.messages.filter { it.isDigit() })
                     .withContextPresentation()
             }
 
@@ -188,11 +200,14 @@ class ChatViewModel(
                 summaryIntervalMessages = state.summaryIntervalInput.toIntOrNull()
                     ?.coerceAtLeast(1)
                     ?: DefaultContextManagementMessages,
-                slidingWindowMessages = state.slidingWindowMessagesInput.toIntOrNull()
-                    ?.coerceAtLeast(1)
-                    ?: DefaultContextManagementMessages,
-            ),
-        )
+                    slidingWindowMessages = state.slidingWindowMessagesInput.toIntOrNull()
+                        ?.coerceAtLeast(1)
+                        ?: DefaultContextManagementMessages,
+                    stickyFactsWindowMessages = state.stickyFactsWindowInput.toIntOrNull()
+                        ?.coerceAtLeast(1)
+                        ?: DefaultContextManagementMessages,
+                ),
+            )
         val userMessage = ChatMessage(
             role = ChatRole.User,
             content = prompt,
@@ -219,6 +234,10 @@ class ChatViewModel(
                 state = state.copy(
                     isLoading = false,
                     messages = response.messages,
+                    stickyFacts = response.stickyFacts,
+                    stickyFactsStatus = response.stickyFacts
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { "facts: ${it.size}" },
                 ).withContextPresentation()
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)

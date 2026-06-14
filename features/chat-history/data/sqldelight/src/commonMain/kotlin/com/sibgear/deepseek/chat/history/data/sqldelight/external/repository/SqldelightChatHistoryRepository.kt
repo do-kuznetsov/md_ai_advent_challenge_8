@@ -1,5 +1,6 @@
 package com.sibgear.deepseek.chat.history.data.sqldelight.external.repository
 
+import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
@@ -16,12 +17,14 @@ class SqldelightChatHistoryRepository(
     chatId: Int,
 ) : ChatHistoryRepository {
     private val tableName = chatId.toTableName()
+    private val factsTableName = chatId.toFactsTableName()
 
     init {
         databaseFile.parentFile?.mkdirs()
         withConnection { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(createTableSql(tableName))
+                statement.execute(createFactsTableSql(factsTableName))
             }
             connection.ensureAttachmentColumns(tableName)
         }
@@ -75,10 +78,55 @@ class SqldelightChatHistoryRepository(
         return getMessages()
     }
 
+    override suspend fun getFacts(): List<HistoryFact> =
+        withConnection { connection ->
+            connection.prepareStatement(selectAllFactsSql(factsTableName)).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(
+                                HistoryFact(
+                                    key = resultSet.getString("fact_key"),
+                                    value = resultSet.getString("fact_value"),
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+    override suspend fun replaceFacts(facts: List<HistoryFact>): List<HistoryFact> {
+        withConnection { connection ->
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(deleteAllSql(factsTableName))
+                }
+                connection.prepareStatement(insertFactSql(factsTableName)).use { statement ->
+                    facts.forEach { fact ->
+                        statement.setString(1, fact.key)
+                        statement.setString(2, fact.value)
+                        statement.addBatch()
+                    }
+                    statement.executeBatch()
+                }
+                connection.commit()
+            } catch (exception: Throwable) {
+                connection.rollback()
+                throw exception
+            } finally {
+                connection.autoCommit = true
+            }
+        }
+        return getFacts()
+    }
+
     override suspend fun clear() {
         withConnection { connection ->
             connection.createStatement().use { statement ->
                 statement.executeUpdate(deleteAllSql(tableName))
+                statement.executeUpdate(deleteAllSql(factsTableName))
             }
         }
     }
@@ -189,6 +237,11 @@ internal fun Int.toTableName(): String {
     return "history_message_tab_$this"
 }
 
+internal fun Int.toFactsTableName(): String {
+    require(this > 0) { "chatId must be positive" }
+    return "history_fact_tab_$this"
+}
+
 internal fun createTableSql(tableName: String): String =
     """
     CREATE TABLE IF NOT EXISTS $tableName (
@@ -206,6 +259,15 @@ internal fun createTableSql(tableName: String): String =
         total_tokens INTEGER,
         cost REAL,
         retry_count INTEGER
+    )
+    """.trimIndent()
+
+internal fun createFactsTableSql(tableName: String): String =
+    """
+    CREATE TABLE IF NOT EXISTS $tableName (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        fact_key TEXT NOT NULL,
+        fact_value TEXT NOT NULL
     )
     """.trimIndent()
 
@@ -231,6 +293,18 @@ internal fun insertSql(tableName: String): String =
 
 internal fun selectAllSql(tableName: String): String =
     "SELECT * FROM $tableName ORDER BY id ASC"
+
+internal fun selectAllFactsSql(tableName: String): String =
+    "SELECT * FROM $tableName ORDER BY id ASC"
+
+internal fun insertFactSql(tableName: String): String =
+    """
+    INSERT INTO $tableName(
+        fact_key,
+        fact_value
+    )
+    VALUES (?, ?)
+    """.trimIndent()
 
 internal fun deleteAllSql(tableName: String): String =
     "DELETE FROM $tableName"

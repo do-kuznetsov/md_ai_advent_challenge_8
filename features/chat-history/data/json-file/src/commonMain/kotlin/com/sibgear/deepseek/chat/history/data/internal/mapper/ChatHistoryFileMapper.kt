@@ -3,12 +3,14 @@ package com.sibgear.deepseek.chat.history.data.internal.mapper
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileVersion
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryDto
+import com.sibgear.deepseek.chat.history.data.internal.model.HistoryFactDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageAttachmentDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageFooterDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageKindDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryRoleDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
+import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
@@ -50,6 +52,28 @@ internal fun ChatHistoryFileDto.toHistoryMessagesByChatId(): Map<Int, List<Histo
         chat.chatId to chat.messages.mapNotNull { it.toDomain() }
     }
 
+internal fun ChatHistoryFileDto.toChatDataByChatId(): Map<Int, ChatHistoryData> =
+    chats.associate { chat ->
+        chat.chatId to ChatHistoryData(
+            messages = chat.messages.mapNotNull { it.toDomain() },
+            facts = chat.facts.mapNotNull { it.toDomain() },
+        )
+    }
+
+internal fun Map<Int, ChatHistoryData>.toChatHistoriesDataFileDto(): ChatHistoryFileDto =
+    ChatHistoryFileDto(
+        version = ChatHistoryFileVersion,
+        chats = entries
+            .sortedBy { it.key }
+            .map { (chatId, data) ->
+                ChatHistoryDto(
+                    chatId = chatId,
+                    messages = data.messages.map { it.toDto() },
+                    facts = data.facts.map { it.toDto() },
+                )
+            },
+    )
+
 internal fun LegacyChatHistoryFileDto.toHistoryMessages(): List<HistoryMessage> =
     messages.mapNotNull { it.toDomain() }
 
@@ -63,6 +87,25 @@ private fun HistoryMessage.toDto(): HistoryMessageDto =
         sourceLabel = sourceLabel,
         footer = footer?.toDto(),
     )
+
+private fun HistoryFact.toDto(): HistoryFactDto =
+    HistoryFactDto(
+        key = key,
+        value = value,
+    )
+
+private fun HistoryFactDto.toDomain(): HistoryFact? {
+    val trimmedKey = key.trim()
+    val trimmedValue = value.trim()
+    if (trimmedKey.isEmpty() || trimmedValue.isEmpty()) {
+        return null
+    }
+
+    return HistoryFact(
+        key = trimmedKey,
+        value = trimmedValue,
+    )
+}
 
 private fun HistoryMessageDto.toDomain(): HistoryMessage? {
     val domainRole = role.toHistoryRole() ?: return null
@@ -135,3 +178,8 @@ private fun HistoryMessageFooterDto.toDomain(): HistoryMessageFooter =
     )
 
 private const val LegacySingleChatId = 1
+
+internal data class ChatHistoryData(
+    val messages: List<HistoryMessage> = emptyList(),
+    val facts: List<HistoryFact> = emptyList(),
+)

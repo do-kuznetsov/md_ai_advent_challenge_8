@@ -2,10 +2,13 @@ package com.sibgear.deepseek.chat.data.openrouter.external.repository
 
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMessages
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toContextMessages
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.mergeStickyFacts
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterAssistantHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterChatCompletionRequest
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterCompressionSummaryHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterUserHistoryMessage
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toHistoryFacts
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toStickyFacts
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiErrorResponse
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterCompletionResult
 import com.sibgear.deepseek.chat.data.openrouter.internal.repository.OpenRouterMaxRetries
@@ -18,7 +21,9 @@ import com.sibgear.deepseek.chat.data.openrouter.internal.repository.isTimeoutEr
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
+import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
@@ -71,11 +76,14 @@ class OpenRouterChatRepository(
         var retryCount = 0
 
         return try {
+            val historyMessages = historyInteractor.getMessages()
+            val stickyFacts = historyInteractor.getFacts().toStickyFacts()
             val completion = sendCompletionWithRetry(
                 request = request,
                 contextMessages = contextPlanner.plan(
-                    messages = historyInteractor.getMessages().toContextMessages(),
+                    messages = historyMessages.toContextMessages(),
                     contextManagementSettings = request.contextManagementSettings,
+                    stickyFacts = stickyFacts,
                 ).apiMessages,
                 includeSystemPrompt = true,
                 servicePrompt = null,
@@ -88,12 +96,20 @@ class OpenRouterChatRepository(
                     retryCount = retryCount,
                 ),
             )
+            val updatedStickyFacts = if (!completion.isError &&
+                request.contextManagementSettings.mode == ContextManagementMode.StickyFacts
+            ) {
+                updateStickyFacts(request, messagesWithAssistant, stickyFacts)
+            } else {
+                stickyFacts
+            }
             AgentResponse(
                 messages = if (completion.isError) {
                     messagesWithAssistant
                 } else {
                     maybeCompressContext(request, messagesWithAssistant)
                 }.toChatMessages(),
+                stickyFacts = updatedStickyFacts,
             )
         } catch (exception: CancellationException) {
             throw exception
@@ -106,8 +122,43 @@ class OpenRouterChatRepository(
                         retryCount = retryCount,
                     ),
                 ).toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
             )
         }
+    }
+
+    private suspend fun updateStickyFacts(
+        request: AiRequestData,
+        currentMessages: List<HistoryMessage>,
+        currentFacts: List<StickyFact>,
+    ): List<StickyFact> {
+        val updateRequest = contextPlanner.plan(
+            messages = currentMessages.toContextMessages(),
+            contextManagementSettings = request.contextManagementSettings,
+            stickyFacts = currentFacts,
+        ).stickyFactsUpdateRequest ?: return currentFacts
+
+        val update = runCatching {
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = updateRequest.messages,
+                includeSystemPrompt = false,
+                servicePrompt = updateRequest.prompt,
+                onRetryCountChanged = {},
+            )
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return currentFacts
+        }
+        if (update.isError) {
+            return currentFacts
+        }
+
+        val updatedFacts = update.content.mergeStickyFacts(currentFacts, json) ?: return currentFacts
+        historyInteractor.replaceFacts(updatedFacts.toHistoryFacts())
+        return updatedFacts
     }
 
     private suspend fun sendCompletionWithRetry(

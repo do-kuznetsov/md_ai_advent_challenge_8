@@ -6,6 +6,7 @@ import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
+import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildContextUsageLabel
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildPinnedContextMessageIndex
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
@@ -28,6 +29,9 @@ data class ChatViewState(
     val isContextManagementPanelExpanded: Boolean = false,
     val summaryIntervalInput: String = DefaultContextManagementMessages.toString(),
     val slidingWindowMessagesInput: String = DefaultContextManagementMessages.toString(),
+    val stickyFactsWindowInput: String = DefaultContextManagementMessages.toString(),
+    val stickyFacts: List<StickyFact> = emptyList(),
+    val stickyFactsStatus: String? = null,
     val pinnedContextMessageIndex: Int? = buildPinnedContextMessageIndex(
         messages = messages,
         mode = contextManagementMode,

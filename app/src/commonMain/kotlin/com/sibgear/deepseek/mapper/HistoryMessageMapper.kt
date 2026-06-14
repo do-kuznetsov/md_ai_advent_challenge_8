@@ -5,6 +5,8 @@ import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
@@ -16,6 +18,22 @@ internal fun List<HistoryMessage>.toChatMessages(): List<ChatMessage> =
 
 internal fun List<ChatMessage>.toHistoryMessages(): List<HistoryMessage> =
     map { it.toHistoryMessage() }
+
+internal fun List<HistoryFact>.toStickyFacts(): List<StickyFact> =
+    map { fact ->
+        StickyFact(
+            key = fact.key,
+            value = fact.value,
+        )
+    }
+
+internal fun List<StickyFact>.toHistoryFacts(): List<HistoryFact> =
+    map { fact ->
+        HistoryFact(
+            key = fact.key,
+            value = fact.value,
+        )
+    }
 
 private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(

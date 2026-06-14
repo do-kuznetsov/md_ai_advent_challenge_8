@@ -24,7 +24,9 @@ import com.sibgear.deepseek.chat.workspace.ui.external.presentation.AiChatAppVie
 import com.sibgear.deepseek.chat.workspace.ui.external.view.AiChatAppScreen
 import com.sibgear.deepseek.config.BuildConfig
 import com.sibgear.deepseek.mapper.toChatMessages
+import com.sibgear.deepseek.mapper.toHistoryFacts
 import com.sibgear.deepseek.mapper.toHistoryMessages
+import com.sibgear.deepseek.mapper.toStickyFacts
 import com.sibgear.deepseek.persistence.WorkspaceStorage
 import com.sibgear.deepseek.persistence.WorkspaceTabSnapshot
 import kotlinx.coroutines.Dispatchers
@@ -63,12 +65,16 @@ fun App() {
             initialMessages: List<HistoryMessage>? = null,
         ): ChatViewModel {
             val historyStorage = workspaceStorage.createHistoryStorage(storageType)
+            val historyRepository = historyStorage.createRepository(tabNumber)
             val historyInteractor = ChatHistoryInteractor(
-                repository = historyStorage.createRepository(tabNumber),
+                repository = historyRepository,
                 dispatcher = Dispatchers.Default,
             )
             val restoredMessages = initialMessages ?: runBlocking {
                 historyInteractor.getMessages()
+            }
+            val restoredFacts = runBlocking {
+                historyInteractor.getFacts()
             }
             val repository = RoutingAiRepository(
                 chatRepositories = mapOf(
@@ -97,6 +103,7 @@ fun App() {
                 interactor = interactor,
                 coroutineScope = scope,
                 initialMessages = restoredMessages.toChatMessages(),
+                initialStickyFacts = restoredFacts.toStickyFacts(),
             )
         }
 
@@ -133,8 +140,9 @@ fun App() {
                 val targetStorage = workspaceStorage.createHistoryStorage(storageType)
                 currentTabs.forEach { tab ->
                     runBlocking {
-                        targetStorage.createRepository(tab.number)
-                            .replace(tab.viewModel.state.messages.toHistoryMessages())
+                        val targetRepository = targetStorage.createRepository(tab.number)
+                        targetRepository.replace(tab.viewModel.state.messages.toHistoryMessages())
+                        targetRepository.replaceFacts(tab.viewModel.state.stickyFacts.toHistoryFacts())
                     }
                 }
 

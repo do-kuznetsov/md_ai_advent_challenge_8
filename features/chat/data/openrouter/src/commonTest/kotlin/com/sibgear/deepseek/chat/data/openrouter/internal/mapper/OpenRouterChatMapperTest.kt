@@ -8,6 +8,7 @@ import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
+import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
@@ -76,5 +77,31 @@ class OpenRouterChatMapperTest {
         val apiRequest = request.toOpenRouterChatCompletionRequest(plannedContext)
 
         assertEquals(listOf("kept"), apiRequest.messages.map { it.content })
+    }
+
+    @Test
+    fun requestBodyKeepsSystemPromptSeparateFromStickyFactsMessage() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "openrouter/free", provider = AiProvider.OpenRouter),
+            apiSettings = ApiSettings(),
+            contextManagementSettings = ContextManagementSettings(
+                mode = ContextManagementMode.StickyFacts,
+                stickyFactsWindowMessages = 1,
+            ),
+        )
+        val plannedContext = ChatContextPlanner().plan(
+            messages = listOf(HistoryMessage(role = HistoryRole.User, content = "visible prompt")).toContextMessages(),
+            contextManagementSettings = request.contextManagementSettings,
+            stickyFacts = listOf(StickyFact(key = "goal", value = "test")),
+        ).apiMessages
+
+        val apiRequest = request.toOpenRouterChatCompletionRequest(plannedContext)
+
+        assertEquals(listOf("system", "user", "user"), apiRequest.messages.map { it.role })
+        assertEquals("system", apiRequest.messages[0].content)
+        assertEquals("Sticky facts:\n- goal: test", apiRequest.messages[1].content)
+        assertEquals("visible prompt", apiRequest.messages[2].content)
     }
 }

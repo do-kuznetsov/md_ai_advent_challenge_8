@@ -6,6 +6,8 @@ import com.sibgear.deepseek.chat.domain.model.CompressionSummaryPrompt
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
+import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.domain.model.StickyFactsUpdatePrompt
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -142,6 +144,102 @@ class ChatContextPlannerTest {
             contextManagementSettings = ContextManagementSettings(
                 mode = ContextManagementMode.SlidingWindow,
                 slidingWindowMessages = 0,
+            ),
+        )
+
+        assertEquals(listOf("second"), plan.apiMessages.map { it.content })
+    }
+
+    @Test
+    fun stickyFactsReturnsFactsMessageFirstAndLastRegularMessages() {
+        val plan = planner.plan(
+            messages = listOf(
+                message("old"),
+                message("summary", kind = ChatMessageKind.CompressionSummary),
+                message("kept", role = ChatRole.Assistant),
+            ),
+            contextManagementSettings = ContextManagementSettings(
+                mode = ContextManagementMode.StickyFacts,
+                stickyFactsWindowMessages = 1,
+            ),
+            stickyFacts = listOf(StickyFact(key = "goal", value = "test")),
+        )
+
+        assertEquals(
+            listOf(
+                "Sticky facts:\n- goal: test",
+                "kept",
+            ),
+            plan.apiMessages.map { it.content },
+        )
+        assertEquals(ChatRole.User, plan.apiMessages.first().role)
+    }
+
+    @Test
+    fun stickyFactsUpdateRequestUsesFactsAndLastUserAssistantPair() {
+        val plan = planner.plan(
+            messages = listOf(
+                message("first user"),
+                message("assistant", role = ChatRole.Assistant),
+                message("last user"),
+                message("last assistant", role = ChatRole.Assistant),
+            ),
+            contextManagementSettings = ContextManagementSettings(mode = ContextManagementMode.StickyFacts),
+            stickyFacts = listOf(StickyFact(key = "goal", value = "test")),
+        )
+
+        val updateRequest = assertNotNull(plan.stickyFactsUpdateRequest)
+        assertEquals(
+            listOf(
+                "Sticky facts:\n- goal: test",
+                "last user",
+                "last assistant",
+            ),
+            updateRequest.messages.map { it.content },
+        )
+        assertEquals(StickyFactsUpdatePrompt, updateRequest.prompt)
+    }
+
+    @Test
+    fun stickyFactsUpdateRequestIsNotCreatedBeforeAssistantResponse() {
+        val plan = planner.plan(
+            messages = listOf(
+                message("first user"),
+                message("assistant", role = ChatRole.Assistant),
+                message("last user"),
+            ),
+            contextManagementSettings = ContextManagementSettings(mode = ContextManagementMode.StickyFacts),
+            stickyFacts = listOf(StickyFact(key = "goal", value = "test")),
+        )
+
+        assertNull(plan.stickyFactsUpdateRequest)
+    }
+
+    @Test
+    fun stickyFactsUpdateRequestIgnoresCompressionSummary() {
+        val plan = planner.plan(
+            messages = listOf(
+                message("first user"),
+                message("summary", kind = ChatMessageKind.CompressionSummary),
+                message("assistant", role = ChatRole.Assistant),
+            ),
+            contextManagementSettings = ContextManagementSettings(mode = ContextManagementMode.StickyFacts),
+        )
+
+        val updateRequest = assertNotNull(plan.stickyFactsUpdateRequest)
+        assertEquals(listOf("first user", "assistant"), updateRequest.messages.map { it.content })
+    }
+
+    @Test
+    fun invalidStickyFactsWindowSizeIsCoercedToOne() {
+        val plan = planner.plan(
+            messages = listOf(
+                message("first"),
+                message("second"),
+            ),
+            contextManagementSettings = ContextManagementSettings(
+                mode = ContextManagementMode.StickyFacts,
+                stickyFactsWindowMessages = 0,
             ),
         )
 

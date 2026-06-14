@@ -33,3 +33,8 @@ data class HistoryMessageAttachment(
     val fileName: String,
     val sizeBytes: Long,
 )
+
+data class HistoryFact(
+    val key: String,
+    val value: String,
+)

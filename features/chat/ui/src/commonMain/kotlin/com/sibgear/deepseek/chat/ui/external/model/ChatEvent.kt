@@ -14,6 +14,7 @@ sealed interface ChatEvent {
     data class ContextManagementModeSelected(val mode: ContextManagementMode) : ChatEvent
     data class SummaryIntervalChanged(val interval: String) : ChatEvent
     data class SlidingWindowMessagesChanged(val messages: String) : ChatEvent
+    data class StickyFactsWindowMessagesChanged(val messages: String) : ChatEvent
     data class CompressionSummaryToggled(val messageIndex: Int) : ChatEvent
     data class ModelFilterChanged(val filter: String) : ChatEvent
     data class ModelSelected(val model: AiModel) : ChatEvent

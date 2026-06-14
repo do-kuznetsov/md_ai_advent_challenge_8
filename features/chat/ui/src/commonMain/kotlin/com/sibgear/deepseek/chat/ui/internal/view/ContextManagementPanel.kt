@@ -121,6 +121,28 @@ internal fun ContextManagementPanel(
                         Text("сообщений")
                     }
                 }
+
+                ModeRow(
+                    mode = ContextManagementMode.StickyFacts,
+                    selectedMode = state.contextManagementMode,
+                    onSelected = { onEvent(ChatEvent.ContextManagementModeSelected(it)) },
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("facts + последние")
+                        ShortcutOutlinedTextField(
+                            value = state.stickyFactsWindowInput,
+                            onValueChange = { onEvent(ChatEvent.StickyFactsWindowMessagesChanged(it)) },
+                            modifier = Modifier.width(56.dp),
+                            singleLine = true,
+                            enabled = state.contextManagementMode == ContextManagementMode.StickyFacts,
+                        )
+                        Text("сообщений")
+                    }
+                }
+
             }
         }
     }
@@ -157,6 +179,7 @@ private fun ContextManagementMode.displayTitle(): String =
         ContextManagementMode.None -> "Без управления"
         ContextManagementMode.ContextSummary -> "Context Summary"
         ContextManagementMode.SlidingWindow -> "Sliding Window"
+        ContextManagementMode.StickyFacts -> "Sticky Facts"
     }
 
 private fun ChatViewState.contextManagementArrow(): String =

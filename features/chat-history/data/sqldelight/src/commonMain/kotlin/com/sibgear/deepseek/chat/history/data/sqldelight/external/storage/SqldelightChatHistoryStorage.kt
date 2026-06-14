@@ -1,6 +1,7 @@
 package com.sibgear.deepseek.chat.history.data.sqldelight.external.storage
 
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.repository.SqldelightChatHistoryRepository
+import com.sibgear.deepseek.chat.history.data.sqldelight.external.repository.toFactsTableName
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.repository.toTableName
 import java.io.File
 import java.sql.DriverManager
@@ -42,6 +43,7 @@ class SqldelightChatHistoryStorage(
         DriverManager.getConnection("jdbc:sqlite:${databaseFile.absolutePath}").use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeUpdate("DROP TABLE IF EXISTS ${chatId.toTableName()}")
+                statement.executeUpdate("DROP TABLE IF EXISTS ${chatId.toFactsTableName()}")
             }
         }
     }

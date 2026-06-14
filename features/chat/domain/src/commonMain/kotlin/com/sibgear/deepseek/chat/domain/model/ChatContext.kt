@@ -9,9 +9,20 @@ data class ContextMessage(
 data class ContextPlan(
     val apiMessages: List<ContextMessage>,
     val compressionRequest: CompressionRequest? = null,
+    val stickyFactsUpdateRequest: StickyFactsUpdateRequest? = null,
 )
 
 data class CompressionRequest(
+    val messages: List<ContextMessage>,
+    val prompt: String,
+)
+
+data class StickyFact(
+    val key: String,
+    val value: String,
+)
+
+data class StickyFactsUpdateRequest(
     val messages: List<ContextMessage>,
     val prompt: String,
 )
@@ -30,4 +41,13 @@ const val CompressionSummaryPrompt = """
 Не добавляй ничего от себя.
 
 Ответ дай кратко, списком.
+"""
+
+const val StickyFactsUpdatePrompt = """
+Обнови sticky facts для продолжения диалога.
+
+На входе есть текущие факты и последнее сообщение пользователя.
+Верни только JSON object, без markdown и пояснений.
+Ключи и значения должны быть короткими строками.
+Если факт нужно удалить, верни для ключа null.
 """

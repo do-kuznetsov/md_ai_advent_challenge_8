@@ -21,6 +21,13 @@ internal data class LegacyChatHistoryFileDto(
 internal data class ChatHistoryDto(
     val chatId: Int,
     val messages: List<HistoryMessageDto> = emptyList(),
+    val facts: List<HistoryFactDto> = emptyList(),
+)
+
+@Serializable
+internal data class HistoryFactDto(
+    val key: String,
+    val value: String,
 )
 
 @Serializable
