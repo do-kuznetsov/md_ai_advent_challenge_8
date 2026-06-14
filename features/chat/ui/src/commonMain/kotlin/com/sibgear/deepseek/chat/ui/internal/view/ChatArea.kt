@@ -82,13 +82,10 @@ internal fun ChatArea(
                     }
                 } else if (index == pinnedContextMessageIndex) {
                     stickyHeader(key = "pinned-$index") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                        ) {
-                            ChatBubble(message = message)
-                        }
+                        SlidingWindowBoundaryHeader()
+                    }
+                    item(key = "message-$index") {
+                        ChatBubble(message = message)
                     }
                 } else {
                     item(key = "message-$index") {
@@ -102,6 +99,24 @@ internal fun ChatArea(
             adapter = rememberScrollbarAdapter(listState),
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(8.dp),
         )
+    }
+}
+
+@Composable
+private fun SlidingWindowBoundaryHeader() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "контекст начинается здесь",
+            color = Color(0xFF5F6368),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        HorizontalDivider(color = Color(0xFF9AA0A6))
     }
 }
 

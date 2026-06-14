@@ -14,12 +14,8 @@ internal fun buildPinnedContextMessageIndex(
         return null
     }
 
-    val windowSize = slidingWindowMessagesInput.toIntOrNull()
-        ?.coerceAtLeast(1)
-        ?: DefaultContextManagementMessages
-    val regularMessageIndexes = messages.withIndex()
-        .filter { (_, message) -> message.kind == ChatMessageKind.Regular }
-        .map { it.index }
+    val windowSize = slidingWindowMessagesInput.slidingWindowSize()
+    val regularMessageIndexes = messages.regularMessageIndexes()
 
     if (regularMessageIndexes.size <= windowSize) {
         return null
@@ -27,3 +23,13 @@ internal fun buildPinnedContextMessageIndex(
 
     return regularMessageIndexes.takeLast(windowSize).firstOrNull()
 }
+
+private fun String.slidingWindowSize(): Int =
+    toIntOrNull()
+        ?.coerceAtLeast(1)
+        ?: DefaultContextManagementMessages
+
+private fun List<ChatMessage>.regularMessageIndexes(): List<Int> =
+    withIndex()
+        .filter { (_, message) -> message.kind == ChatMessageKind.Regular }
+        .map { it.index }
