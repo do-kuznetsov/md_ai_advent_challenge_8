@@ -6,6 +6,10 @@ import com.sibgear.deepseek.chat.domain.model.BranchSelection
 import com.sibgear.deepseek.chat.domain.model.BranchSummaryUpdatePrompt
 import com.sibgear.deepseek.chat.domain.model.BranchSummaryUpdateRequest
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryCandidate
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryItem
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
@@ -14,6 +18,10 @@ import com.sibgear.deepseek.chat.domain.model.CompressionRequest
 import com.sibgear.deepseek.chat.domain.model.CompressionSummaryPrompt
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.ContextPlan
+import com.sibgear.deepseek.chat.domain.model.MemoryClassificationRequest
+import com.sibgear.deepseek.chat.domain.model.MemoryInjection
+import com.sibgear.deepseek.chat.domain.model.MemoryMutationRequest
+import com.sibgear.deepseek.chat.domain.model.MemoryRetrievalRequest
 import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.model.StickyFactsUpdatePrompt
 import com.sibgear.deepseek.chat.domain.model.StickyFactsUpdateRequest
@@ -100,6 +108,147 @@ class ChatContextPlanner {
                 appendLine("Если тема новая верхнего уровня, parentBranchId должен быть null.")
             },
         )
+
+    fun memoryClassificationRequest(userPrompt: String): MemoryClassificationRequest =
+        MemoryClassificationRequest(
+            prompt = buildString {
+                appendLine("You are a memory classification engine.")
+                appendLine()
+                appendLine("Analyze the user message and determine whether factual information should be stored.")
+                appendLine()
+                appendLine("Memory layers:")
+                appendLine("- working_memory: current task, project, technologies, constraints, objectives.")
+                appendLine("- long_term_memory: stable user preferences, profile, long-lasting reusable facts.")
+                appendLine()
+                appendLine("Rules:")
+                appendLine("- Extract only factual information.")
+                appendLine("- Do not store requests, questions, or assistant responses.")
+                appendLine("- Ignore trivial statements.")
+                appendLine("- Return JSON only, without markdown.")
+                appendLine()
+                appendLine("Schema:")
+                appendLine("""{"store":true,"memory_items":[{"layer":"working_memory","fact":"...","importance":0.7}]}""")
+                appendLine()
+                appendLine("User message:")
+                append(userPrompt)
+            },
+        )
+
+    fun memoryMutationRequest(
+        currentMemory: List<ChatMemoryItem>,
+        candidates: List<ChatMemoryCandidate>,
+    ): MemoryMutationRequest =
+        MemoryMutationRequest(
+            prompt = buildString {
+                appendLine("You are a memory update engine.")
+                appendLine()
+                appendLine("Update the stored memory using new candidate facts.")
+                appendLine()
+                appendLine("Rules:")
+                appendLine("- Use add for new facts, update for corrected facts, delete for obsolete facts.")
+                appendLine("- Preserve stable existing facts unless contradicted.")
+                appendLine("- Do not create duplicates.")
+                appendLine("- Never write short_term memory.")
+                appendLine("- Return JSON only, without markdown.")
+                appendLine()
+                appendLine("Current memory:")
+                appendMemoryItems(currentMemory)
+                appendLine()
+                appendLine("Candidate facts:")
+                if (candidates.isEmpty()) {
+                    appendLine("- none")
+                } else {
+                    candidates.forEach { candidate ->
+                        appendLine("- layer=${candidate.layer.storageValue}; importance=${candidate.importance.coerceIn(0.0, 1.0)}; fact=${candidate.fact}")
+                    }
+                }
+                appendLine()
+                appendLine("Schema:")
+                appendLine("""{"updates":[{"action":"add","layer":"working_memory","fact":"...","importance":0.7},{"action":"update","id":"memory-1","layer":"long_term_memory","fact":"...","importance":0.9},{"action":"delete","id":"memory-2"}]}""")
+            },
+        )
+
+    fun memoryRetrievalRequest(
+        userPrompt: String,
+        availableMemory: List<ChatMemoryItem>,
+    ): MemoryRetrievalRequest =
+        MemoryRetrievalRequest(
+            prompt = buildString {
+                appendLine("You are a memory retrieval planner.")
+                appendLine()
+                appendLine("Your task is NOT to answer the user.")
+                appendLine("Decide which memory should be provided to the main assistant.")
+                appendLine()
+                appendLine("Rules:")
+                appendLine("- Select only memories relevant to the current user request.")
+                appendLine("- Avoid irrelevant memories and minimize context size.")
+                appendLine("- need_short_term means the recent conversation context is useful.")
+                appendLine("- Return JSON only, without markdown.")
+                appendLine()
+                appendLine("Current user request:")
+                appendLine(userPrompt)
+                appendLine()
+                appendLine("Available memory:")
+                appendMemoryItems(availableMemory)
+                appendLine()
+                appendLine("Schema:")
+                appendLine("""{"need_short_term":true,"need_working_memory":true,"need_long_term_memory":false,"memory_ids":["memory-1"],"reason":"..."}""")
+            },
+        )
+
+    fun memoryInjection(
+        originalSystemPrompt: String,
+        retrievalPlan: ChatMemoryRetrievalPlan,
+        availableMemory: List<ChatMemoryItem>,
+    ): MemoryInjection {
+        val selectedItems = availableMemory.filter { item ->
+            val layerSelected = when (item.layer) {
+                ChatMemoryLayer.ShortTerm -> false
+                ChatMemoryLayer.WorkingMemory -> retrievalPlan.needWorkingMemory
+                ChatMemoryLayer.LongTermMemory -> retrievalPlan.needLongTermMemory
+            }
+            val idSelected = retrievalPlan.memoryItemIds.isEmpty() || item.id in retrievalPlan.memoryItemIds
+            layerSelected && idSelected
+        }
+        val usedLayers = buildList {
+            if (retrievalPlan.needShortTerm) {
+                add(ChatMemoryLayer.ShortTerm)
+            }
+            if (selectedItems.any { it.layer == ChatMemoryLayer.WorkingMemory }) {
+                add(ChatMemoryLayer.WorkingMemory)
+            }
+            if (selectedItems.any { it.layer == ChatMemoryLayer.LongTermMemory }) {
+                add(ChatMemoryLayer.LongTermMemory)
+            }
+        }
+
+        val effectiveSystemPrompt = if (selectedItems.isEmpty()) {
+            originalSystemPrompt
+        } else {
+            buildString {
+                append(originalSystemPrompt.trim())
+                if (isNotEmpty()) {
+                    appendLine()
+                    appendLine()
+                }
+                appendLine("[MEMORY_CONTEXT]")
+                selectedItems
+                    .groupBy { it.layer }
+                    .forEach { (layer, items) ->
+                        appendLine(layer.displayTitle)
+                        items.sortedByDescending { it.importance }.forEach { item ->
+                            appendLine("- [${item.id}] ${item.fact}")
+                        }
+                    }
+            }.trimEnd()
+        }
+
+        return MemoryInjection(
+            effectiveSystemPrompt = effectiveSystemPrompt,
+            usedLayers = usedLayers.distinct(),
+            injectedItems = selectedItems,
+        )
+    }
 
     fun selectBranch(
         branches: List<ChatBranch>,
@@ -274,4 +423,30 @@ class ChatContextPlanner {
         val branch: ChatBranch,
         val depth: Int,
     )
+
+    private fun StringBuilder.appendMemoryItems(items: List<ChatMemoryItem>) {
+        if (items.isEmpty()) {
+            appendLine("- none")
+            return
+        }
+
+        items.sortedWith(compareBy<ChatMemoryItem> { it.layer.ordinal }.thenBy { it.id })
+            .forEach { item ->
+                appendLine("- id=${item.id}; layer=${item.layer.storageValue}; importance=${item.importance.coerceIn(0.0, 1.0)}; fact=${item.fact}")
+            }
+    }
 }
+
+private val ChatMemoryLayer.storageValue: String
+    get() = when (this) {
+        ChatMemoryLayer.ShortTerm -> "short_term"
+        ChatMemoryLayer.WorkingMemory -> "working_memory"
+        ChatMemoryLayer.LongTermMemory -> "long_term_memory"
+    }
+
+private val ChatMemoryLayer.displayTitle: String
+    get() = when (this) {
+        ChatMemoryLayer.ShortTerm -> "Short-term memory:"
+        ChatMemoryLayer.WorkingMemory -> "Working memory:"
+        ChatMemoryLayer.LongTermMemory -> "Long-term memory:"
+    }

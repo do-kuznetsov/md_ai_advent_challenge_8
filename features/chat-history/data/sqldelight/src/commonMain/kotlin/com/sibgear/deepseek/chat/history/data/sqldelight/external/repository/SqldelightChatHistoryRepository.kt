@@ -2,16 +2,24 @@ package com.sibgear.deepseek.chat.history.data.sqldelight.external.repository
 
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChangeAction
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryItem
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryLayer
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import com.sibgear.deepseek.chat.history.domain.repository.ChatHistoryRepository
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class SqldelightChatHistoryRepository(
     private val databaseFile: File,
@@ -20,6 +28,10 @@ class SqldelightChatHistoryRepository(
     private val tableName = chatId.toTableName()
     private val factsTableName = chatId.toFactsTableName()
     private val branchesTableName = chatId.toBranchesTableName()
+    private val json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
 
     init {
         databaseFile.parentFile?.mkdirs()
@@ -199,21 +211,22 @@ class SqldelightChatHistoryRepository(
             setObject(6, null)
             setObject(7, null)
         }
-        setString(8, message.sourceLabel)
+        setString(8, message.memory?.toJson(json))
+        setString(9, message.sourceLabel)
         message.footer?.let { footer ->
-            setLong(9, footer.responseTimeMs)
-            footer.promptTokens?.let { setLong(10, it.toLong()) } ?: setObject(10, null)
-            footer.completionTokens?.let { setLong(11, it.toLong()) } ?: setObject(11, null)
-            footer.totalTokens?.let { setLong(12, it.toLong()) } ?: setObject(12, null)
-            footer.cost?.let { setDouble(13, it) } ?: setObject(13, null)
-            setLong(14, footer.retryCount.toLong())
+            setLong(10, footer.responseTimeMs)
+            footer.promptTokens?.let { setLong(11, it.toLong()) } ?: setObject(11, null)
+            footer.completionTokens?.let { setLong(12, it.toLong()) } ?: setObject(12, null)
+            footer.totalTokens?.let { setLong(13, it.toLong()) } ?: setObject(13, null)
+            footer.cost?.let { setDouble(14, it) } ?: setObject(14, null)
+            setLong(15, footer.retryCount.toLong())
         } ?: run {
-            setObject(9, null)
             setObject(10, null)
             setObject(11, null)
             setObject(12, null)
             setObject(13, null)
             setObject(14, null)
+            setObject(15, null)
         }
     }
 
@@ -230,6 +243,7 @@ class SqldelightChatHistoryRepository(
                     sizeBytes = getNullableLong("attachment_size_bytes") ?: 0L,
                 )
             },
+            memory = getString("memory_json")?.toHistoryMemoryMetadata(json),
             sourceLabel = getString("source_label"),
             footer = getNullableLong("response_time_ms")?.let { responseTimeMs ->
                 HistoryMessageFooter(
@@ -312,6 +326,7 @@ internal fun createTableSql(tableName: String): String =
         api_content TEXT,
         attachment_file_name TEXT,
         attachment_size_bytes INTEGER,
+        memory_json TEXT,
         source_label TEXT,
         response_time_ms INTEGER,
         prompt_tokens INTEGER,
@@ -351,6 +366,7 @@ internal fun insertSql(tableName: String): String =
         api_content,
         attachment_file_name,
         attachment_size_bytes,
+        memory_json,
         source_label,
         response_time_ms,
         prompt_tokens,
@@ -359,7 +375,7 @@ internal fun insertSql(tableName: String): String =
         cost,
         retry_count
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """.trimIndent()
 
 internal fun selectAllSql(tableName: String): String =
@@ -425,4 +441,123 @@ private val MissingColumns = listOf(
     MissingColumn("api_content", "TEXT"),
     MissingColumn("attachment_file_name", "TEXT"),
     MissingColumn("attachment_size_bytes", "INTEGER"),
+    MissingColumn("memory_json", "TEXT"),
 )
+
+@Serializable
+private data class HistoryMessageMemoryDto(
+    val storedLayers: List<String> = emptyList(),
+    val usedLayers: List<String> = emptyList(),
+    val changes: List<HistoryMemoryChangeDto> = emptyList(),
+    val injectedItems: List<HistoryMemoryItemDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+private data class HistoryMemoryChangeDto(
+    val action: String,
+    val layer: String,
+    val fact: String,
+)
+
+@Serializable
+private data class HistoryMemoryItemDto(
+    val id: String,
+    val layer: String,
+    val fact: String,
+    val importance: Double,
+)
+
+private fun HistoryMessageMemoryMetadata.toJson(json: Json): String =
+    json.encodeToString(
+        HistoryMessageMemoryDto(
+            storedLayers = storedLayers.map { it.storageValue },
+            usedLayers = usedLayers.map { it.storageValue },
+            changes = changes.map {
+                HistoryMemoryChangeDto(
+                    action = it.action.storageValue,
+                    layer = it.layer.storageValue,
+                    fact = it.fact,
+                )
+            },
+            injectedItems = injectedItems.map {
+                HistoryMemoryItemDto(
+                    id = it.id,
+                    layer = it.layer.storageValue,
+                    fact = it.fact,
+                    importance = it.importance,
+                )
+            },
+            error = error,
+        ),
+    )
+
+private fun String.toHistoryMemoryMetadata(json: Json): HistoryMessageMemoryMetadata? =
+    runCatching {
+        val dto = json.decodeFromString<HistoryMessageMemoryDto>(this)
+        HistoryMessageMemoryMetadata(
+            storedLayers = dto.storedLayers.mapNotNull { it.toHistoryMemoryLayer() },
+            usedLayers = dto.usedLayers.mapNotNull { it.toHistoryMemoryLayer() },
+            changes = dto.changes.mapNotNull { it.toDomain() },
+            injectedItems = dto.injectedItems.mapNotNull { it.toDomain() },
+            error = dto.error,
+        )
+    }.getOrNull()
+
+private fun HistoryMemoryChangeDto.toDomain(): HistoryMemoryChange? {
+    val trimmedFact = fact.trim()
+    if (trimmedFact.isEmpty()) {
+        return null
+    }
+
+    return HistoryMemoryChange(
+        action = action.toHistoryMemoryChangeAction() ?: return null,
+        layer = layer.toHistoryMemoryLayer() ?: return null,
+        fact = trimmedFact,
+    )
+}
+
+private fun HistoryMemoryItemDto.toDomain(): HistoryMemoryItem? {
+    val trimmedId = id.trim()
+    val trimmedFact = fact.trim()
+    if (trimmedId.isEmpty() || trimmedFact.isEmpty()) {
+        return null
+    }
+
+    return HistoryMemoryItem(
+        id = trimmedId,
+        layer = layer.toHistoryMemoryLayer() ?: return null,
+        fact = trimmedFact,
+        importance = importance.coerceIn(0.0, 1.0),
+    )
+}
+
+private val HistoryMemoryLayer.storageValue: String
+    get() = when (this) {
+        HistoryMemoryLayer.ShortTerm -> "short_term"
+        HistoryMemoryLayer.WorkingMemory -> "working_memory"
+        HistoryMemoryLayer.LongTermMemory -> "long_term_memory"
+    }
+
+private fun String.toHistoryMemoryLayer(): HistoryMemoryLayer? =
+    when (this) {
+        "short_term" -> HistoryMemoryLayer.ShortTerm
+        "working_memory" -> HistoryMemoryLayer.WorkingMemory
+        "long_term_memory" -> HistoryMemoryLayer.LongTermMemory
+        else -> null
+    }
+
+private val HistoryMemoryChangeAction.storageValue: String
+    get() = when (this) {
+        HistoryMemoryChangeAction.Add -> "add"
+        HistoryMemoryChangeAction.Update -> "update"
+        HistoryMemoryChangeAction.Delete -> "delete"
+    }
+
+private fun String.toHistoryMemoryChangeAction(): HistoryMemoryChangeAction? =
+    when (this) {
+        "add" -> HistoryMemoryChangeAction.Add
+        "update" -> HistoryMemoryChangeAction.Update
+        "delete" -> HistoryMemoryChangeAction.Delete
+        else -> null
+    }

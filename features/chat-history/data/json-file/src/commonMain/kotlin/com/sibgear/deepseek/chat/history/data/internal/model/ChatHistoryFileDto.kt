@@ -47,8 +47,33 @@ internal data class HistoryMessageDto(
     val kind: String = HistoryMessageKindDto.Regular.value,
     val apiContent: String? = null,
     val attachment: HistoryMessageAttachmentDto? = null,
+    val memory: HistoryMessageMemoryDto? = null,
     val sourceLabel: String? = null,
     val footer: HistoryMessageFooterDto? = null,
+)
+
+@Serializable
+internal data class HistoryMessageMemoryDto(
+    val storedLayers: List<String> = emptyList(),
+    val usedLayers: List<String> = emptyList(),
+    val changes: List<HistoryMemoryChangeDto> = emptyList(),
+    val injectedItems: List<HistoryMemoryItemDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+internal data class HistoryMemoryChangeDto(
+    val action: String,
+    val layer: String,
+    val fact: String,
+)
+
+@Serializable
+internal data class HistoryMemoryItemDto(
+    val id: String,
+    val layer: String,
+    val fact: String,
+    val importance: Double,
 )
 
 @Serializable

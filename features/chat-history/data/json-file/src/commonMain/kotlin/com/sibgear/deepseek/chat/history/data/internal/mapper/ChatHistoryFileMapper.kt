@@ -5,18 +5,26 @@ import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryFileVers
 import com.sibgear.deepseek.chat.history.data.internal.model.ChatHistoryDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryBranchDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryFactDto
+import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMemoryChangeDto
+import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMemoryItemDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageAttachmentDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageFooterDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageKindDto
+import com.sibgear.deepseek.chat.history.data.internal.model.HistoryMessageMemoryDto
 import com.sibgear.deepseek.chat.history.data.internal.model.HistoryRoleDto
 import com.sibgear.deepseek.chat.history.data.internal.model.LegacyChatHistoryFileDto
 import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChangeAction
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryItem
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryLayer
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 
 internal fun List<HistoryMessage>.toChatHistoryFileDto(): ChatHistoryFileDto =
@@ -89,6 +97,7 @@ private fun HistoryMessage.toDto(): HistoryMessageDto =
         kind = kind.toDto().value,
         apiContent = apiContent,
         attachment = attachment?.toDto(),
+        memory = memory?.toDto(),
         sourceLabel = sourceLabel,
         footer = footer?.toDto(),
     )
@@ -144,6 +153,7 @@ private fun HistoryMessageDto.toDomain(): HistoryMessage? {
         kind = kind.toHistoryMessageKind(),
         apiContent = apiContent,
         attachment = attachment?.toDomain(),
+        memory = memory?.toDomain(),
         sourceLabel = sourceLabel,
         footer = footer?.toDomain(),
     )
@@ -195,6 +205,97 @@ private fun HistoryMessageAttachmentDto.toDomain(): HistoryMessageAttachment =
         fileName = fileName,
         sizeBytes = sizeBytes,
     )
+
+private fun HistoryMessageMemoryMetadata.toDto(): HistoryMessageMemoryDto =
+    HistoryMessageMemoryDto(
+        storedLayers = storedLayers.map { it.toDtoValue() },
+        usedLayers = usedLayers.map { it.toDtoValue() },
+        changes = changes.map { it.toDto() },
+        injectedItems = injectedItems.map { it.toDto() },
+        error = error,
+    )
+
+private fun HistoryMessageMemoryDto.toDomain(): HistoryMessageMemoryMetadata =
+    HistoryMessageMemoryMetadata(
+        storedLayers = storedLayers.mapNotNull { it.toHistoryMemoryLayer() },
+        usedLayers = usedLayers.mapNotNull { it.toHistoryMemoryLayer() },
+        changes = changes.mapNotNull { it.toDomain() },
+        injectedItems = injectedItems.mapNotNull { it.toDomain() },
+        error = error,
+    )
+
+private fun HistoryMemoryChange.toDto(): HistoryMemoryChangeDto =
+    HistoryMemoryChangeDto(
+        action = action.toDtoValue(),
+        layer = layer.toDtoValue(),
+        fact = fact,
+    )
+
+private fun HistoryMemoryChangeDto.toDomain(): HistoryMemoryChange? {
+    val trimmedFact = fact.trim()
+    if (trimmedFact.isEmpty()) {
+        return null
+    }
+
+    return HistoryMemoryChange(
+        action = action.toHistoryMemoryChangeAction() ?: return null,
+        layer = layer.toHistoryMemoryLayer() ?: return null,
+        fact = trimmedFact,
+    )
+}
+
+private fun HistoryMemoryItem.toDto(): HistoryMemoryItemDto =
+    HistoryMemoryItemDto(
+        id = id,
+        layer = layer.toDtoValue(),
+        fact = fact,
+        importance = importance,
+    )
+
+private fun HistoryMemoryItemDto.toDomain(): HistoryMemoryItem? {
+    val trimmedId = id.trim()
+    val trimmedFact = fact.trim()
+    if (trimmedId.isEmpty() || trimmedFact.isEmpty()) {
+        return null
+    }
+
+    return HistoryMemoryItem(
+        id = trimmedId,
+        layer = layer.toHistoryMemoryLayer() ?: return null,
+        fact = trimmedFact,
+        importance = importance.coerceIn(0.0, 1.0),
+    )
+}
+
+private fun HistoryMemoryLayer.toDtoValue(): String =
+    when (this) {
+        HistoryMemoryLayer.ShortTerm -> "short_term"
+        HistoryMemoryLayer.WorkingMemory -> "working_memory"
+        HistoryMemoryLayer.LongTermMemory -> "long_term_memory"
+    }
+
+private fun String.toHistoryMemoryLayer(): HistoryMemoryLayer? =
+    when (this) {
+        "short_term" -> HistoryMemoryLayer.ShortTerm
+        "working_memory" -> HistoryMemoryLayer.WorkingMemory
+        "long_term_memory" -> HistoryMemoryLayer.LongTermMemory
+        else -> null
+    }
+
+private fun HistoryMemoryChangeAction.toDtoValue(): String =
+    when (this) {
+        HistoryMemoryChangeAction.Add -> "add"
+        HistoryMemoryChangeAction.Update -> "update"
+        HistoryMemoryChangeAction.Delete -> "delete"
+    }
+
+private fun String.toHistoryMemoryChangeAction(): HistoryMemoryChangeAction? =
+    when (this) {
+        "add" -> HistoryMemoryChangeAction.Add
+        "update" -> HistoryMemoryChangeAction.Update
+        "delete" -> HistoryMemoryChangeAction.Delete
+        else -> null
+    }
 
 private fun HistoryMessageFooterDto.toDomain(): HistoryMessageFooter =
     HistoryMessageFooter(

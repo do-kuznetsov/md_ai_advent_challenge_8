@@ -3,6 +3,10 @@ package com.sibgear.deepseek
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import com.sibgear.deepseek.assistant.memory.data.jsonfile.external.repository.JsonFileAssistantMemoryRepository
+import com.sibgear.deepseek.assistant.memory.data.sqldelight.external.repository.SqldelightAssistantMemoryRepository
+import com.sibgear.deepseek.assistant.memory.domain.interactor.AssistantMemoryInteractor
+import com.sibgear.deepseek.assistant.memory.domain.repository.AssistantMemoryRepository
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekChatRepository
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekModelsRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterChatRepository
@@ -72,6 +76,10 @@ fun App() {
                 repository = historyRepository,
                 dispatcher = Dispatchers.Default,
             )
+            val memoryInteractor = AssistantMemoryInteractor(
+                repository = workspaceStorage.createMemoryRepository(storageType),
+                dispatcher = Dispatchers.Default,
+            )
             val restoredMessages = initialMessages ?: runBlocking {
                 historyInteractor.getMessages()
             }
@@ -86,10 +94,12 @@ fun App() {
                     AiProvider.DeepSeek to DeepSeekChatRepository(
                         apiKey = BuildConfig.DEEPSEEK_API_KEY,
                         historyInteractor = historyInteractor,
+                        memoryInteractor = memoryInteractor,
                     ),
                     AiProvider.OpenRouter to OpenRouterChatRepository(
                         apiKey = BuildConfig.OPENROUTER_AI_KEY,
                         historyInteractor = historyInteractor,
+                        memoryInteractor = memoryInteractor,
                     ),
                 ),
                 modelRepositories = mapOf(
@@ -221,6 +231,12 @@ private fun WorkspaceStorage.createHistoryStorage(storageType: ChatStorageType):
         ChatStorageType.Database -> DatabaseAppChatHistoryStorage(
             storage = SqldelightChatHistoryStorage(databaseHistoryFile()),
         )
+    }
+
+private fun WorkspaceStorage.createMemoryRepository(storageType: ChatStorageType): AssistantMemoryRepository =
+    when (storageType) {
+        ChatStorageType.Json -> JsonFileAssistantMemoryRepository(jsonMemoryFile())
+        ChatStorageType.Database -> SqldelightAssistantMemoryRepository(databaseHistoryFile())
     }
 
 private class JsonAppChatHistoryStorage(

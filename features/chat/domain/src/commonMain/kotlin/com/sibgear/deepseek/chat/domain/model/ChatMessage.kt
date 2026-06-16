@@ -7,6 +7,7 @@ data class ChatMessage(
     val kind: ChatMessageKind = ChatMessageKind.Regular,
     val apiContent: String? = null,
     val attachment: ChatMessageAttachment? = null,
+    val memory: ChatMessageMemoryMetadata? = null,
     val sourceLabel: String? = null,
     val footer: ChatMessageFooter? = null,
 )
@@ -34,3 +35,23 @@ data class ChatMessageAttachment(
     val fileName: String,
     val sizeBytes: Long,
 )
+
+data class ChatMessageMemoryMetadata(
+    val storedLayers: List<ChatMemoryLayer> = emptyList(),
+    val usedLayers: List<ChatMemoryLayer> = emptyList(),
+    val changes: List<ChatMemoryChange> = emptyList(),
+    val injectedItems: List<ChatMemoryItem> = emptyList(),
+    val error: String? = null,
+)
+
+data class ChatMemoryChange(
+    val action: ChatMemoryChangeAction,
+    val layer: ChatMemoryLayer,
+    val fact: String,
+)
+
+enum class ChatMemoryChangeAction {
+    Add,
+    Update,
+    Delete,
+}

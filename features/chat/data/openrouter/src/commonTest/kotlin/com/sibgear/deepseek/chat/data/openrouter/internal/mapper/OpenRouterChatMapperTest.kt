@@ -5,7 +5,12 @@ import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.BranchRoutingDecision
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryCandidate
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
+import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
+import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
+import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
@@ -130,5 +135,55 @@ class OpenRouterChatMapperTest {
             ),
             decision,
         )
+    }
+
+    @Test
+    fun parsesMemoryClassificationCandidates() {
+        val candidates = """
+            ```json
+            {"store":true,"memory_items":[{"layer":"working_memory","fact":"Project uses Kotlin","importance":0.8}]}
+            ```
+        """.trimIndent().toMemoryCandidates(Json)
+
+        assertEquals(
+            listOf(
+                ChatMemoryCandidate(
+                    layer = ChatMemoryLayer.WorkingMemory,
+                    fact = "Project uses Kotlin",
+                    importance = 0.8,
+                ),
+            ),
+            candidates,
+        )
+    }
+
+    @Test
+    fun parsesMemoryUpdates() {
+        val updates = """{"updates":[{"action":"update","id":"memory-1","layer":"long_term_memory","fact":"Concise","importance":0.9}]}"""
+            .toMemoryUpdates(Json)
+
+        assertEquals(
+            listOf(
+                MemoryUpdate(
+                    action = MemoryUpdateAction.Update,
+                    id = "memory-1",
+                    layer = MemoryLayer.LongTermMemory,
+                    fact = "Concise",
+                    importance = 0.9,
+                ),
+            ),
+            updates,
+        )
+    }
+
+    @Test
+    fun parsesMemoryRetrievalPlan() {
+        val plan = """{"need_short_term":true,"need_working_memory":true,"need_long_term_memory":false,"memory_ids":["memory-1"],"reason":"relevant"}"""
+            .toChatMemoryRetrievalPlan(Json)
+
+        assertEquals(true, plan?.needShortTerm)
+        assertEquals(true, plan?.needWorkingMemory)
+        assertEquals(false, plan?.needLongTermMemory)
+        assertEquals(listOf("memory-1"), plan?.memoryItemIds)
     }
 }
