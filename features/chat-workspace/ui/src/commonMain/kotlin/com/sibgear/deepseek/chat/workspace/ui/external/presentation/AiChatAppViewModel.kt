@@ -10,8 +10,12 @@ import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppViewState
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 import com.sibgear.deepseek.chat.workspace.ui.external.model.StorageSwitchResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 class AiChatAppViewModel(
+    private val coroutineScope: CoroutineScope,
     private val createChatViewModel: (tabNumber: Int, storageType: ChatStorageType) -> ChatViewModel,
     private val createInitialTabTitle: (tabNumber: Int) -> String = { ChatTab.NewTitle },
     private val switchStorage: (
@@ -32,6 +36,14 @@ class AiChatAppViewModel(
         storageType: ChatStorageType,
     ) -> Unit = { _, _, _, _ -> },
     private val onTabClosed: (tabNumber: Int, storageType: ChatStorageType) -> Unit = { _, _ -> },
+    private val loadProfileAction: suspend (storageType: ChatStorageType) -> String = { "" },
+    private val saveProfileAction: suspend (storageType: ChatStorageType, text: String) -> String = { _, text -> text },
+    private val updateProfileFromInterviewAction: suspend (
+        providerName: String,
+        modelId: String,
+        currentProfile: String,
+        answers: List<String>,
+    ) -> String = { _, _, currentProfile, _ -> currentProfile },
 ) {
     private val initialNumbers = initialTabNumbers
         .filter { it > 0 }
@@ -64,6 +76,17 @@ class AiChatAppViewModel(
                 state = state.copy(isStorageMenuExpanded = event.isExpanded)
             }
             is AiChatAppEvent.StorageSelected -> selectStorage(event.storageType)
+            AiChatAppEvent.ProfileDialogOpened -> openProfileDialog()
+            AiChatAppEvent.ProfileDialogClosed -> closeProfileDialog()
+            is AiChatAppEvent.ProfileDraftChanged -> {
+                state = state.copy(profileDraft = event.text, profileError = null)
+            }
+            AiChatAppEvent.ProfileSaved -> saveProfile()
+            AiChatAppEvent.ProfileInterviewStarted -> startProfileInterview()
+            is AiChatAppEvent.ProfileInterviewAnswerChanged -> {
+                state = state.copy(profileInterviewAnswerInput = event.text, profileError = null)
+            }
+            AiChatAppEvent.ProfileInterviewAnswerSubmitted -> submitProfileInterviewAnswer()
             is AiChatAppEvent.TabSelected -> {
                 if (state.tabs.any { it.number == event.number }) {
                     state = state.copy(activeTabNumber = event.number)
@@ -116,6 +139,139 @@ class AiChatAppViewModel(
             activeTabNumber = tab.number,
         )
         notifyWorkspaceChanged()
+    }
+
+    private fun openProfileDialog() {
+        val storageType = state.selectedStorageType
+        state = state.copy(
+            isProfileDialogOpen = true,
+            profileDraft = EmptyProfileTemplate,
+            profileError = null,
+            isProfileInterviewActive = false,
+            isProfileInterviewLoading = false,
+            isProfileSaving = false,
+        )
+        coroutineScope.launch {
+            runCatching { loadProfileAction(storageType) }
+                .onSuccess { profileText ->
+                    state = state.copy(
+                        profileDraft = profileText.ifBlank { EmptyProfileTemplate },
+                        profileError = null,
+                    )
+                }
+                .onFailure { exception ->
+                    if (exception is CancellationException) {
+                        throw exception
+                    }
+                    state = state.copy(profileError = formatProfileError(exception))
+                }
+        }
+    }
+
+    private fun closeProfileDialog() {
+        state = state.copy(
+            isProfileDialogOpen = false,
+            isProfileInterviewActive = false,
+            isProfileInterviewLoading = false,
+            isProfileSaving = false,
+            profileError = null,
+        )
+    }
+
+    private fun saveProfile() {
+        if (!state.isProfileActionEnabled) {
+            return
+        }
+        val storageType = state.selectedStorageType
+        val text = state.profileDraft
+        state = state.copy(isProfileSaving = true, profileError = null)
+        coroutineScope.launch {
+            runCatching { saveProfileAction(storageType, text) }
+                .onSuccess { savedText ->
+                    state = state.copy(
+                        profileDraft = savedText.ifBlank { EmptyProfileTemplate },
+                        isProfileSaving = false,
+                        isProfileDialogOpen = false,
+                    )
+                }
+                .onFailure { exception ->
+                    if (exception is CancellationException) {
+                        throw exception
+                    }
+                    state = state.copy(
+                        isProfileSaving = false,
+                        profileError = formatProfileError(exception),
+                    )
+                }
+        }
+    }
+
+    private fun startProfileInterview() {
+        if (!state.isProfileActionEnabled) {
+            return
+        }
+        state = state.copy(
+            isProfileInterviewActive = true,
+            profileInterviewQuestionIndex = 0,
+            profileInterviewAnswers = emptyList(),
+            profileInterviewAnswerInput = "",
+            profileError = null,
+        )
+    }
+
+    private fun submitProfileInterviewAnswer() {
+        if (!state.isProfileActionEnabled || !state.isProfileInterviewActive) {
+            return
+        }
+
+        val answer = state.profileInterviewAnswerInput.trim()
+        val answers = state.profileInterviewAnswers + answer
+        val nextIndex = state.profileInterviewQuestionIndex + 1
+        if (nextIndex < ProfileInterviewQuestionsCount) {
+            state = state.copy(
+                profileInterviewAnswers = answers,
+                profileInterviewQuestionIndex = nextIndex,
+                profileInterviewAnswerInput = "",
+                profileError = null,
+            )
+            return
+        }
+
+        val activeViewModel = state.activeTab?.viewModel
+        val providerName = activeViewModel?.selectedModelProviderName.orEmpty()
+        val modelId = activeViewModel?.selectedModelId.orEmpty()
+        val currentProfile = state.profileDraft
+        state = state.copy(
+            isProfileInterviewLoading = true,
+            profileInterviewAnswers = answers,
+            profileInterviewAnswerInput = "",
+            profileError = null,
+        )
+        coroutineScope.launch {
+            runCatching {
+                updateProfileFromInterviewAction(
+                    providerName,
+                    modelId,
+                    currentProfile,
+                    answers,
+                )
+            }.onSuccess { updatedProfile ->
+                state = state.copy(
+                    profileDraft = updatedProfile.ifBlank { EmptyProfileTemplate },
+                    isProfileInterviewActive = false,
+                    isProfileInterviewLoading = false,
+                )
+            }.onFailure { exception ->
+                if (exception is CancellationException) {
+                    throw exception
+                }
+                state = state.copy(
+                    isProfileInterviewActive = false,
+                    isProfileInterviewLoading = false,
+                    profileError = formatProfileError(exception),
+                )
+            }
+        }
     }
 
     private fun closeTab(number: Int) {
@@ -233,5 +389,15 @@ class AiChatAppViewModel(
 
     private companion object {
         const val MaxTitleWords = 5
+        const val ProfileInterviewQuestionsCount = 5
+        val EmptyProfileTemplate = """
+            Стиль:
+            Формат:
+            Ограничения:
+            Предпочтения:
+        """.trimIndent()
     }
 }
+
+private fun formatProfileError(exception: Throwable): String =
+    exception.message ?: exception::class.simpleName ?: "unknown"

@@ -44,6 +44,12 @@ class ChatViewModel(
     )
         private set
 
+    val selectedModelProviderName: String
+        get() = state.selectedModel.provider.name
+
+    val selectedModelId: String
+        get() = state.selectedModel.id
+
     fun onEvent(event: ChatEvent) {
         when (event) {
             ChatEvent.AttachmentCleared -> {

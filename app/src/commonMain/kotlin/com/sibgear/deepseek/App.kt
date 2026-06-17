@@ -6,11 +6,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.external.repository.JsonFileAssistantMemoryRepository
 import com.sibgear.deepseek.assistant.memory.data.sqldelight.external.repository.SqldelightAssistantMemoryRepository
 import com.sibgear.deepseek.assistant.memory.domain.interactor.AssistantMemoryInteractor
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import com.sibgear.deepseek.assistant.memory.domain.repository.AssistantMemoryRepository
+import com.sibgear.deepseek.assistant.memory.domain.service.AssistantProfileService
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekChatRepository
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekModelsRepository
+import com.sibgear.deepseek.chat.data.deepseek.external.service.DeepSeekAssistantProfileService
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterChatRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterModelsRepository
+import com.sibgear.deepseek.chat.data.openrouter.external.service.OpenRouterAssistantProfileService
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.repository.RoutingAiRepository
@@ -65,6 +69,11 @@ fun App() {
     }
 
     val viewModel = remember(scope, workspaceStorage) {
+        val profileServices: Map<String, AssistantProfileService> = mapOf(
+            AiProvider.DeepSeek.name to DeepSeekAssistantProfileService(apiKey = BuildConfig.DEEPSEEK_API_KEY),
+            AiProvider.OpenRouter.name to OpenRouterAssistantProfileService(apiKey = BuildConfig.OPENROUTER_AI_KEY),
+        )
+
         fun createChatViewModel(
             tabNumber: Int,
             storageType: ChatStorageType,
@@ -142,6 +151,7 @@ fun App() {
         }
 
         AiChatAppViewModel(
+            coroutineScope = scope,
             createChatViewModel = { tabNumber, storageType ->
                 createChatViewModel(
                     tabNumber = tabNumber,
@@ -207,6 +217,21 @@ fun App() {
             },
             onTabClosed = { tabNumber, storageType ->
                 workspaceStorage.createHistoryStorage(storageType).deleteChat(tabNumber)
+            },
+            loadProfileAction = { storageType ->
+                workspaceStorage.createMemoryRepository(storageType).getProfile().text
+            },
+            saveProfileAction = { storageType, text ->
+                workspaceStorage.createMemoryRepository(storageType).saveProfile(UserProfile(text = text)).text
+            },
+            updateProfileFromInterviewAction = { providerName, modelId, currentProfile, answers ->
+                val profileService = profileServices[providerName]
+                    ?: error("Неизвестный провайдер профиля: $providerName")
+                profileService.updateProfile(
+                    currentProfile = UserProfile(text = currentProfile),
+                    interviewAnswers = answers,
+                    modelId = modelId.takeIf { it.isNotBlank() } ?: error("Не выбрана модель для интервью."),
+                ).text
             },
         )
     }

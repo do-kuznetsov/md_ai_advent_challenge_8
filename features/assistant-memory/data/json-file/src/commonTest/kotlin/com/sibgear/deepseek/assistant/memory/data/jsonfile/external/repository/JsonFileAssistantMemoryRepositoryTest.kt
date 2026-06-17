@@ -4,6 +4,7 @@ import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
@@ -70,6 +71,36 @@ class JsonFileAssistantMemoryRepositoryTest {
         repository.applyUpdates(listOf(MemoryUpdate(action = MemoryUpdateAction.Delete, id = "memory-1")))
 
         assertEquals(emptyList(), repository.getItems())
+    }
+
+    @Test
+    fun storesProfileAlongsideMemoryItems() = runTest {
+        val file = tempMemoryFile()
+        val repository = JsonFileAssistantMemoryRepository(file)
+        val items = listOf(
+            MemoryItem(
+                id = "memory-1",
+                layer = MemoryLayer.WorkingMemory,
+                fact = "Project uses Kotlin",
+                importance = 0.8,
+            ),
+        )
+
+        repository.replaceItems(items)
+        repository.saveProfile(UserProfile(text = "Стиль: кратко"))
+
+        val restored = JsonFileAssistantMemoryRepository(file)
+        assertEquals(items, restored.getItems())
+        assertEquals(UserProfile(text = "Стиль: кратко"), restored.getProfile())
+    }
+
+    @Test
+    fun oldFileWithoutProfileRestoresEmptyProfile() = runTest {
+        val file = tempMemoryFile()
+        file.parentFile.mkdirs()
+        file.writeText("""{"version":1,"items":[]}""")
+
+        assertEquals(UserProfile(), JsonFileAssistantMemoryRepository(file).getProfile())
     }
 
     private fun tempMemoryFile(): File =

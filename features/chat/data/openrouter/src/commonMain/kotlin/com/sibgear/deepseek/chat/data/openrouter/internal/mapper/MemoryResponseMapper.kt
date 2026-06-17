@@ -4,6 +4,7 @@ import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryRetrievalPlan
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryCandidate
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan
@@ -75,6 +76,17 @@ internal fun String.toChatMemoryRetrievalPlan(json: Json): ChatMemoryRetrievalPl
                 .mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf(String::isNotEmpty) },
             reason = root["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         )
+    }.getOrNull()
+
+internal fun String.toUserProfile(json: Json): UserProfile? =
+    runCatching {
+        val profile = json.parseToJsonElement(extractJsonObject())
+            .jsonObject["profile"]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.trim()
+            ?: return@runCatching null
+        UserProfile(text = profile)
     }.getOrNull()
 
 internal fun ChatMemoryRetrievalPlan.toMemoryRetrievalPlan(): MemoryRetrievalPlan =
