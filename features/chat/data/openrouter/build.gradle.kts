@@ -10,6 +10,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":features:assistant-memory:domain"))
             implementation(project(":features:chat:domain"))
             implementation(project(":features:chat-history:domain"))
             implementation(libs.kotlinx.coroutines.core)

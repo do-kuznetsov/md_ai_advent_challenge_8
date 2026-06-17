@@ -1,15 +1,23 @@
 package com.sibgear.deepseek.chat.data.deepseek.external.repository
 
+import com.sibgear.deepseek.assistant.memory.domain.interactor.AssistantMemoryInteractor
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toChatMessages
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toChatMemoryItems
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toChatMemoryRetrievalPlan
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toContextMessages
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekAssistantHistoryMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekChatCompletionRequest
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekCompressionSummaryHistoryMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toDeepSeekUserHistoryMessage
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryMemoryChanges
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryMemoryItems
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryMemoryLayers
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toBranchRoutingDecision
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toChatBranches
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryBranches
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toHistoryFacts
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toMemoryCandidates
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toMemoryUpdates
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toStickyFacts
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.mergeStickyFacts
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiErrorResponse
@@ -25,6 +33,7 @@ import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -45,6 +54,7 @@ import kotlin.time.TimeSource
 class DeepSeekChatRepository(
     private val apiKey: String,
     private val historyInteractor: ChatHistoryInteractor,
+    private val memoryInteractor: AssistantMemoryInteractor? = null,
     private val contextPlanner: ChatContextPlanner = ChatContextPlanner(),
 ) : AiChatRepository {
     private val json = Json {
@@ -72,7 +82,8 @@ class DeepSeekChatRepository(
         }
 
     private suspend fun sendLinearMessage(request: AiRequestData): AgentResponse {
-        historyInteractor.add(request.toDeepSeekUserHistoryMessage())
+        val preparedMemory = prepareMemory(request)
+        historyInteractor.add(request.toDeepSeekUserHistoryMessage(memory = preparedMemory.metadata))
         val startedAt = TimeSource.Monotonic.markNow()
 
         return try {
@@ -86,6 +97,7 @@ class DeepSeekChatRepository(
                     stickyFacts = stickyFacts,
                 ).apiMessages,
                 includeSystemPrompt = true,
+                effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
             )
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
@@ -132,6 +144,7 @@ class DeepSeekChatRepository(
 
     private suspend fun sendBranchingMessage(request: AiRequestData): AgentResponse {
         val startedAt = TimeSource.Monotonic.markNow()
+        val preparedMemory = prepareMemory(request)
         val historyBeforeUser = historyInteractor.getMessages()
         var branchSelection = resolveBranch(
             request = request,
@@ -139,7 +152,12 @@ class DeepSeekChatRepository(
             fallbackActiveBranchId = historyBeforeUser.lastOrNull { it.branchId != null }?.branchId,
         )
         historyInteractor.replaceBranches(branchSelection.branches.toHistoryBranches())
-        historyInteractor.add(request.toDeepSeekUserHistoryMessage(branchId = branchSelection.activeBranchId))
+        historyInteractor.add(
+            request.toDeepSeekUserHistoryMessage(
+                branchId = branchSelection.activeBranchId,
+                memory = preparedMemory.metadata,
+            ),
+        )
 
         return try {
             val historyMessages = historyInteractor.getMessages()
@@ -152,6 +170,7 @@ class DeepSeekChatRepository(
                     activeBranchId = branchSelection.activeBranchId,
                 ).apiMessages,
                 includeSystemPrompt = true,
+                effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
             )
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
@@ -371,6 +390,7 @@ class DeepSeekChatRepository(
         contextMessages: List<ContextMessage>,
         includeSystemPrompt: Boolean,
         servicePrompt: String? = null,
+        effectiveSystemPrompt: String? = null,
     ): DeepSeekCompletionResult {
         val response = client.post(ChatCompletionsUrl) {
             bearerAuth(apiKey)
@@ -380,6 +400,7 @@ class DeepSeekChatRepository(
                     contextMessages = contextMessages,
                     includeSystemPrompt = includeSystemPrompt,
                     servicePrompt = servicePrompt,
+                    effectiveSystemPrompt = effectiveSystemPrompt,
                 ),
             )
         }
@@ -406,6 +427,121 @@ class DeepSeekChatRepository(
         )
     }
 
+    private suspend fun prepareMemory(request: AiRequestData): PreparedMemory {
+        val memory = memoryInteractor ?: return PreparedMemory(
+            effectiveSystemPrompt = request.systemPrompt,
+            metadata = null,
+        )
+
+        val originalItems = runCatching { memory.getItems() }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return PreparedMemory(
+                effectiveSystemPrompt = request.systemPrompt,
+                metadata = HistoryMessageMemoryMetadata(error = formatMemoryError(exception)),
+            )
+        }
+
+        var currentItems = originalItems
+        var changes = emptyList<com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange>()
+        val errors = mutableListOf<String>()
+
+        val candidates = runCatching {
+            val classificationRequest = contextPlanner.memoryClassificationRequest(request.prompt)
+            sendCompletion(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = classificationRequest.prompt,
+            ).takeUnless { it.isError }
+                ?.content
+                ?.toMemoryCandidates(json)
+                .orEmpty()
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            emptyList()
+        }
+
+        if (candidates.isNotEmpty()) {
+            val updates = runCatching {
+                val mutationRequest = contextPlanner.memoryMutationRequest(
+                    currentMemory = currentItems.toChatMemoryItems(),
+                    candidates = candidates,
+                )
+                sendCompletion(
+                    request = request,
+                    contextMessages = emptyList(),
+                    includeSystemPrompt = false,
+                    servicePrompt = mutationRequest.prompt,
+                ).takeUnless { it.isError }
+                    ?.content
+                    ?.toMemoryUpdates(json)
+                    .orEmpty()
+            }.getOrElse { exception ->
+                if (exception is CancellationException) {
+                    throw exception
+                }
+                errors += formatMemoryError(exception)
+                emptyList()
+            }
+
+            if (updates.isNotEmpty()) {
+                changes = updates.toHistoryMemoryChanges(currentItems)
+                currentItems = runCatching {
+                    memory.applyUpdates(updates)
+                }.getOrElse { exception ->
+                    if (exception is CancellationException) {
+                        throw exception
+                    }
+                    errors += formatMemoryError(exception)
+                    currentItems
+                }
+            }
+        }
+
+        val retrievalPlan = runCatching {
+            val retrievalRequest = contextPlanner.memoryRetrievalRequest(
+                userPrompt = request.prompt,
+                availableMemory = currentItems.toChatMemoryItems(),
+            )
+            sendCompletion(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = retrievalRequest.prompt,
+            ).takeUnless { it.isError }
+                ?.content
+                ?.toChatMemoryRetrievalPlan(json)
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            null
+        }
+
+        val injection = contextPlanner.memoryInjection(
+            originalSystemPrompt = request.systemPrompt,
+            retrievalPlan = retrievalPlan ?: com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan(),
+            availableMemory = currentItems.toChatMemoryItems(),
+        )
+
+        return PreparedMemory(
+            effectiveSystemPrompt = injection.effectiveSystemPrompt,
+            metadata = HistoryMessageMemoryMetadata(
+                storedLayers = changes.map { it.layer }.distinct(),
+                usedLayers = injection.usedLayers.toHistoryMemoryLayers(),
+                changes = changes,
+                injectedItems = injection.injectedItems.toHistoryMemoryItems(),
+                error = errors.joinToString(separator = "; ").takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
     private fun formatApiError(
         statusCode: Int,
         statusDescription: String,
@@ -425,6 +561,14 @@ private data class DeepSeekCompletionResult(
     val usage: DeepSeekResponseUsage? = null,
     val isError: Boolean = false,
 )
+
+private data class PreparedMemory(
+    val effectiveSystemPrompt: String,
+    val metadata: HistoryMessageMemoryMetadata?,
+)
+
+private fun formatMemoryError(exception: Throwable): String =
+    "memory: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
 
 private const val ChatCompletionsUrl = "https://api.deepseek.com/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L

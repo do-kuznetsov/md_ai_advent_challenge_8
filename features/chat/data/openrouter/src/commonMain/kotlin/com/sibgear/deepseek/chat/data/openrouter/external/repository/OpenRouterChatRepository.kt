@@ -1,6 +1,9 @@
 package com.sibgear.deepseek.chat.data.openrouter.external.repository
 
+import com.sibgear.deepseek.assistant.memory.domain.interactor.AssistantMemoryInteractor
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMessages
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMemoryItems
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMemoryRetrievalPlan
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toContextMessages
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.mergeStickyFacts
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toBranchRoutingDecision
@@ -11,6 +14,11 @@ import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterCha
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterCompressionSummaryHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toOpenRouterUserHistoryMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toHistoryFacts
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toHistoryMemoryChanges
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toHistoryMemoryItems
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toHistoryMemoryLayers
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toMemoryCandidates
+import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toMemoryUpdates
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toStickyFacts
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiErrorResponse
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterCompletionResult
@@ -32,6 +40,7 @@ import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -56,6 +65,7 @@ import kotlin.time.TimeSource
 class OpenRouterChatRepository(
     private val apiKey: String,
     private val historyInteractor: ChatHistoryInteractor,
+    private val memoryInteractor: AssistantMemoryInteractor? = null,
     private val contextPlanner: ChatContextPlanner = ChatContextPlanner(),
 ) : AiChatRepository {
     private val json = Json {
@@ -83,7 +93,8 @@ class OpenRouterChatRepository(
         }
 
     private suspend fun sendLinearMessage(request: AiRequestData): AgentResponse {
-        historyInteractor.add(request.toOpenRouterUserHistoryMessage())
+        val preparedMemory = prepareMemory(request)
+        historyInteractor.add(request.toOpenRouterUserHistoryMessage(memory = preparedMemory.metadata))
         val startedAt = TimeSource.Monotonic.markNow()
         var retryCount = 0
 
@@ -98,6 +109,7 @@ class OpenRouterChatRepository(
                     stickyFacts = stickyFacts,
                 ).apiMessages,
                 includeSystemPrompt = true,
+                effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
                 servicePrompt = null,
             ) { retryCount = it }
             val messagesWithAssistant = historyInteractor.add(
@@ -147,6 +159,7 @@ class OpenRouterChatRepository(
     private suspend fun sendBranchingMessage(request: AiRequestData): AgentResponse {
         val startedAt = TimeSource.Monotonic.markNow()
         var retryCount = 0
+        val preparedMemory = prepareMemory(request)
         val historyBeforeUser = historyInteractor.getMessages()
         var branchSelection = resolveBranch(
             request = request,
@@ -154,7 +167,12 @@ class OpenRouterChatRepository(
             fallbackActiveBranchId = historyBeforeUser.lastOrNull { it.branchId != null }?.branchId,
         )
         historyInteractor.replaceBranches(branchSelection.branches.toHistoryBranches())
-        historyInteractor.add(request.toOpenRouterUserHistoryMessage(branchId = branchSelection.activeBranchId))
+        historyInteractor.add(
+            request.toOpenRouterUserHistoryMessage(
+                branchId = branchSelection.activeBranchId,
+                memory = preparedMemory.metadata,
+            ),
+        )
 
         return try {
             val historyMessages = historyInteractor.getMessages()
@@ -167,6 +185,7 @@ class OpenRouterChatRepository(
                     activeBranchId = branchSelection.activeBranchId,
                 ).apiMessages,
                 includeSystemPrompt = true,
+                effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
                 servicePrompt = null,
             ) { retryCount = it }
             val messagesWithAssistant = historyInteractor.add(
@@ -347,6 +366,7 @@ class OpenRouterChatRepository(
         contextMessages: List<ContextMessage>,
         includeSystemPrompt: Boolean,
         servicePrompt: String?,
+        effectiveSystemPrompt: String? = null,
         onRetryCountChanged: (Int) -> Unit,
     ): OpenRouterCompletionResult {
         var retryCount = 0
@@ -358,6 +378,7 @@ class OpenRouterChatRepository(
                     contextMessages = contextMessages,
                     includeSystemPrompt = includeSystemPrompt,
                     servicePrompt = servicePrompt,
+                    effectiveSystemPrompt = effectiveSystemPrompt,
                 )
                 if (completion.isRetryable && retryCount < OpenRouterMaxRetries) {
                     retryCount += 1
@@ -436,6 +457,7 @@ class OpenRouterChatRepository(
         contextMessages: List<ContextMessage>,
         includeSystemPrompt: Boolean,
         servicePrompt: String?,
+        effectiveSystemPrompt: String? = null,
     ): OpenRouterCompletionResult {
         val response = client.post(ChatCompletionsUrl) {
             bearerAuth(apiKey)
@@ -451,6 +473,7 @@ class OpenRouterChatRepository(
                     contextMessages = contextMessages,
                     includeSystemPrompt = includeSystemPrompt,
                     servicePrompt = servicePrompt,
+                    effectiveSystemPrompt = effectiveSystemPrompt,
                 ),
             )
         }
@@ -491,6 +514,124 @@ class OpenRouterChatRepository(
         return accumulator.result()
     }
 
+    private suspend fun prepareMemory(request: AiRequestData): PreparedMemory {
+        val memory = memoryInteractor ?: return PreparedMemory(
+            effectiveSystemPrompt = request.systemPrompt,
+            metadata = null,
+        )
+
+        val originalItems = runCatching { memory.getItems() }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return PreparedMemory(
+                effectiveSystemPrompt = request.systemPrompt,
+                metadata = HistoryMessageMemoryMetadata(error = formatMemoryError(exception)),
+            )
+        }
+
+        var currentItems = originalItems
+        var changes = emptyList<com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange>()
+        val errors = mutableListOf<String>()
+
+        val candidates = runCatching {
+            val classificationRequest = contextPlanner.memoryClassificationRequest(request.prompt)
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = classificationRequest.prompt,
+                onRetryCountChanged = {},
+            ).takeUnless { it.isError }
+                ?.content
+                ?.toMemoryCandidates(json)
+                .orEmpty()
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            emptyList()
+        }
+
+        if (candidates.isNotEmpty()) {
+            val updates = runCatching {
+                val mutationRequest = contextPlanner.memoryMutationRequest(
+                    currentMemory = currentItems.toChatMemoryItems(),
+                    candidates = candidates,
+                )
+                sendCompletionWithRetry(
+                    request = request,
+                    contextMessages = emptyList(),
+                    includeSystemPrompt = false,
+                    servicePrompt = mutationRequest.prompt,
+                    onRetryCountChanged = {},
+                ).takeUnless { it.isError }
+                    ?.content
+                    ?.toMemoryUpdates(json)
+                    .orEmpty()
+            }.getOrElse { exception ->
+                if (exception is CancellationException) {
+                    throw exception
+                }
+                errors += formatMemoryError(exception)
+                emptyList()
+            }
+
+            if (updates.isNotEmpty()) {
+                changes = updates.toHistoryMemoryChanges(currentItems)
+                currentItems = runCatching {
+                    memory.applyUpdates(updates)
+                }.getOrElse { exception ->
+                    if (exception is CancellationException) {
+                        throw exception
+                    }
+                    errors += formatMemoryError(exception)
+                    currentItems
+                }
+            }
+        }
+
+        val retrievalPlan = runCatching {
+            val retrievalRequest = contextPlanner.memoryRetrievalRequest(
+                userPrompt = request.prompt,
+                availableMemory = currentItems.toChatMemoryItems(),
+            )
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = retrievalRequest.prompt,
+                onRetryCountChanged = {},
+            ).takeUnless { it.isError }
+                ?.content
+                ?.toChatMemoryRetrievalPlan(json)
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            null
+        }
+
+        val injection = contextPlanner.memoryInjection(
+            originalSystemPrompt = request.systemPrompt,
+            retrievalPlan = retrievalPlan ?: com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan(),
+            availableMemory = currentItems.toChatMemoryItems(),
+        )
+
+        return PreparedMemory(
+            effectiveSystemPrompt = injection.effectiveSystemPrompt,
+            metadata = HistoryMessageMemoryMetadata(
+                storedLayers = changes.map { it.layer }.distinct(),
+                usedLayers = injection.usedLayers.toHistoryMemoryLayers(),
+                changes = changes,
+                injectedItems = injection.injectedItems.toHistoryMemoryItems(),
+                error = errors.joinToString(separator = "; ").takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
     private fun formatApiError(
         statusCode: Int,
         statusDescription: String,
@@ -512,6 +653,14 @@ private fun formatException(exception: Throwable): String {
 
     return "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
 }
+
+private data class PreparedMemory(
+    val effectiveSystemPrompt: String,
+    val metadata: HistoryMessageMemoryMetadata?,
+)
+
+private fun formatMemoryError(exception: Throwable): String =
+    "memory: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
 
 private const val ChatCompletionsUrl = "https://openrouter.ai/api/v1/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L

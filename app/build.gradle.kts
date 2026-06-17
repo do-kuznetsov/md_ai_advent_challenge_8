@@ -15,6 +15,9 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":features:assistant-memory:domain"))
+            implementation(project(":features:assistant-memory:data:json-file"))
+            implementation(project(":features:assistant-memory:data:sqldelight"))
             implementation(project(":features:chat:domain"))
             implementation(project(":features:chat:data:deepseek"))
             implementation(project(":features:chat:data:openrouter"))

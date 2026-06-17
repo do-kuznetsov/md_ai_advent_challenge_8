@@ -3,6 +3,9 @@ package com.sibgear.deepseek.chat.domain.interactor
 import com.sibgear.deepseek.chat.domain.model.BranchRoutingDecision
 import com.sibgear.deepseek.chat.domain.model.BranchSummaryUpdatePrompt
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryItem
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.CompressionSummaryPrompt
@@ -340,6 +343,59 @@ class ChatContextPlannerTest {
         assertEquals(listOf("branch user", "branch assistant"), request.messages.map { it.content })
         assertEquals(true, request.prompt.contains("Текущая ветка: tech"))
         assertEquals(true, request.prompt.contains(BranchSummaryUpdatePrompt.trim()))
+    }
+
+    @Test
+    fun memoryInjectionAddsSelectedMemoryToSystemPrompt() {
+        val injection = planner.memoryInjection(
+            originalSystemPrompt = "base system",
+            retrievalPlan = ChatMemoryRetrievalPlan(
+                needShortTerm = true,
+                needWorkingMemory = true,
+                needLongTermMemory = false,
+            ),
+            availableMemory = listOf(
+                ChatMemoryItem(
+                    id = "memory-1",
+                    layer = ChatMemoryLayer.WorkingMemory,
+                    fact = "Project uses Kotlin",
+                    importance = 0.8,
+                ),
+                ChatMemoryItem(
+                    id = "memory-2",
+                    layer = ChatMemoryLayer.LongTermMemory,
+                    fact = "User likes concise answers",
+                    importance = 0.9,
+                ),
+            ),
+        )
+
+        assertEquals(listOf(ChatMemoryLayer.ShortTerm, ChatMemoryLayer.WorkingMemory), injection.usedLayers)
+        assertEquals(listOf("memory-1"), injection.injectedItems.map { it.id })
+        assertEquals(true, injection.effectiveSystemPrompt.contains("[MEMORY_CONTEXT]"))
+        assertEquals(true, injection.effectiveSystemPrompt.contains("Project uses Kotlin"))
+        assertEquals(false, injection.effectiveSystemPrompt.contains("User likes concise answers"))
+        assertEquals(false, injection.effectiveSystemPrompt.contains("Short-term memory"))
+    }
+
+    @Test
+    fun memoryServicePromptsContainUserPromptAndAvailableMemory() {
+        val classification = planner.memoryClassificationRequest("Use Kotlin and Compose")
+        val retrieval = planner.memoryRetrievalRequest(
+            userPrompt = "Continue the task",
+            availableMemory = listOf(
+                ChatMemoryItem(
+                    id = "memory-1",
+                    layer = ChatMemoryLayer.WorkingMemory,
+                    fact = "Use Compose",
+                    importance = 0.7,
+                ),
+            ),
+        )
+
+        assertEquals(true, classification.prompt.contains("Use Kotlin and Compose"))
+        assertEquals(true, retrieval.prompt.contains("memory-1"))
+        assertEquals(true, retrieval.prompt.contains("Use Compose"))
     }
 
     private fun message(

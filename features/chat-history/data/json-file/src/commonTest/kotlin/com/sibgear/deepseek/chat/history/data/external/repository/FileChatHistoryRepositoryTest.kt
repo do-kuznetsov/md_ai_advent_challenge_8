@@ -4,6 +4,11 @@ import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageAttachment
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageFooter
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChangeAction
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryItem
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryLayer
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.data.external.storage.JsonFileChatHistoryStorage
@@ -27,6 +32,25 @@ class FileChatHistoryRepositoryTest {
             attachment = HistoryMessageAttachment(
                 fileName = "notes.md",
                 sizeBytes = 12L,
+            ),
+            memory = HistoryMessageMemoryMetadata(
+                storedLayers = listOf(HistoryMemoryLayer.WorkingMemory),
+                usedLayers = listOf(HistoryMemoryLayer.ShortTerm, HistoryMemoryLayer.WorkingMemory),
+                changes = listOf(
+                    HistoryMemoryChange(
+                        action = HistoryMemoryChangeAction.Add,
+                        layer = HistoryMemoryLayer.WorkingMemory,
+                        fact = "Project uses Kotlin",
+                    ),
+                ),
+                injectedItems = listOf(
+                    HistoryMemoryItem(
+                        id = "memory-1",
+                        layer = HistoryMemoryLayer.WorkingMemory,
+                        fact = "Project uses Kotlin",
+                        importance = 0.8,
+                    ),
+                ),
             ),
         )
         val second = HistoryMessage(

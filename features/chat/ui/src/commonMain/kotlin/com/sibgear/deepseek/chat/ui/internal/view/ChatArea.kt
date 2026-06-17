@@ -26,6 +26,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,6 +39,9 @@ import com.sibgear.deepseek.chat.ui.generated.resources.Res
 import com.sibgear.deepseek.chat.ui.generated.resources.ic_paperclip
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
+import com.sibgear.deepseek.chat.domain.model.ChatMessageMemoryMetadata
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryChangeAction
+import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.ui.internal.mapper.formatMegabytes
@@ -161,6 +168,7 @@ private fun ChatBubble(
         ChatRole.User -> UserMessageColor
         ChatRole.Assistant -> AssistantMessageColor
     }
+    var isMemoryExpanded by remember(message.memory) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -228,6 +236,14 @@ private fun ChatBubble(
                     }
                 }
 
+                message.memory?.let { memory ->
+                    MemoryMetadataBlock(
+                        memory = memory,
+                        isExpanded = isMemoryExpanded,
+                        onToggle = { isMemoryExpanded = !isMemoryExpanded },
+                    )
+                }
+
                 message.footer?.let { footer ->
                     Text(
                         text = footer.displayText(),
@@ -239,6 +255,89 @@ private fun ChatBubble(
         }
     }
 }
+
+@Composable
+private fun MemoryMetadataBlock(
+    memory: ChatMessageMemoryMetadata,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val summary = memory.summaryText()
+    if (summary.isBlank()) {
+        return
+    }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = summary,
+            modifier = Modifier.clickable(onClick = onToggle),
+            color = Color(0xFF5F6368),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        if (isExpanded) {
+            memory.error?.let { error ->
+                Text(
+                    text = error,
+                    color = Color(0xFF8A4B00),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            memory.changes.takeIf { it.isNotEmpty() }?.let { changes ->
+                Text(
+                    text = buildString {
+                        appendLine("memory changes:")
+                        changes.forEach { change ->
+                            appendLine("- ${change.action.displayText}: ${change.layer.displayText}: ${change.fact}")
+                        }
+                    }.trimEnd(),
+                    color = Color(0xFF5F6368),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            memory.injectedItems.takeIf { it.isNotEmpty() }?.let { items ->
+                Text(
+                    text = buildString {
+                        appendLine("memory injected:")
+                        items.forEach { item ->
+                            appendLine("- ${item.layer.displayText}: ${item.fact}")
+                        }
+                    }.trimEnd(),
+                    color = Color(0xFF5F6368),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+    }
+}
+
+private fun ChatMessageMemoryMetadata.summaryText(): String =
+    buildList {
+        if (storedLayers.isNotEmpty()) {
+            add("memory stored: ${storedLayers.distinct().joinToString { it.displayText }}")
+        }
+        if (usedLayers.isNotEmpty()) {
+            add("memory used: ${usedLayers.distinct().joinToString { it.displayText }}")
+        }
+        if (error != null && storedLayers.isEmpty() && usedLayers.isEmpty()) {
+            add("memory: ignored")
+        }
+    }.joinToString(separator = " · ")
+
+private val ChatMemoryLayer.displayText: String
+    get() = when (this) {
+        ChatMemoryLayer.ShortTerm -> "short-term"
+        ChatMemoryLayer.WorkingMemory -> "working"
+        ChatMemoryLayer.LongTermMemory -> "long-term"
+    }
+
+private val ChatMemoryChangeAction.displayText: String
+    get() = when (this) {
+        ChatMemoryChangeAction.Add -> "add"
+        ChatMemoryChangeAction.Update -> "update"
+        ChatMemoryChangeAction.Delete -> "delete"
+    }
 
 private fun ChatMessageFooter.displayText(): String =
     buildList {

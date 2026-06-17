@@ -66,6 +66,9 @@ internal class WorkspaceStorage(
     fun databaseHistoryFile(): File =
         File(baseDir, "chat-history.db")
 
+    fun jsonMemoryFile(): File =
+        File(baseDir, "assistant-memory.json")
+
     fun storageDirectoryLabel(): String =
         "storage: ${baseDir.absolutePath}"
 

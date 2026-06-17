@@ -62,6 +62,65 @@ data class BranchSelection(
     val activeBranchId: Int,
 )
 
+data class ChatMemoryItem(
+    val id: String,
+    val layer: ChatMemoryLayer,
+    val fact: String,
+    val importance: Double,
+)
+
+enum class ChatMemoryLayer {
+    ShortTerm,
+    WorkingMemory,
+    LongTermMemory,
+}
+
+data class ChatMemoryCandidate(
+    val layer: ChatMemoryLayer,
+    val fact: String,
+    val importance: Double,
+)
+
+data class ChatMemoryUpdate(
+    val action: ChatMemoryUpdateAction,
+    val id: String? = null,
+    val layer: ChatMemoryLayer? = null,
+    val fact: String? = null,
+    val importance: Double? = null,
+)
+
+enum class ChatMemoryUpdateAction {
+    Add,
+    Update,
+    Delete,
+}
+
+data class MemoryClassificationRequest(
+    val prompt: String,
+)
+
+data class MemoryMutationRequest(
+    val prompt: String,
+)
+
+data class MemoryRetrievalRequest(
+    val prompt: String,
+)
+
+data class ChatMemoryRetrievalPlan(
+    val needShortTerm: Boolean = true,
+    val needWorkingMemory: Boolean = false,
+    val needLongTermMemory: Boolean = false,
+    val memoryItemIds: List<String> = emptyList(),
+    val reason: String = "",
+)
+
+data class MemoryInjection(
+    val effectiveSystemPrompt: String,
+    val usedLayers: List<ChatMemoryLayer>,
+    val injectedItems: List<ChatMemoryItem>,
+)
+
 const val CompressionSummaryPrompt = """
 Сожми предыдущий диалог для продолжения общения.
 Это промежуточная компрессия контекста, а не финальное резюме.
