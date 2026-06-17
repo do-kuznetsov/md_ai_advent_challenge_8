@@ -10,11 +10,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -41,6 +47,7 @@ internal fun ChatTabBar(
     onTabAdded: () -> Unit,
     onStorageMenuExpandedChanged: (Boolean) -> Unit,
     onStorageSelected: (ChatStorageType) -> Unit,
+    onProfileClicked: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -74,6 +81,7 @@ internal fun ChatTabBar(
             isStorageSwitchEnabled = isStorageSwitchEnabled,
             onStorageMenuExpandedChanged = onStorageMenuExpandedChanged,
             onStorageSelected = onStorageSelected,
+            onProfileClicked = onProfileClicked,
         )
     }
 }
@@ -151,6 +159,7 @@ private fun StorageSelector(
     isStorageSwitchEnabled: Boolean,
     onStorageMenuExpandedChanged: (Boolean) -> Unit,
     onStorageSelected: (ChatStorageType) -> Unit,
+    onProfileClicked: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -181,28 +190,48 @@ private fun StorageSelector(
             )
         }
 
-        Box(modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = { onStorageMenuExpandedChanged(true) },
-                enabled = isStorageSwitchEnabled,
-                modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onProfileClicked,
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             ) {
-                Text(
-                    text = selectedStorageType.label,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "user profile",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
 
-            DropdownMenu(
-                expanded = isStorageMenuExpanded,
-                onDismissRequest = { onStorageMenuExpandedChanged(false) },
-            ) {
-                ChatStorageType.entries.forEach { storageType ->
-                    DropdownMenuItem(
-                        text = { Text(storageType.label) },
-                        onClick = { onStorageSelected(storageType) },
+            Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { onStorageMenuExpandedChanged(true) },
+                    enabled = isStorageSwitchEnabled,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = selectedStorageType.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                }
+
+                DropdownMenu(
+                    expanded = isStorageMenuExpanded,
+                    onDismissRequest = { onStorageMenuExpandedChanged(false) },
+                ) {
+                    ChatStorageType.entries.forEach { storageType ->
+                        DropdownMenuItem(
+                            text = { Text(storageType.label) },
+                            onClick = { onStorageSelected(storageType) },
+                        )
+                    }
                 }
             }
         }

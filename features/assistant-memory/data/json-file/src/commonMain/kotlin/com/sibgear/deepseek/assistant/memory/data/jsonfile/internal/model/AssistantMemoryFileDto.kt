@@ -8,6 +8,7 @@ internal const val AssistantMemoryFileVersion = 1
 internal data class AssistantMemoryFileDto(
     val version: Int = AssistantMemoryFileVersion,
     val items: List<MemoryItemDto> = emptyList(),
+    val profile: UserProfileDto? = null,
 )
 
 @Serializable
@@ -16,4 +17,9 @@ internal data class MemoryItemDto(
     val layer: String,
     val fact: String,
     val importance: Double,
+)
+
+@Serializable
+internal data class UserProfileDto(
+    val text: String = "",
 )

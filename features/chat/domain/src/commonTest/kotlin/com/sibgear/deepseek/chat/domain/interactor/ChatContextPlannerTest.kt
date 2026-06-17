@@ -379,6 +379,20 @@ class ChatContextPlannerTest {
     }
 
     @Test
+    fun memoryInjectionAddsUserProfileSeparatelyFromMemoryContext() {
+        val injection = planner.memoryInjection(
+            originalSystemPrompt = "base system",
+            userProfile = "Стиль: отвечать кратко",
+            retrievalPlan = ChatMemoryRetrievalPlan(),
+            availableMemory = emptyList(),
+        )
+
+        assertEquals(true, injection.effectiveSystemPrompt.contains("[USER_PROFILE]"))
+        assertEquals(true, injection.effectiveSystemPrompt.contains("Стиль: отвечать кратко"))
+        assertEquals(false, injection.effectiveSystemPrompt.contains("[MEMORY_CONTEXT]"))
+    }
+
+    @Test
     fun memoryServicePromptsContainUserPromptAndAvailableMemory() {
         val classification = planner.memoryClassificationRequest("Use Kotlin and Compose")
         val retrieval = planner.memoryRetrievalRequest(

@@ -11,6 +11,7 @@ import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
@@ -185,5 +186,16 @@ class OpenRouterChatMapperTest {
         assertEquals(true, plan?.needWorkingMemory)
         assertEquals(false, plan?.needLongTermMemory)
         assertEquals(listOf("memory-1"), plan?.memoryItemIds)
+    }
+
+    @Test
+    fun parsesUserProfile() {
+        val profile = """
+            ```json
+            {"profile":"Стиль: кратко"}
+            ```
+        """.trimIndent().toUserProfile(Json)
+
+        assertEquals(UserProfile(text = "Стиль: кратко"), profile)
     }
 }

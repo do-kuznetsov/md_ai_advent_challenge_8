@@ -2,11 +2,13 @@ package com.sibgear.deepseek.assistant.memory.data.jsonfile.external.repository
 
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper.toAssistantMemoryFileDto
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper.toMemoryItems
+import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper.toUserProfile
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.model.AssistantMemoryFileDto
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import com.sibgear.deepseek.assistant.memory.domain.repository.AssistantMemoryRepository
 import java.io.File
 import kotlinx.serialization.encodeToString
@@ -26,7 +28,7 @@ class JsonFileAssistantMemoryRepository(
 
     override suspend fun replaceItems(items: List<MemoryItem>): List<MemoryItem> {
         val safeItems = items.sanitized()
-        writeItems(safeItems)
+        writeDto(safeItems.toAssistantMemoryFileDto(readProfile()))
         return safeItems
     }
 
@@ -71,31 +73,48 @@ class JsonFileAssistantMemoryRepository(
         return replaceItems(current)
     }
 
+    override suspend fun getProfile(): UserProfile =
+        readProfile()
+
+    override suspend fun saveProfile(profile: UserProfile): UserProfile {
+        val safeProfile = profile.sanitized()
+        writeDto(readItems().toAssistantMemoryFileDto(safeProfile))
+        return safeProfile
+    }
+
     override suspend fun clear() {
-        writeItems(emptyList())
+        writeDto(emptyList<MemoryItem>().toAssistantMemoryFileDto(readProfile()))
     }
 
     private fun readItems(): List<MemoryItem> {
+        return readDto().toMemoryItems()
+    }
+
+    private fun readProfile(): UserProfile {
+        return readDto().toUserProfile()
+    }
+
+    private fun readDto(): AssistantMemoryFileDto {
         if (!file.exists()) {
-            return emptyList()
+            return AssistantMemoryFileDto()
         }
 
         return runCatching {
-            json.decodeFromString<AssistantMemoryFileDto>(file.readText()).toMemoryItems()
+            json.decodeFromString<AssistantMemoryFileDto>(file.readText())
         }.getOrElse {
             preserveCorruptFile()
-            emptyList()
+            AssistantMemoryFileDto()
         }
     }
 
-    private fun writeItems(items: List<MemoryItem>) {
+    private fun writeDto(dto: AssistantMemoryFileDto) {
         val parent = file.parentFile
         if (parent != null && !parent.exists()) {
             parent.mkdirs()
         }
 
         val tempFile = File(parent ?: File("."), "${file.name}.tmp")
-        tempFile.writeText(json.encodeToString(items.toAssistantMemoryFileDto()))
+        tempFile.writeText(json.encodeToString(dto))
         if (file.exists() && !file.delete()) {
             tempFile.delete()
             error("Cannot replace assistant memory file: ${file.absolutePath}")
@@ -120,6 +139,9 @@ private fun List<MemoryItem>.sanitized(): List<MemoryItem> =
             item.layer != MemoryLayer.ShortTerm
     }.distinctBy { it.id }
         .map { it.copy(fact = it.fact.trim(), importance = it.importance.coerceIn(0.0, 1.0)) }
+
+private fun UserProfile.sanitized(): UserProfile =
+    copy(text = text.trim())
 
 private fun List<MemoryItem>.nextMemoryId(): String {
     val next = mapNotNull { item ->

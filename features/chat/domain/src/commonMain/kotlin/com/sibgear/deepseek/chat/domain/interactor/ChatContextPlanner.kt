@@ -198,6 +198,7 @@ class ChatContextPlanner {
 
     fun memoryInjection(
         originalSystemPrompt: String,
+        userProfile: String = "",
         retrievalPlan: ChatMemoryRetrievalPlan,
         availableMemory: List<ChatMemoryItem>,
     ): MemoryInjection {
@@ -222,7 +223,8 @@ class ChatContextPlanner {
             }
         }
 
-        val effectiveSystemPrompt = if (selectedItems.isEmpty()) {
+        val trimmedProfile = userProfile.trim()
+        val effectiveSystemPrompt = if (selectedItems.isEmpty() && trimmedProfile.isEmpty()) {
             originalSystemPrompt
         } else {
             buildString {
@@ -231,7 +233,16 @@ class ChatContextPlanner {
                     appendLine()
                     appendLine()
                 }
-                appendLine("[MEMORY_CONTEXT]")
+                if (trimmedProfile.isNotEmpty()) {
+                    appendLine("[USER_PROFILE]")
+                    appendLine(trimmedProfile)
+                    if (selectedItems.isNotEmpty()) {
+                        appendLine()
+                    }
+                }
+                if (selectedItems.isNotEmpty()) {
+                    appendLine("[MEMORY_CONTEXT]")
+                }
                 selectedItems
                     .groupBy { it.layer }
                     .forEach { (layer, items) ->

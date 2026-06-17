@@ -4,6 +4,7 @@ import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
@@ -70,6 +71,24 @@ class SqldelightAssistantMemoryRepositoryTest {
         repository.applyUpdates(listOf(MemoryUpdate(action = MemoryUpdateAction.Delete, id = "memory-1")))
 
         assertEquals(emptyList(), repository.getItems())
+    }
+
+    @Test
+    fun storesAndRestoresProfile() = runTest {
+        val file = tempDatabaseFile()
+        val repository = SqldelightAssistantMemoryRepository(file)
+
+        repository.saveProfile(UserProfile(text = "Формат: списком"))
+
+        assertEquals(
+            UserProfile(text = "Формат: списком"),
+            SqldelightAssistantMemoryRepository(file).getProfile(),
+        )
+    }
+
+    @Test
+    fun newDatabaseRestoresEmptyProfile() = runTest {
+        assertEquals(UserProfile(), SqldelightAssistantMemoryRepository(tempDatabaseFile()).getProfile())
     }
 
     private fun tempDatabaseFile(): File =

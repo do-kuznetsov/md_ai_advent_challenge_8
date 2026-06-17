@@ -446,6 +446,15 @@ class DeepSeekChatRepository(
         var currentItems = originalItems
         var changes = emptyList<com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange>()
         val errors = mutableListOf<String>()
+        val userProfile = runCatching {
+            memory.getProfile().text
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            ""
+        }
 
         val candidates = runCatching {
             val classificationRequest = contextPlanner.memoryClassificationRequest(request.prompt)
@@ -526,6 +535,7 @@ class DeepSeekChatRepository(
 
         val injection = contextPlanner.memoryInjection(
             originalSystemPrompt = request.systemPrompt,
+            userProfile = userProfile,
             retrievalPlan = retrievalPlan ?: com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan(),
             availableMemory = currentItems.toChatMemoryItems(),
         )

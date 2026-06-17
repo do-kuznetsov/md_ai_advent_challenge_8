@@ -25,6 +25,7 @@ import com.sibgear.deepseek.chat.ui.external.view.ChatScreen
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppEvent
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppViewState
 import com.sibgear.deepseek.chat.workspace.ui.internal.view.ChatTabBar
+import com.sibgear.deepseek.chat.workspace.ui.internal.view.UserProfileDialog
 
 @Composable
 fun AiChatAppScreen(
@@ -58,6 +59,7 @@ fun AiChatAppScreen(
                             onEvent(AiChatAppEvent.StorageMenuExpandedChanged(it))
                         },
                         onStorageSelected = { onEvent(AiChatAppEvent.StorageSelected(it)) },
+                        onProfileClicked = { onEvent(AiChatAppEvent.ProfileDialogOpened) },
                         modifier = Modifier
                             .fillMaxHeight()
                             .width(tabsWidth)
@@ -86,6 +88,24 @@ fun AiChatAppScreen(
                         )
                     }
                 }
+            }
+
+            if (state.isProfileDialogOpen) {
+                UserProfileDialog(
+                    profileDraft = state.profileDraft,
+                    isActionEnabled = state.isProfileActionEnabled,
+                    isInterviewActive = state.isProfileInterviewActive,
+                    interviewQuestionIndex = state.profileInterviewQuestionIndex,
+                    interviewAnswerInput = state.profileInterviewAnswerInput,
+                    isInterviewLoading = state.isProfileInterviewLoading,
+                    error = state.profileError,
+                    onDismissRequest = { onEvent(AiChatAppEvent.ProfileDialogClosed) },
+                    onProfileChanged = { onEvent(AiChatAppEvent.ProfileDraftChanged(it)) },
+                    onSaveClicked = { onEvent(AiChatAppEvent.ProfileSaved) },
+                    onInterviewClicked = { onEvent(AiChatAppEvent.ProfileInterviewStarted) },
+                    onInterviewAnswerChanged = { onEvent(AiChatAppEvent.ProfileInterviewAnswerChanged(it)) },
+                    onInterviewAnswerSubmitted = { onEvent(AiChatAppEvent.ProfileInterviewAnswerSubmitted) },
+                )
             }
         }
     }

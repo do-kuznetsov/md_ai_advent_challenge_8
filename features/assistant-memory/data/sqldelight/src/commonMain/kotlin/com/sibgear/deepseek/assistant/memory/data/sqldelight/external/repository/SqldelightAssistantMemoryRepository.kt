@@ -4,6 +4,7 @@ import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import com.sibgear.deepseek.assistant.memory.domain.repository.AssistantMemoryRepository
 import java.io.File
 import java.sql.Connection
@@ -18,6 +19,7 @@ class SqldelightAssistantMemoryRepository(
         withConnection { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(createMemoryTableSql())
+                statement.execute(createProfileTableSql())
             }
         }
     }
@@ -103,6 +105,33 @@ class SqldelightAssistantMemoryRepository(
         return replaceItems(current)
     }
 
+    override suspend fun getProfile(): UserProfile =
+        withConnection { connection ->
+            connection.prepareStatement(selectProfileSql()).use { statement ->
+                statement.setString(1, ProfileId)
+                statement.executeQuery().use { resultSet ->
+                    if (resultSet.next()) {
+                        UserProfile(text = resultSet.getString("profile_text").orEmpty())
+                    } else {
+                        UserProfile()
+                    }
+                }
+            }
+        }
+
+    override suspend fun saveProfile(profile: UserProfile): UserProfile {
+        val safeProfile = profile.sanitized()
+        withConnection { connection ->
+            connection.prepareStatement(upsertProfileSql()).use { statement ->
+                statement.setString(1, ProfileId)
+                statement.setString(2, safeProfile.text)
+                statement.setString(3, safeProfile.text)
+                statement.executeUpdate()
+            }
+        }
+        return safeProfile
+    }
+
     override suspend fun clear() {
         withConnection { connection ->
             connection.createStatement().use { statement ->
@@ -138,6 +167,9 @@ private fun List<MemoryItem>.sanitized(): List<MemoryItem> =
     }.distinctBy { it.id }
         .map { it.copy(fact = it.fact.trim(), importance = it.importance.coerceIn(0.0, 1.0)) }
 
+private fun UserProfile.sanitized(): UserProfile =
+    copy(text = text.trim())
+
 private fun List<MemoryItem>.nextMemoryId(): String {
     val next = mapNotNull { item ->
         item.id.removePrefix(MemoryIdPrefix).toIntOrNull()
@@ -172,8 +204,19 @@ private fun createMemoryTableSql(): String =
     )
     """.trimIndent()
 
+private fun createProfileTableSql(): String =
+    """
+    CREATE TABLE IF NOT EXISTS $ProfileTableName (
+        profile_id TEXT NOT NULL PRIMARY KEY,
+        profile_text TEXT NOT NULL
+    )
+    """.trimIndent()
+
 private fun selectAllSql(): String =
     "SELECT * FROM $MemoryTableName ORDER BY memory_id ASC"
+
+private fun selectProfileSql(): String =
+    "SELECT profile_text FROM $ProfileTableName WHERE profile_id = ?"
 
 private fun insertSql(): String =
     """
@@ -189,6 +232,15 @@ private fun insertSql(): String =
 private fun deleteAllSql(): String =
     "DELETE FROM $MemoryTableName"
 
+private fun upsertProfileSql(): String =
+    """
+    INSERT INTO $ProfileTableName(profile_id, profile_text)
+    VALUES (?, ?)
+    ON CONFLICT(profile_id) DO UPDATE SET profile_text = ?
+    """.trimIndent()
+
 private const val MemoryTableName = "assistant_memory_item"
+private const val ProfileTableName = "assistant_user_profile"
+private const val ProfileId = "default"
 private const val MemoryIdPrefix = "memory-"
 private const val DefaultImportance = 0.5

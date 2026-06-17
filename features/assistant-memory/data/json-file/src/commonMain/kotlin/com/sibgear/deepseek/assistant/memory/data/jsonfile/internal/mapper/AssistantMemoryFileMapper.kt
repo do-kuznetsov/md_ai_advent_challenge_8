@@ -3,16 +3,22 @@ package com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.model.AssistantMemoryFileDto
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.model.AssistantMemoryFileVersion
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.model.MemoryItemDto
+import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.model.UserProfileDto
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
+import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 
 internal fun AssistantMemoryFileDto.toMemoryItems(): List<MemoryItem> =
     items.mapNotNull { it.toDomain() }
 
-internal fun List<MemoryItem>.toAssistantMemoryFileDto(): AssistantMemoryFileDto =
+internal fun AssistantMemoryFileDto.toUserProfile(): UserProfile =
+    UserProfile(text = profile?.text.orEmpty())
+
+internal fun List<MemoryItem>.toAssistantMemoryFileDto(profile: UserProfile): AssistantMemoryFileDto =
     AssistantMemoryFileDto(
         version = AssistantMemoryFileVersion,
         items = map { it.toDto() },
+        profile = profile.toDto(),
     )
 
 private fun MemoryItem.toDto(): MemoryItemDto =
@@ -22,6 +28,9 @@ private fun MemoryItem.toDto(): MemoryItemDto =
         fact = fact,
         importance = importance,
     )
+
+private fun UserProfile.toDto(): UserProfileDto =
+    UserProfileDto(text = text)
 
 private fun MemoryItemDto.toDomain(): MemoryItem? {
     val trimmedId = id.trim()
