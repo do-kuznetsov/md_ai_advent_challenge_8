@@ -15,7 +15,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
-            implementation(compose.components.resources)
+            implementation(libs.compose.material.icons.extended)
             implementation(libs.kotlinx.coroutines.core)
         }
 
@@ -23,8 +23,4 @@ kotlin {
             implementation(libs.kotlin.test)
         }
     }
-}
-
-compose.resources {
-    packageOfResClass = "com.sibgear.deepseek.chat.ui.generated.resources"
 }

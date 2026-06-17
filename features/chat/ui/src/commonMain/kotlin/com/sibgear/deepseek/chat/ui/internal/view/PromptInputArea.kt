@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -21,12 +23,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.sibgear.deepseek.chat.ui.generated.resources.Res
-import com.sibgear.deepseek.chat.ui.generated.resources.ic_paperclip
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
 import com.sibgear.deepseek.chat.ui.internal.mapper.formatMegabytes
-import org.jetbrains.compose.resources.painterResource
 
 @Composable
 internal fun PromptInputArea(
@@ -95,7 +94,7 @@ internal fun PromptInputArea(
                         .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.ic_paperclip),
+                        imageVector = Icons.Default.AttachFile,
                         contentDescription = "attach file",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -111,7 +110,7 @@ internal fun PromptInputArea(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    painter = painterResource(Res.drawable.ic_paperclip),
+                    imageVector = Icons.Default.AttachFile,
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
                     tint = Color(0xFF5F6368),

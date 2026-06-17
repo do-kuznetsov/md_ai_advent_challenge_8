@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -35,8 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.sibgear.deepseek.chat.ui.generated.resources.Res
-import com.sibgear.deepseek.chat.ui.generated.resources.ic_paperclip
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageFooter
 import com.sibgear.deepseek.chat.domain.model.ChatMessageMemoryMetadata
@@ -45,7 +45,6 @@ import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.ui.internal.mapper.formatMegabytes
-import org.jetbrains.compose.resources.painterResource
 import kotlin.math.roundToLong
 
 private val UserMessageColor = Color(0xFFDDF7DF)
@@ -223,7 +222,7 @@ private fun ChatBubble(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            painter = painterResource(Res.drawable.ic_paperclip),
+                            imageVector = Icons.Default.AttachFile,
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
                             tint = Color(0xFF5F6368),
