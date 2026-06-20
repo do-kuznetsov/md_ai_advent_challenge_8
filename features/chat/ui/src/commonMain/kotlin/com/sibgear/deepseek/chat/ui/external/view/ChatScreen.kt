@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -18,7 +17,6 @@ import com.sibgear.deepseek.chat.ui.internal.view.ApiSettingsPanel
 import com.sibgear.deepseek.chat.ui.internal.view.BranchTreePanel
 import com.sibgear.deepseek.chat.ui.internal.view.ChatArea
 import com.sibgear.deepseek.chat.ui.internal.view.PromptInputArea
-import com.sibgear.deepseek.chat.ui.internal.view.SendButtonArea
 import com.sibgear.deepseek.chat.ui.internal.view.StickyFactsPanel
 
 @Composable
@@ -60,14 +58,7 @@ fun ChatScreen(
                 ApiSettingsPanel(
                     state = state,
                     onEvent = onEvent,
-                    modifier = Modifier.weight(1f),
-                )
-
-                SendButtonArea(
-                    isLoading = state.isLoading,
-                    isSendEnabled = state.isSendEnabled,
-                    onSendClicked = { onEvent(ChatEvent.SendClicked) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxHeight(),
                 )
             }
         }
