@@ -41,7 +41,7 @@ internal fun UserProfileDialog(
 ) {
     Dialog(onDismissRequest = onDismissRequest) {
         Surface(
-            modifier = Modifier.widthIn(min = 520.dp, max = 720.dp),
+            modifier = Modifier.widthIn(min = 640.dp, max = 860.dp),
             shape = RoundedCornerShape(8.dp),
             tonalElevation = 6.dp,
             shadowElevation = 8.dp,
@@ -150,24 +150,32 @@ private fun InterviewBlock(
                 )
             }
         } else {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedTextField(
                     value = answerInput,
                     onValueChange = onAnswerChanged,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp, max = 180.dp),
                     enabled = isActionEnabled,
-                    singleLine = true,
+                    minLines = 3,
+                    maxLines = 6,
                 )
 
-                Button(
-                    onClick = onAnswerSubmitted,
-                    enabled = isActionEnabled,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("ответить")
+                    Button(
+                        onClick = onAnswerSubmitted,
+                        enabled = isActionEnabled,
+                    ) {
+                        Text("ответить")
+                    }
                 }
             }
         }
@@ -175,9 +183,9 @@ private fun InterviewBlock(
 }
 
 private val ProfileQuestions = listOf(
-    "Какой стиль ответов тебе комфортнее?",
-    "Какой формат и уровень детализации предпочитаешь?",
-    "Какие ограничения или вещи стоит избегать?",
-    "Какой рабочий или технический контекст важно учитывать?",
-    "Как лучше предлагать решения и следующие шаги?",
+    "На каком языке с тобой общаться и как обращаться? Если удобно, укажи имя/ник и основной язык.",
+    "Какие ответы тебе комфортнее: короткие или подробные? Нужны ли объяснения шагов, примеры, альтернативы?",
+    "Какой стиль общения предпочитаешь: формальный, спокойный рабочий, разговорный? Что точно раздражает?",
+    "Кто ты на проекте и что это за проект? Кратко опиши роль, продукт, аудиторию и текущую цель.",
+    "Какие технические рамки важно учитывать: стек, архитектура, ограничения по зависимостям, кодстайлу, тестам, безопасности или процессу?",
 )

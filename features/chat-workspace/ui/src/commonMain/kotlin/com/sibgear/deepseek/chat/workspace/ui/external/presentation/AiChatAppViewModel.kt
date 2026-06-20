@@ -391,10 +391,11 @@ class AiChatAppViewModel(
         const val MaxTitleWords = 5
         const val ProfileInterviewQuestionsCount = 5
         val EmptyProfileTemplate = """
-            Стиль:
-            Формат:
-            Ограничения:
-            Предпочтения:
+            Язык и обращение:
+            Детальность ответов:
+            Стиль общения:
+            Роль и проект:
+            Технические рамки:
         """.trimIndent()
     }
 }
