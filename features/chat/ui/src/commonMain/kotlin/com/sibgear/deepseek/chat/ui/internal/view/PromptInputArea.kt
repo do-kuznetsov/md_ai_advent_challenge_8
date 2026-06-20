@@ -7,17 +7,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +63,9 @@ import com.sibgear.deepseek.chat.ui.internal.mapper.formatMegabytes
 internal fun PromptInputArea(
     state: ChatViewState,
     onEvent: (ChatEvent) -> Unit,
+    showTaskModeToggle: Boolean = false,
+    isTaskModeEnabled: Boolean = false,
+    onTaskModeToggled: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -82,6 +88,7 @@ internal fun PromptInputArea(
                 onValueChange = { onEvent(ChatEvent.SystemPromptChanged(it)) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
+                enabled = !state.isSystemPromptReadOnly,
             )
         }
 
@@ -95,6 +102,9 @@ internal fun PromptInputArea(
                 isLoading = state.isLoading,
                 isSendEnabled = state.isSendEnabled,
                 attachment = state.attachment,
+                showTaskModeToggle = showTaskModeToggle,
+                isTaskModeEnabled = isTaskModeEnabled,
+                onTaskModeToggled = onTaskModeToggled,
                 onSendClicked = { onEvent(ChatEvent.SendClicked) },
                 onAttachClicked = {
                     when (val result = pickTextAttachment()) {
@@ -125,6 +135,9 @@ private fun UserPromptInputBox(
     isLoading: Boolean,
     isSendEnabled: Boolean,
     attachment: PromptAttachment?,
+    showTaskModeToggle: Boolean,
+    isTaskModeEnabled: Boolean,
+    onTaskModeToggled: () -> Unit,
     onSendClicked: () -> Unit,
     onAttachClicked: () -> Unit,
     onAttachmentCleared: () -> Unit,
@@ -289,6 +302,35 @@ private fun UserPromptInputBox(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (showTaskModeToggle) {
+                    IconButton(
+                        onClick = onTaskModeToggled,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(
+                                if (isTaskModeEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                },
+                                CircleShape,
+                            ),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Checklist,
+                            contentDescription = "task state machine",
+                            modifier = Modifier.size(18.dp),
+                            tint = if (isTaskModeEnabled) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            },
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(TaskModeAttachButtonGap))
+                }
+
                 IconButton(
                     onClick = onAttachClicked,
                     modifier = Modifier
@@ -362,6 +404,8 @@ private enum class PromptEditShortcut(
     Cut(Key.X),
     Paste(Key.V),
 }
+
+private val TaskModeAttachButtonGap = 12.dp
 
 private fun KeyEvent.promptEditShortcut(): PromptEditShortcut? {
     if (!isPromptCommandKeyDown()) {

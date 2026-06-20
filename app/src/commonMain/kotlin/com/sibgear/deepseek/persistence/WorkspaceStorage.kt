@@ -1,5 +1,11 @@
 package com.sibgear.deepseek.persistence
 
+import com.sibgear.deepseek.chat.domain.model.TaskContext
+import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
+import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
+import com.sibgear.deepseek.chat.domain.model.TaskStageSession
+import com.sibgear.deepseek.chat.domain.model.TaskState
+import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import java.io.File
 import kotlinx.serialization.Serializable
@@ -66,6 +72,12 @@ internal class WorkspaceStorage(
     fun databaseHistoryFile(): File =
         File(baseDir, "chat-history.db")
 
+    fun jsonTaskStageHistoryFile(): File =
+        File(baseDir, "task-stage-history.json")
+
+    fun databaseTaskStageHistoryFile(): File =
+        File(baseDir, "task-stage-history.db")
+
     fun jsonMemoryFile(): File =
         File(baseDir, "assistant-memory.json")
 
@@ -107,7 +119,7 @@ internal class WorkspaceStorage(
         val safeTabs = tabs
             .filter { it.number > 0 }
             .distinctBy { it.number }
-            .map { WorkspaceTabSnapshot(number = it.number) }
+            .map { WorkspaceTabSnapshot(number = it.number, taskSession = it.taskSession?.toDomain()) }
         val active = activeTabNumber
             .takeIf { number -> safeTabs.any { it.number == number } }
             ?: safeTabs.firstOrNull()?.number
@@ -127,7 +139,7 @@ internal class WorkspaceStorage(
 
     private fun WorkspaceSnapshot.toDto(): WorkspaceFileDto =
         WorkspaceFileDto(
-            tabs = tabs.map { WorkspaceTabDto(number = it.number) },
+            tabs = tabs.map { WorkspaceTabDto(number = it.number, taskSession = it.taskSession?.toDto()) },
             activeTabNumber = activeTabNumber,
             nextTabNumber = nextTabNumber,
             selectedStorageType = selectedStorageType.storageValue,
@@ -148,6 +160,7 @@ internal data class WorkspaceSnapshot(
 
 internal data class WorkspaceTabSnapshot(
     val number: Int,
+    val taskSession: TaskSessionSnapshot? = null,
 )
 
 @Serializable
@@ -163,11 +176,135 @@ private data class WorkspaceFileDto(
 private data class WorkspaceTabDto(
     val number: Int,
     val historyFileName: String? = null,
+    val taskSession: TaskSessionSnapshotDto? = null,
+)
+
+@Serializable
+private data class TaskSessionSnapshotDto(
+    val isModeEnabled: Boolean = false,
+    val context: TaskContextDto? = null,
+    val selectedStage: String = TaskState.Planning.title,
+    val stages: List<TaskStageSessionDto> = emptyList(),
+    val pendingTransition: TaskTransitionProposalDto? = null,
+)
+
+@Serializable
+private data class TaskContextDto(
+    val task: String,
+    val state: String,
+    val step: Int,
+    val total: Int,
+    val plan: List<String> = emptyList(),
+    val done: List<String> = emptyList(),
+    val current: String,
+    val expectedAction: String,
+)
+
+@Serializable
+private data class TaskStageSessionDto(
+    val state: String,
+    val chatId: Int,
+    val systemPrompt: String,
+    val startUserPrompt: String,
+    val input: String = "",
+    val output: String? = null,
+    val isReached: Boolean = false,
+    val isReadyForTransition: Boolean = false,
+)
+
+@Serializable
+private data class TaskTransitionProposalDto(
+    val from: String,
+    val to: String,
+    val reason: String,
+    val inputForTarget: String,
 )
 
 private const val WorkspaceFileVersion = 1
 private const val JsonStorageValue = "json"
 private const val DatabaseStorageValue = "db"
+
+private fun TaskSessionSnapshot.toDto(): TaskSessionSnapshotDto =
+    TaskSessionSnapshotDto(
+        isModeEnabled = isModeEnabled,
+        context = context?.toDto(),
+        selectedStage = selectedStage.title,
+        stages = stages.map { it.toDto() },
+        pendingTransition = pendingTransition?.toDto(),
+    )
+
+private fun TaskSessionSnapshotDto.toDomain(): TaskSessionSnapshot =
+    TaskSessionSnapshot(
+        isModeEnabled = isModeEnabled,
+        context = context?.toDomain(),
+        selectedStage = selectedStage.toTaskState(),
+        stages = stages.map { it.toDomain() },
+        pendingTransition = pendingTransition?.toDomain(),
+    )
+
+private fun TaskContext.toDto(): TaskContextDto =
+    TaskContextDto(
+        task = task,
+        state = state.title,
+        step = step,
+        total = total,
+        plan = plan,
+        done = done,
+        current = current,
+        expectedAction = expectedAction.name,
+    )
+
+private fun TaskContextDto.toDomain(): TaskContext =
+    TaskContext(
+        task = task,
+        state = state.toTaskState(),
+        step = step,
+        total = total,
+        plan = plan,
+        done = done,
+        current = current,
+        expectedAction = expectedAction.toTaskExpectedAction(),
+    )
+
+private fun TaskStageSession.toDto(): TaskStageSessionDto =
+    TaskStageSessionDto(
+        state = state.title,
+        chatId = chatId,
+        systemPrompt = systemPrompt,
+        startUserPrompt = startUserPrompt,
+        input = input,
+        output = output,
+        isReached = isReached,
+        isReadyForTransition = isReadyForTransition,
+    )
+
+private fun TaskStageSessionDto.toDomain(): TaskStageSession =
+    TaskStageSession(
+        state = state.toTaskState(),
+        chatId = chatId,
+        systemPrompt = systemPrompt,
+        startUserPrompt = startUserPrompt,
+        input = input,
+        output = output,
+        isReached = isReached,
+        isReadyForTransition = isReadyForTransition,
+    )
+
+private fun TaskTransitionProposal.toDto(): TaskTransitionProposalDto =
+    TaskTransitionProposalDto(
+        from = from.title,
+        to = to.title,
+        reason = reason,
+        inputForTarget = inputForTarget,
+    )
+
+private fun TaskTransitionProposalDto.toDomain(): TaskTransitionProposal =
+    TaskTransitionProposal(
+        from = from.toTaskState(),
+        to = to.toTaskState(),
+        reason = reason,
+        inputForTarget = inputForTarget,
+    )
 
 private val ChatStorageType.storageValue: String
     get() = when (this) {
@@ -180,6 +317,12 @@ private fun String.toChatStorageType(): ChatStorageType =
         DatabaseStorageValue -> ChatStorageType.Database
         else -> ChatStorageType.Json
     }
+
+private fun String.toTaskState(): TaskState =
+    TaskState.entries.firstOrNull { it.title == this } ?: TaskState.Planning
+
+private fun String.toTaskExpectedAction(): TaskExpectedAction =
+    TaskExpectedAction.entries.firstOrNull { it.name == this } ?: TaskExpectedAction.UserPrompt
 
 internal fun defaultStorageBaseDir(): File {
     val resourcesDir = System.getProperty("compose.application.resources.dir")

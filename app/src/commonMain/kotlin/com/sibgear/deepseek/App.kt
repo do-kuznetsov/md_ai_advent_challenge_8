@@ -17,6 +17,8 @@ import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterM
 import com.sibgear.deepseek.chat.data.openrouter.external.service.OpenRouterAssistantProfileService
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.AiProvider
+import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
+import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.repository.RoutingAiRepository
 import com.sibgear.deepseek.chat.history.data.external.storage.JsonFileChatHistoryStorage
 import com.sibgear.deepseek.chat.history.data.sqldelight.external.storage.SqldelightChatHistoryStorage
@@ -28,6 +30,8 @@ import com.sibgear.deepseek.chat.ui.external.presentation.ChatViewModel
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 import com.sibgear.deepseek.chat.workspace.ui.external.model.StorageSwitchResult
+import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
+import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskStageAgent
 import com.sibgear.deepseek.chat.workspace.ui.external.presentation.AiChatAppViewModel
 import com.sibgear.deepseek.chat.workspace.ui.external.view.AiChatAppScreen
 import com.sibgear.deepseek.config.BuildConfig
@@ -78,8 +82,16 @@ fun App() {
             tabNumber: Int,
             storageType: ChatStorageType,
             initialMessages: List<HistoryMessage>? = null,
+            useTaskStageHistory: Boolean = false,
+            initialSystemPrompt: String = "",
+            initialPrompt: String = "",
+            isSystemPromptReadOnly: Boolean = false,
         ): ChatViewModel {
-            val historyStorage = workspaceStorage.createHistoryStorage(storageType)
+            val historyStorage = if (useTaskStageHistory) {
+                workspaceStorage.createTaskStageHistoryStorage(storageType)
+            } else {
+                workspaceStorage.createHistoryStorage(storageType)
+            }
             val historyRepository = historyStorage.createRepository(tabNumber)
             val historyInteractor = ChatHistoryInteractor(
                 repository = historyRepository,
@@ -129,6 +141,9 @@ fun App() {
                 initialMessages = restoredMessages.toChatMessages(),
                 initialStickyFacts = restoredFacts.toStickyFacts(),
                 initialBranches = restoredBranches.toChatBranches(),
+                initialSystemPrompt = initialSystemPrompt,
+                initialPrompt = initialPrompt,
+                isSystemPromptReadOnly = isSystemPromptReadOnly,
             )
         }
 
@@ -136,6 +151,7 @@ fun App() {
             tabNumber: Int,
             storageType: ChatStorageType,
             initialMessages: List<HistoryMessage>,
+            taskSession: TaskSessionSnapshot? = null,
         ): ChatTab {
             val chatViewModel = createChatViewModel(
                 tabNumber = tabNumber,
@@ -147,6 +163,29 @@ fun App() {
                 number = tabNumber,
                 title = initialMessages.toTabTitle(),
                 viewModel = chatViewModel,
+                taskSession = taskSession?.let { snapshot ->
+                    TaskModeSession(
+                        isModeEnabled = snapshot.isModeEnabled,
+                        context = snapshot.context,
+                        selectedStage = snapshot.selectedStage,
+                        stageAgents = snapshot.stages.map { session ->
+                            val stageViewModel = createChatViewModel(
+                                tabNumber = session.chatId,
+                                storageType = storageType,
+                                useTaskStageHistory = true,
+                                initialSystemPrompt = session.systemPrompt,
+                                initialPrompt = session.startUserPrompt.takeIf { session.output == null }.orEmpty(),
+                                isSystemPromptReadOnly = true,
+                            )
+                            stageViewModel.loadModels()
+                            TaskStageAgent(
+                                session = session,
+                                viewModel = stageViewModel,
+                            )
+                        },
+                        pendingTransition = snapshot.pendingTransition,
+                    )
+                },
             )
         }
 
@@ -159,19 +198,39 @@ fun App() {
                     initialMessages = initialHistoryByTab[tabNumber],
                 )
             },
+            createTaskStageChatViewModel = { chatId, storageType, systemPrompt, initialPrompt ->
+                createChatViewModel(
+                    tabNumber = chatId,
+                    storageType = storageType,
+                    useTaskStageHistory = true,
+                    initialSystemPrompt = systemPrompt,
+                    initialPrompt = initialPrompt,
+                    isSystemPromptReadOnly = true,
+                )
+            },
             createInitialTabTitle = { tabNumber ->
                 initialTitlesByTab[tabNumber] ?: ChatTab.NewTitle
             },
             switchStorage = { storageType, currentTabs, activeTabNumber, nextTabNumber ->
                 val targetStorage = workspaceStorage.createHistoryStorage(storageType)
+                val targetTaskStageStorage = workspaceStorage.createTaskStageHistoryStorage(storageType)
                 currentTabs.forEach { tab ->
                     runBlocking {
                         val targetRepository = targetStorage.createRepository(tab.number)
                         targetRepository.replace(tab.viewModel.state.messages.toHistoryMessages())
                         targetRepository.replaceFacts(tab.viewModel.state.stickyFacts.toHistoryFacts())
                         targetRepository.replaceBranches(tab.viewModel.state.branches.toHistoryBranches())
+                        tab.taskSession?.stageAgents.orEmpty().forEach { agent ->
+                            val targetStageRepository = targetTaskStageStorage.createRepository(agent.session.chatId)
+                            targetStageRepository.replace(agent.viewModel.state.messages.toHistoryMessages())
+                            targetStageRepository.replaceFacts(agent.viewModel.state.stickyFacts.toHistoryFacts())
+                            targetStageRepository.replaceBranches(agent.viewModel.state.branches.toHistoryBranches())
+                        }
                     }
                 }
+                val taskSnapshotsByTab = currentTabs.mapNotNull { tab ->
+                    tab.taskSession?.toSnapshot()?.let { snapshot -> tab.number to snapshot }
+                }.toMap()
 
                 val currentNumbers = currentTabs.map { it.number }
                 val mergedNumbers = mergeTabNumbers(
@@ -186,6 +245,7 @@ fun App() {
                         tabNumber = tabNumber,
                         storageType = storageType,
                         initialMessages = messages,
+                        taskSession = taskSnapshotsByTab[tabNumber],
                     )
                 }
                 val safeActiveTabNumber = activeTabNumber
@@ -203,13 +263,16 @@ fun App() {
                 )
             },
             initialTabNumbers = initialTabNumbers,
+            initialTaskSessionsByTab = initialWorkspace.tabs.mapNotNull { tab ->
+                tab.taskSession?.let { taskSession -> tab.number to taskSession }
+            }.toMap(),
             initialActiveTabNumber = initialWorkspace.activeTabNumber,
             initialNextTabNumber = initialWorkspace.nextTabNumber,
             initialStorageType = initialStorageType,
             storageDirectoryLabel = workspaceStorage.storageDirectoryLabel(),
-            onWorkspaceChanged = { tabNumbers, activeTabNumber, nextTabNumber, storageType ->
+            onWorkspaceChanged = { tabs, activeTabNumber, nextTabNumber, storageType ->
                 workspaceStorage.save(
-                    tabs = tabNumbers.map { WorkspaceTabSnapshot(number = it) },
+                    tabs = tabs.map { WorkspaceTabSnapshot(number = it.number, taskSession = it.taskSession) },
                     activeTabNumber = activeTabNumber,
                     nextTabNumber = nextTabNumber,
                     selectedStorageType = storageType,
@@ -217,6 +280,10 @@ fun App() {
             },
             onTabClosed = { tabNumber, storageType ->
                 workspaceStorage.createHistoryStorage(storageType).deleteChat(tabNumber)
+                val taskStageStorage = workspaceStorage.createTaskStageHistoryStorage(storageType)
+                TaskState.entries.forEach { stage ->
+                    taskStageStorage.deleteChat(tabNumber.toTaskStageChatId(stage))
+                }
             },
             loadProfileAction = { storageType ->
                 workspaceStorage.createMemoryRepository(storageType).getProfile().text
@@ -255,6 +322,16 @@ private fun WorkspaceStorage.createHistoryStorage(storageType: ChatStorageType):
         )
         ChatStorageType.Database -> DatabaseAppChatHistoryStorage(
             storage = SqldelightChatHistoryStorage(databaseHistoryFile()),
+        )
+    }
+
+private fun WorkspaceStorage.createTaskStageHistoryStorage(storageType: ChatStorageType): AppChatHistoryStorage =
+    when (storageType) {
+        ChatStorageType.Json -> JsonAppChatHistoryStorage(
+            storage = JsonFileChatHistoryStorage(jsonTaskStageHistoryFile()),
+        )
+        ChatStorageType.Database -> DatabaseAppChatHistoryStorage(
+            storage = SqldelightChatHistoryStorage(databaseTaskStageHistoryFile()),
         )
     }
 
@@ -319,4 +396,8 @@ private fun List<HistoryMessage>.toTabTitle(): String {
         .ifBlank { ChatTab.NewTitle }
 }
 
+private fun Int.toTaskStageChatId(stage: TaskState): Int =
+    this * TaskStageChatIdMultiplier + stage.ordinal + 1
+
 private const val MaxTabTitleWords = 5
+private const val TaskStageChatIdMultiplier = 10

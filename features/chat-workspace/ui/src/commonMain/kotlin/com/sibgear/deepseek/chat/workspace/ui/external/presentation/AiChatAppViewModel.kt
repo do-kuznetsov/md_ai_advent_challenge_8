@@ -3,13 +3,28 @@ package com.sibgear.deepseek.chat.workspace.ui.external.presentation
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.sibgear.deepseek.chat.domain.model.ChatMessage
+import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.TaskContext
+import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
+import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
+import com.sibgear.deepseek.chat.domain.model.TaskStageSession
+import com.sibgear.deepseek.chat.domain.model.TaskState
+import com.sibgear.deepseek.chat.domain.model.TaskStateMachine
+import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
+import com.sibgear.deepseek.chat.domain.model.next
+import com.sibgear.deepseek.chat.domain.model.previous
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
+import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
 import com.sibgear.deepseek.chat.ui.external.presentation.ChatViewModel
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppEvent
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppViewState
+import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTabSnapshot
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 import com.sibgear.deepseek.chat.workspace.ui.external.model.StorageSwitchResult
+import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
+import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskStageAgent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -17,6 +32,12 @@ import kotlinx.coroutines.launch
 class AiChatAppViewModel(
     private val coroutineScope: CoroutineScope,
     private val createChatViewModel: (tabNumber: Int, storageType: ChatStorageType) -> ChatViewModel,
+    private val createTaskStageChatViewModel: (
+        chatId: Int,
+        storageType: ChatStorageType,
+        systemPrompt: String,
+        initialPrompt: String,
+    ) -> ChatViewModel,
     private val createInitialTabTitle: (tabNumber: Int) -> String = { ChatTab.NewTitle },
     private val switchStorage: (
         storageType: ChatStorageType,
@@ -25,12 +46,13 @@ class AiChatAppViewModel(
         nextTabNumber: Int,
     ) -> StorageSwitchResult,
     initialTabNumbers: List<Int> = emptyList(),
+    initialTaskSessionsByTab: Map<Int, TaskSessionSnapshot> = emptyMap(),
     initialActiveTabNumber: Int? = null,
     initialNextTabNumber: Int? = null,
     initialStorageType: ChatStorageType = ChatStorageType.Json,
     private val storageDirectoryLabel: String,
     private val onWorkspaceChanged: (
-        tabNumbers: List<Int>,
+        tabs: List<ChatTabSnapshot>,
         activeTabNumber: Int,
         nextTabNumber: Int,
         storageType: ChatStorageType,
@@ -45,10 +67,12 @@ class AiChatAppViewModel(
         answers: List<String>,
     ) -> String = { _, _, currentProfile, _ -> currentProfile },
 ) {
+    private val taskMachine = TaskStateMachine()
     private val initialNumbers = initialTabNumbers
         .filter { it > 0 }
         .distinct()
         .ifEmpty { listOf(1) }
+    private val initialTaskSnapshots = initialTaskSessionsByTab
     private var nextTabNumber = maxOf(
         initialNextTabNumber ?: ((initialNumbers.maxOrNull() ?: 0) + 1),
         (initialNumbers.maxOrNull() ?: 0) + 1,
@@ -59,6 +83,7 @@ class AiChatAppViewModel(
             tabNumbers = initialNumbers,
             activeTabNumber = initialActiveTabNumber,
             storageType = initialStorageType,
+            taskSnapshotsByTab = initialTaskSnapshots,
         ),
     )
         private set
@@ -87,6 +112,12 @@ class AiChatAppViewModel(
                 state = state.copy(profileInterviewAnswerInput = event.text, profileError = null)
             }
             AiChatAppEvent.ProfileInterviewAnswerSubmitted -> submitProfileInterviewAnswer()
+            AiChatAppEvent.TaskModeToggled -> toggleTaskMode()
+            is AiChatAppEvent.TaskStageSelected -> selectTaskStage(event.stage)
+            AiChatAppEvent.TaskTransitionAccepted -> acceptTaskTransition()
+            AiChatAppEvent.TaskTransitionRevisionRequested -> requestTaskRevision()
+            AiChatAppEvent.TaskPreviousStageRequested -> requestPreviousTaskStage()
+            is AiChatAppEvent.ActiveTaskStageChatEvent -> handleTaskStageChatEvent(event.event)
             is AiChatAppEvent.TabSelected -> {
                 if (state.tabs.any { it.number == event.number }) {
                     state = state.copy(activeTabNumber = event.number)
@@ -100,8 +131,15 @@ class AiChatAppViewModel(
         tabNumbers: List<Int>,
         activeTabNumber: Int?,
         storageType: ChatStorageType,
+        taskSnapshotsByTab: Map<Int, TaskSessionSnapshot>,
     ): AiChatAppViewState {
-        val tabs = tabNumbers.map { createTab(it, storageType) }
+        val tabs = tabNumbers.map { tabNumber ->
+            createTab(
+                number = tabNumber,
+                storageType = storageType,
+                taskSnapshot = taskSnapshotsByTab[tabNumber],
+            )
+        }
         return AiChatAppViewState(
             tabs = tabs,
             activeTabNumber = activeTabNumber
@@ -121,6 +159,7 @@ class AiChatAppViewModel(
     private fun createTab(
         number: Int,
         storageType: ChatStorageType,
+        taskSnapshot: TaskSessionSnapshot? = null,
     ): ChatTab {
         val viewModel = createChatViewModel(number, storageType)
         viewModel.loadModels()
@@ -129,8 +168,30 @@ class AiChatAppViewModel(
             number = number,
             title = createInitialTabTitle(number),
             viewModel = viewModel,
+            taskSession = taskSnapshot?.toTaskModeSession(storageType),
         )
     }
+
+    private fun TaskSessionSnapshot.toTaskModeSession(storageType: ChatStorageType): TaskModeSession =
+        TaskModeSession(
+            isModeEnabled = isModeEnabled,
+            context = context,
+            selectedStage = selectedStage,
+            stageAgents = stages.map { session ->
+                val viewModel = createTaskStageChatViewModel(
+                    session.chatId,
+                    storageType,
+                    session.systemPrompt,
+                    session.startUserPrompt.takeIf { session.output == null }.orEmpty(),
+                )
+                viewModel.loadModels()
+                TaskStageAgent(
+                    session = session,
+                    viewModel = viewModel,
+                )
+            },
+            pendingTransition = pendingTransition,
+        )
 
     private fun addTab() {
         val tab = createNewTab()
@@ -339,11 +400,391 @@ class AiChatAppViewModel(
         val activeViewModel = state.activeTab?.viewModel ?: return
         when (event) {
             ChatEvent.SendClicked -> {
-                updateActiveTabTitleIfNeeded(activeViewModel.state.prompt)
-                activeViewModel.sendPrompt()
+                val activeTab = state.activeTab ?: return
+                val taskSession = activeTab.taskSession
+                if (taskSession?.isModeEnabled == true) {
+                    handleTaskModePrompt(activeTab)
+                } else {
+                    updateActiveTabTitleIfNeeded(activeViewModel.state.prompt)
+                    activeViewModel.sendPrompt()
+                }
             }
             else -> activeViewModel.onEvent(event)
         }
+    }
+
+    private fun toggleTaskMode() {
+        val activeTab = state.activeTab ?: return
+        val currentSession = activeTab.taskSession
+        val nextSession = if (currentSession == null) {
+            TaskModeSession(isModeEnabled = true)
+        } else {
+            currentSession.copy(isModeEnabled = !currentSession.isModeEnabled)
+        }
+        updateTab(activeTab.number) { tab -> tab.copy(taskSession = nextSession) }
+    }
+
+    private fun selectTaskStage(stage: TaskState) {
+        val activeTab = state.activeTab ?: return
+        val taskSession = activeTab.taskSession ?: return
+        val context = taskSession.context
+        val isReached = taskSession.stageAgents.any { it.session.state == stage } ||
+            (context != null && stage.ordinal <= context.state.ordinal)
+        if (!isReached) {
+            return
+        }
+
+        updateTab(activeTab.number) { tab ->
+            tab.copy(taskSession = taskSession.copy(selectedStage = stage))
+        }
+    }
+
+    private fun handleTaskModePrompt(activeTab: ChatTab) {
+        val prompt = activeTab.viewModel.state.prompt.trim()
+        if (prompt.isBlank()) {
+            return
+        }
+        updateActiveTabTitleIfNeeded(prompt)
+        activeTab.viewModel.setPrompt("")
+        activeTab.viewModel.appendLocalMessage(ChatMessage(role = ChatRole.User, content = prompt))
+
+        val taskSession = activeTab.taskSession
+        if (taskSession?.context == null) {
+            startTask(activeTab, prompt)
+        } else {
+            sendAdditionalInputToCurrentStage(activeTab, prompt)
+        }
+    }
+
+    private fun startTask(activeTab: ChatTab, task: String) {
+        val context = taskMachine.start(task)
+        val input = buildStageInput(
+            context = context,
+            stage = TaskState.Planning,
+            previousOutput = null,
+            additionalInput = null,
+        )
+        val agent = createStageAgent(
+            tabNumber = activeTab.number,
+            storageType = state.selectedStorageType,
+            stage = TaskState.Planning,
+            input = input,
+        )
+        val session = TaskModeSession(
+            isModeEnabled = true,
+            context = context,
+            selectedStage = TaskState.Planning,
+            stageAgents = listOf(agent),
+            pendingTransition = null,
+        )
+
+        activeTab.viewModel.appendLocalMessage(
+            ChatMessage(
+                role = ChatRole.Assistant,
+                content = "Task State Machine started: planning",
+            ),
+        )
+        updateTab(activeTab.number) { tab -> tab.copy(taskSession = session) }
+        sendStagePrompt(activeTab.number, TaskState.Planning, input)
+    }
+
+    private fun sendAdditionalInputToCurrentStage(activeTab: ChatTab, prompt: String) {
+        val taskSession = activeTab.taskSession ?: return
+        val context = taskSession.context ?: return
+        val input = buildStageInput(
+            context = context,
+            stage = context.state,
+            previousOutput = taskSession.stageAgents
+                .firstOrNull { it.session.state == context.state }
+                ?.session
+                ?.output,
+            additionalInput = prompt,
+        )
+        val sessionWithAgent = taskSession.ensureStageAgent(
+            tabNumber = activeTab.number,
+            storageType = state.selectedStorageType,
+            stage = context.state,
+            input = input,
+        )
+        updateTab(activeTab.number) { tab ->
+            tab.copy(
+                taskSession = sessionWithAgent.copy(
+                    context = context.copy(expectedAction = TaskExpectedAction.AgentWork),
+                    selectedStage = context.state,
+                    pendingTransition = null,
+                ),
+            )
+        }
+        sendStagePrompt(activeTab.number, context.state, input)
+    }
+
+    private fun acceptTaskTransition() {
+        val activeTab = state.activeTab ?: return
+        val taskSession = activeTab.taskSession ?: return
+        val context = taskSession.context ?: return
+        val proposal = taskSession.pendingTransition ?: return
+        val nextContext = taskMachine.acceptTransition(context, proposal)
+        val nextSession = taskSession.ensureStageAgent(
+            tabNumber = activeTab.number,
+            storageType = state.selectedStorageType,
+            stage = proposal.to,
+            input = proposal.inputForTarget,
+        ).copy(
+            context = nextContext,
+            selectedStage = proposal.to,
+            pendingTransition = null,
+        )
+
+        updateTab(activeTab.number) { tab -> tab.copy(taskSession = nextSession) }
+        activeTab.viewModel.appendLocalMessage(
+            ChatMessage(
+                role = ChatRole.Assistant,
+                content = "Transition accepted: ${proposal.from.title} -> ${proposal.to.title}",
+            ),
+        )
+        sendStagePrompt(activeTab.number, proposal.to, proposal.inputForTarget)
+    }
+
+    private fun requestTaskRevision() {
+        val activeTab = state.activeTab ?: return
+        val taskSession = activeTab.taskSession ?: return
+        val context = taskSession.context ?: return
+        val revisedContext = taskMachine.requestRevision(context)
+
+        updateTab(activeTab.number) { tab ->
+            tab.copy(
+                taskSession = taskSession.copy(
+                    context = revisedContext,
+                    selectedStage = context.state,
+                    pendingTransition = null,
+                ),
+            )
+        }
+        activeTab.viewModel.appendLocalMessage(
+            ChatMessage(
+                role = ChatRole.Assistant,
+                content = "Revision requested for ${context.state.title}. Send additional details in the main chat.",
+            ),
+        )
+    }
+
+    private fun requestPreviousTaskStage() {
+        val activeTab = state.activeTab ?: return
+        val taskSession = activeTab.taskSession ?: return
+        val context = taskSession.context ?: return
+        if (taskSession.stageAgents.firstOrNull { it.session.state == context.state }?.viewModel?.state?.isLoading == true) {
+            return
+        }
+        val previous = context.state.previous() ?: return
+        val completedContext = context.takeIf { it.expectedAction == TaskExpectedAction.UserConfirmation }
+            ?: taskMachine.completeStage(
+                context = context,
+                output = taskSession.stageAgents
+                    .firstOrNull { it.session.state == context.state }
+                    ?.session
+                    ?.output
+                    .orEmpty(),
+            )
+        val proposal = taskMachine.proposeTransition(
+            context = completedContext,
+            to = previous,
+            reason = "Return to ${previous.title} for refinement",
+            inputForTarget = buildStageInput(
+                context = completedContext.copy(state = previous, current = previous.title),
+                stage = previous,
+                previousOutput = taskSession.stageAgents.firstOrNull { it.session.state == previous }?.session?.output,
+                additionalInput = "The orchestrator requested a return from ${context.state.title}.",
+            ),
+        )
+
+        updateTab(activeTab.number) { tab ->
+            tab.copy(
+                taskSession = taskSession.copy(
+                    context = completedContext,
+                    pendingTransition = proposal,
+                    selectedStage = context.state,
+                ),
+            )
+        }
+    }
+
+    private fun handleTaskStageChatEvent(event: ChatEvent) {
+        val activeTab = state.activeTab ?: return
+        val taskSession = activeTab.taskSession ?: return
+        val agent = taskSession.selectedStageAgent ?: return
+        when (event) {
+            ChatEvent.SendClicked -> {
+                agent.viewModel.syncRequestSettingsFrom(activeTab.viewModel.state)
+                agent.viewModel.sendPrompt { stageState ->
+                    completeTaskStage(
+                        tabNumber = activeTab.number,
+                        stage = agent.session.state,
+                        output = stageState.lastAssistantOutput(),
+                    )
+                }
+            }
+            else -> agent.viewModel.onEvent(event)
+        }
+    }
+
+    private fun createStageAgent(
+        tabNumber: Int,
+        storageType: ChatStorageType,
+        stage: TaskState,
+        input: String,
+    ): TaskStageAgent {
+        val chatId = taskStageChatId(tabNumber, stage)
+        val systemPrompt = buildStageSystemPrompt(stage)
+        val viewModel = createTaskStageChatViewModel(
+            chatId,
+            storageType,
+            systemPrompt,
+            input,
+        )
+        viewModel.loadModels()
+        return TaskStageAgent(
+            session = TaskStageSession(
+                state = stage,
+                chatId = chatId,
+                systemPrompt = systemPrompt,
+                startUserPrompt = input,
+                input = input,
+                isReached = true,
+            ),
+            viewModel = viewModel,
+        )
+    }
+
+    private fun TaskModeSession.ensureStageAgent(
+        tabNumber: Int,
+        storageType: ChatStorageType,
+        stage: TaskState,
+        input: String,
+    ): TaskModeSession {
+        val existing = stageAgents.firstOrNull { it.session.state == stage }
+        if (existing == null) {
+            return copy(stageAgents = stageAgents + createStageAgent(tabNumber, storageType, stage, input))
+        }
+        return copy(
+            stageAgents = stageAgents.map { agent ->
+                if (agent.session.state == stage) {
+                    agent.copy(
+                        session = agent.session.copy(
+                            startUserPrompt = input,
+                            input = input,
+                            output = null,
+                            isReached = true,
+                            isReadyForTransition = false,
+                        ),
+                    )
+                } else {
+                    agent
+                }
+            },
+        )
+    }
+
+    private fun sendStagePrompt(
+        tabNumber: Int,
+        stage: TaskState,
+        input: String,
+    ) {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
+        val taskSession = activeTab.taskSession ?: return
+        val agent = taskSession.stageAgents.firstOrNull { it.session.state == stage } ?: return
+        agent.viewModel.syncRequestSettingsFrom(activeTab.viewModel.state)
+        agent.viewModel.setPrompt(input)
+        updateTab(tabNumber) { tab ->
+            val session = tab.taskSession ?: return@updateTab tab
+            tab.copy(
+                taskSession = session.copy(
+                    context = session.context?.copy(expectedAction = TaskExpectedAction.AgentWork),
+                    selectedStage = stage,
+                    pendingTransition = null,
+                ),
+            )
+        }
+        agent.viewModel.sendPrompt { stageState ->
+            completeTaskStage(
+                tabNumber = tabNumber,
+                stage = stage,
+                output = stageState.lastAssistantOutput(),
+            )
+        }
+    }
+
+    private fun completeTaskStage(
+        tabNumber: Int,
+        stage: TaskState,
+        output: String,
+    ) {
+        val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
+        val taskSession = tab.taskSession ?: return
+        val context = taskSession.context ?: return
+        val updatedAgents = taskSession.stageAgents.map { agent ->
+            if (agent.session.state == stage) {
+                agent.copy(
+                    session = agent.session.copy(
+                        output = output,
+                        isReadyForTransition = output.isNotBlank(),
+                    ),
+                )
+            } else {
+                agent
+            }
+        }
+        val shouldControlTransition = stage == context.state && output.isNotBlank()
+        val completedContext = if (shouldControlTransition) {
+            taskMachine.completeStage(
+                context = context,
+                output = output,
+                plan = if (stage == TaskState.Planning) extractPlanItems(output) else context.plan,
+            )
+        } else {
+            context
+        }
+        val pendingTransition = if (shouldControlTransition) {
+            val nextStage = stage.next()
+            nextStage?.let { target ->
+                taskMachine.proposeTransition(
+                    context = completedContext,
+                    to = target,
+                    reason = "${stage.title} completed",
+                    inputForTarget = buildStageInput(
+                        context = completedContext.copy(state = target, current = target.title),
+                        stage = target,
+                        previousOutput = output,
+                        additionalInput = null,
+                    ),
+                )
+            }
+        } else {
+            taskSession.pendingTransition
+        }
+
+        updateTab(tabNumber) { currentTab ->
+            val currentSession = currentTab.taskSession ?: return@updateTab currentTab
+            currentTab.copy(
+                taskSession = currentSession.copy(
+                    context = completedContext,
+                    stageAgents = updatedAgents,
+                    pendingTransition = pendingTransition,
+                    selectedStage = stage,
+                ),
+            )
+        }
+    }
+
+    private fun updateTab(
+        tabNumber: Int,
+        transform: (ChatTab) -> ChatTab,
+    ) {
+        state = state.copy(
+            tabs = state.tabs.map { tab ->
+                if (tab.number == tabNumber) transform(tab) else tab
+            },
+        )
+        notifyWorkspaceChanged()
     }
 
     private fun updateActiveTabTitleIfNeeded(prompt: String) {
@@ -370,7 +811,12 @@ class AiChatAppViewModel(
 
     private fun notifyWorkspaceChanged() {
         onWorkspaceChanged(
-            state.tabs.map { it.number },
+            state.tabs.map { tab ->
+                ChatTabSnapshot(
+                    number = tab.number,
+                    taskSession = tab.taskSession?.toSnapshot(),
+                )
+            },
             state.activeTabNumber,
             nextTabNumber,
             state.selectedStorageType,
@@ -402,3 +848,93 @@ class AiChatAppViewModel(
 
 private fun formatProfileError(exception: Throwable): String =
     exception.message ?: exception::class.simpleName ?: "unknown"
+
+private fun taskStageChatId(
+    tabNumber: Int,
+    stage: TaskState,
+): Int =
+    tabNumber * TaskStageChatIdMultiplier + stage.ordinal + 1
+
+private fun buildStageSystemPrompt(stage: TaskState): String =
+    when (stage) {
+        TaskState.Planning -> """
+            You are the isolated planning agent for a coding assistant task.
+            Work only on the planning stage. Gather missing information, choose technologies from the project context, and produce an implementable plan.
+            Do not claim implementation is done. End with a concise result that the orchestrator can pass to execution.
+        """.trimIndent()
+
+        TaskState.Execution -> """
+            You are the isolated execution agent for a coding assistant task.
+            Work only from the accepted planning input. Describe concrete implementation work, decisions, changed behavior, and any blockers.
+            Do not validate the result as final; validation is handled by another stage.
+        """.trimIndent()
+
+        TaskState.Validation -> """
+            You are the isolated validation agent for a coding assistant task.
+            Check the execution result against the accepted plan. Focus on build, tests, regressions, and remaining risks.
+            Produce a validation result that the orchestrator can accept or send back for revision.
+        """.trimIndent()
+
+        TaskState.Done -> """
+            You are the isolated final report agent for a coding assistant task.
+            Summarize the accepted plan, execution result, validation result, and final outcome.
+            Do not start new work. Produce the final done-stage response.
+        """.trimIndent()
+    }
+
+private fun buildStageInput(
+    context: TaskContext,
+    stage: TaskState,
+    previousOutput: String?,
+    additionalInput: String?,
+): String =
+    buildString {
+        appendLine("Task: ${context.task}")
+        appendLine("Current stage: ${stage.title}")
+        appendLine("Step: ${stage.ordinal + 1}/${TaskState.entries.size}")
+        if (context.plan.isNotEmpty()) {
+            appendLine()
+            appendLine("Accepted plan:")
+            context.plan.forEach { item -> appendLine("- $item") }
+        }
+        if (context.done.isNotEmpty()) {
+            appendLine()
+            appendLine("Already done:")
+            context.done.forEach { item -> appendLine("- $item") }
+        }
+        previousOutput?.takeIf { it.isNotBlank() }?.let { output ->
+            appendLine()
+            appendLine("Previous stage output:")
+            appendLine(output)
+        }
+        additionalInput?.takeIf { it.isNotBlank() }?.let { input ->
+            appendLine()
+            appendLine("Additional user input:")
+            appendLine(input)
+        }
+        appendLine()
+        appendLine("Return only the result for the $stage stage.")
+    }
+
+private fun extractPlanItems(output: String): List<String> {
+    val lines = output
+        .lineSequence()
+        .map { line ->
+            line.trim()
+                .removePrefix("-")
+                .removePrefix("*")
+                .removePrefix("•")
+                .trim()
+        }
+        .filter { it.isNotBlank() }
+        .take(MaxExtractedPlanItems)
+        .toList()
+    return lines.ifEmpty { listOf(output.trim().take(MaxFallbackPlanChars)) }
+}
+
+private fun ChatViewState.lastAssistantOutput(): String =
+    messages.lastOrNull { it.role == ChatRole.Assistant }?.content.orEmpty()
+
+private const val TaskStageChatIdMultiplier = 10
+private const val MaxExtractedPlanItems = 12
+private const val MaxFallbackPlanChars = 600

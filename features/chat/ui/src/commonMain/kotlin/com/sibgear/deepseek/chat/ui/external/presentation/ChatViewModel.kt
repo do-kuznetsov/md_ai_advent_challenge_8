@@ -31,11 +31,17 @@ class ChatViewModel(
     initialMessages: List<ChatMessage> = emptyList(),
     initialStickyFacts: List<StickyFact> = emptyList(),
     initialBranches: List<ChatBranch> = emptyList(),
+    initialSystemPrompt: String = "",
+    initialPrompt: String = "",
+    isSystemPromptReadOnly: Boolean = false,
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
 
     var state by mutableStateOf(
         ChatViewState(
+            systemPrompt = initialSystemPrompt,
+            isSystemPromptReadOnly = isSystemPromptReadOnly,
+            prompt = initialPrompt,
             messages = initialMessages,
             stickyFacts = initialStickyFacts,
             branches = initialBranches,
@@ -144,7 +150,9 @@ class ChatViewModel(
             }
 
             is ChatEvent.SystemPromptChanged -> {
-                state = state.copy(systemPrompt = event.systemPrompt)
+                if (!state.isSystemPromptReadOnly) {
+                    state = state.copy(systemPrompt = event.systemPrompt)
+                }
             }
 
             is ChatEvent.TemperatureChanged -> {
@@ -193,7 +201,7 @@ class ChatViewModel(
         }
     }
 
-    fun sendPrompt() {
+    fun sendPrompt(onCompleted: ((ChatViewState) -> Unit)? = null) {
         val prompt = state.prompt.trim()
         if (prompt.isEmpty() || state.isLoading) {
             return
@@ -252,6 +260,7 @@ class ChatViewModel(
                     activeBranchId = response.activeBranchId,
                     branchingStatus = response.activeBranchId?.let { "branch: $it" },
                 ).withContextPresentation()
+                onCompleted?.invoke(state)
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -264,8 +273,33 @@ class ChatViewModel(
                     isLoading = false,
                     messages = state.messages + errorMessage,
                 ).withContextPresentation()
+                onCompleted?.invoke(state)
             }
         }
+    }
+
+    fun setPrompt(prompt: String) {
+        state = state.copy(prompt = prompt)
+    }
+
+    fun appendLocalMessage(message: ChatMessage) {
+        state = state.copy(messages = state.messages + message).withContextPresentation()
+    }
+
+    fun syncRequestSettingsFrom(source: ChatViewState) {
+        state = state.copy(
+            selectedModel = source.selectedModel,
+            openRouterModels = source.openRouterModels,
+            deepSeekModels = source.deepSeekModels,
+            modelFilter = source.modelFilter,
+            openRouterModelsStatus = source.openRouterModelsStatus,
+            contextManagementMode = source.contextManagementMode,
+            summaryIntervalInput = source.summaryIntervalInput,
+            slidingWindowMessagesInput = source.slidingWindowMessagesInput,
+            stickyFactsWindowInput = source.stickyFactsWindowInput,
+            apiSettings = source.apiSettings,
+            maxTokensInput = source.maxTokensInput,
+        ).withContextPresentation()
     }
 
     private fun applyOpenRouterFilter() {

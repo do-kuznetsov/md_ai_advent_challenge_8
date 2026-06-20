@@ -42,6 +42,10 @@ fun ChatScreen(
     state: ChatViewState,
     onEvent: (ChatEvent) -> Unit,
     modifier: Modifier = Modifier,
+    showModelDrawer: Boolean = true,
+    showTaskModeToggle: Boolean = false,
+    isTaskModeEnabled: Boolean = false,
+    onTaskModeToggled: () -> Unit = {},
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -59,46 +63,70 @@ fun ChatScreen(
                 modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StickyFactsPanel(state = state)
-                    BranchTreePanel(state = state)
-
-                    ChatArea(
-                        messages = state.messages,
-                        pinnedContextMessageIndex = state.pinnedContextMessageIndex,
-                        expandedCompressionMessageIndexes = state.expandedCompressionMessageIndexes,
-                        onCompressionSummaryToggled = { onEvent(ChatEvent.CompressionSummaryToggled(it)) },
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    PromptInputArea(
-                        state = state,
-                        onEvent = onEvent,
-                    )
-                }
-
-                AiModelSettingsDrawer(
+                ChatPane(
                     state = state,
                     onEvent = onEvent,
-                    isExpanded = isAiModelDrawerExpanded,
-                    onExpandedChange = { isAiModelDrawerExpanded = it },
-                    onResize = { dragDeltaPx ->
-                        val deltaFraction = dragDeltaPx / maxWidthPx
-                        aiModelDrawerWidthFraction = (aiModelDrawerWidthFraction - deltaFraction)
-                            .coerceIn(AiModelDrawerMinWidthFraction, AiModelDrawerMaxWidthFraction)
-                    },
-                    modifier = Modifier.width(drawerWidth).fillMaxHeight(),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    showTaskModeToggle = showTaskModeToggle,
+                    isTaskModeEnabled = isTaskModeEnabled,
+                    onTaskModeToggled = onTaskModeToggled,
                 )
+
+                if (showModelDrawer) {
+                    AiModelSettingsDrawer(
+                        state = state,
+                        onEvent = onEvent,
+                        isExpanded = isAiModelDrawerExpanded,
+                        onExpandedChange = { isAiModelDrawerExpanded = it },
+                        onResize = { dragDeltaPx ->
+                            val deltaFraction = dragDeltaPx / maxWidthPx
+                            aiModelDrawerWidthFraction = (aiModelDrawerWidthFraction - deltaFraction)
+                                .coerceIn(AiModelDrawerMinWidthFraction, AiModelDrawerMaxWidthFraction)
+                        },
+                        modifier = Modifier.width(drawerWidth).fillMaxHeight(),
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AiModelSettingsDrawer(
+fun ChatPane(
+    state: ChatViewState,
+    onEvent: (ChatEvent) -> Unit,
+    modifier: Modifier = Modifier,
+    showTaskModeToggle: Boolean = false,
+    isTaskModeEnabled: Boolean = false,
+    onTaskModeToggled: () -> Unit = {},
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        StickyFactsPanel(state = state)
+        BranchTreePanel(state = state)
+
+        ChatArea(
+            messages = state.messages,
+            pinnedContextMessageIndex = state.pinnedContextMessageIndex,
+            expandedCompressionMessageIndexes = state.expandedCompressionMessageIndexes,
+            onCompressionSummaryToggled = { onEvent(ChatEvent.CompressionSummaryToggled(it)) },
+            modifier = Modifier.weight(1f),
+        )
+
+        PromptInputArea(
+            state = state,
+            onEvent = onEvent,
+            showTaskModeToggle = showTaskModeToggle,
+            isTaskModeEnabled = isTaskModeEnabled,
+            onTaskModeToggled = onTaskModeToggled,
+        )
+    }
+}
+
+@Composable
+fun AiModelSettingsDrawer(
     state: ChatViewState,
     onEvent: (ChatEvent) -> Unit,
     isExpanded: Boolean,
