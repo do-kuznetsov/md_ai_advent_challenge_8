@@ -405,7 +405,7 @@ class AiChatAppViewModel(
                 val activeTab = state.activeTab ?: return
                 val taskSession = activeTab.taskSession
                 if (taskSession?.isModeEnabled == true) {
-                    handleTaskModePrompt(activeTab)
+                    handleTaskModeOrchestratorPrompt(activeTab)
                 } else {
                     updateActiveTabTitleIfNeeded(activeViewModel.state.prompt)
                     activeViewModel.sendPrompt()
@@ -441,25 +441,27 @@ class AiChatAppViewModel(
         }
     }
 
-    private fun handleTaskModePrompt(activeTab: ChatTab) {
+    private fun handleTaskModeOrchestratorPrompt(activeTab: ChatTab) {
         val prompt = activeTab.viewModel.state.prompt.trim()
         if (prompt.isBlank()) {
             return
         }
         updateActiveTabTitleIfNeeded(prompt)
-        activeTab.viewModel.setPrompt("")
-        activeTab.viewModel.appendLocalMessage(ChatMessage(role = ChatRole.User, content = prompt))
 
         val taskSession = activeTab.taskSession
         if (taskSession?.context == null) {
+            activeTab.viewModel.setPrompt("")
+            activeTab.viewModel.appendLocalMessage(ChatMessage(role = ChatRole.User, content = prompt))
             startTask(activeTab, prompt)
         } else if (
             taskSession.pendingRejection != null &&
             taskSession.context.expectedAction == TaskExpectedAction.UserPrompt
         ) {
+            activeTab.viewModel.setPrompt("")
+            activeTab.viewModel.appendLocalMessage(ChatMessage(role = ChatRole.User, content = prompt))
             sendRejectionClarificationToOrchestrator(activeTab, prompt)
         } else {
-            sendAdditionalInputToCurrentStage(activeTab, prompt)
+            activeTab.viewModel.sendPrompt()
         }
     }
 
@@ -493,37 +495,6 @@ class AiChatAppViewModel(
         )
         updateTab(activeTab.number) { tab -> tab.copy(taskSession = session) }
         sendStagePrompt(activeTab.number, TaskState.Planning, input)
-    }
-
-    private fun sendAdditionalInputToCurrentStage(activeTab: ChatTab, prompt: String) {
-        val taskSession = activeTab.taskSession ?: return
-        val context = taskSession.context ?: return
-        val input = buildStageInput(
-            context = context,
-            stage = context.state,
-            previousOutput = taskSession.stageAgents
-                .firstOrNull { it.session.state == context.state }
-                ?.session
-                ?.output,
-            additionalInput = prompt,
-        )
-        val sessionWithAgent = taskSession.ensureStageAgent(
-            tabNumber = activeTab.number,
-            storageType = state.selectedStorageType,
-            stage = context.state,
-            input = input,
-        )
-        updateTab(activeTab.number) { tab ->
-            tab.copy(
-                taskSession = sessionWithAgent.copy(
-                    context = context.copy(expectedAction = TaskExpectedAction.AgentWork),
-                    selectedStage = context.state,
-                    pendingTransition = null,
-                    pendingRejection = null,
-                ),
-            )
-        }
-        sendStagePrompt(activeTab.number, context.state, input)
     }
 
     private fun acceptTaskTransition() {
@@ -788,6 +759,10 @@ class AiChatAppViewModel(
         val activeTab = state.activeTab ?: return
         val taskSession = activeTab.taskSession ?: return
         val agent = taskSession.selectedStageAgent ?: return
+        val currentStage = taskSession.context?.state ?: return
+        if (agent.session.state != currentStage && event.isPromptInputEvent()) {
+            return
+        }
         when (event) {
             ChatEvent.SendClicked -> {
                 agent.viewModel.syncRequestSettingsFrom(activeTab.viewModel.state)
@@ -1233,6 +1208,18 @@ private fun extractPlanItems(output: String): List<String> {
 
 private fun ChatViewState.lastAssistantOutput(): String =
     messages.lastOrNull { it.role == ChatRole.Assistant }?.content.orEmpty()
+
+private fun ChatEvent.isPromptInputEvent(): Boolean =
+    when (this) {
+        is ChatEvent.PromptChanged,
+        is ChatEvent.SystemPromptChanged,
+        is ChatEvent.AttachmentSelected,
+        is ChatEvent.AttachmentError,
+        ChatEvent.AttachmentCleared,
+        ChatEvent.SendClicked -> true
+
+        else -> false
+    }
 
 private const val TaskStageChatIdMultiplier = 10
 private const val MaxExtractedPlanItems = 12

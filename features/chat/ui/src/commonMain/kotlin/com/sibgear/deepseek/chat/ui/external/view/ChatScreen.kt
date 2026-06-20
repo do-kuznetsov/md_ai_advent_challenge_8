@@ -101,6 +101,7 @@ fun ChatPane(
     onTaskModeToggled: () -> Unit = {},
     leadingSystemPrompt: String? = null,
     promptHeaderContent: (@Composable () -> Unit)? = null,
+    isPromptInputEnabled: Boolean = true,
 ) {
     Column(
         modifier = modifier,
@@ -125,6 +126,7 @@ fun ChatPane(
             isTaskModeEnabled = isTaskModeEnabled,
             onTaskModeToggled = onTaskModeToggled,
             promptHeaderContent = promptHeaderContent,
+            isPromptInputEnabled = isPromptInputEnabled,
         )
     }
 }

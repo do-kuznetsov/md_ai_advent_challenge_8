@@ -67,6 +67,7 @@ internal fun PromptInputArea(
     isTaskModeEnabled: Boolean = false,
     onTaskModeToggled: () -> Unit = {},
     promptHeaderContent: (@Composable () -> Unit)? = null,
+    isPromptInputEnabled: Boolean = true,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -106,6 +107,7 @@ internal fun PromptInputArea(
                 onValueChange = { onEvent(ChatEvent.PromptChanged(it)) },
                 isLoading = state.isLoading,
                 isSendEnabled = state.isSendEnabled,
+                isPromptInputEnabled = isPromptInputEnabled,
                 attachment = state.attachment,
                 showTaskModeToggle = showTaskModeToggle,
                 isTaskModeEnabled = isTaskModeEnabled,
@@ -139,6 +141,7 @@ private fun UserPromptInputBox(
     onValueChange: (String) -> Unit,
     isLoading: Boolean,
     isSendEnabled: Boolean,
+    isPromptInputEnabled: Boolean,
     attachment: PromptAttachment?,
     showTaskModeToggle: Boolean,
     isTaskModeEnabled: Boolean,
@@ -162,12 +165,23 @@ private fun UserPromptInputBox(
     } else {
         MaterialTheme.colorScheme.outline
     }
-    val sendButtonBackground = if (isSendEnabled) {
+    val effectiveSendEnabled = isPromptInputEnabled && isSendEnabled
+    val inputBackgroundColor = if (isPromptInputEnabled) {
+        MaterialTheme.colorScheme.surface
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f)
+    }
+    val inputTextColor = if (isPromptInputEnabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.58f)
+    }
+    val sendButtonBackground = if (effectiveSendEnabled) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.surfaceVariant
     }
-    val sendButtonContentColor = if (isSendEnabled) {
+    val sendButtonContentColor = if (effectiveSendEnabled) {
         MaterialTheme.colorScheme.onPrimary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
@@ -183,6 +197,9 @@ private fun UserPromptInputBox(
     }
 
     fun updateTextFieldValue(nextValue: TextFieldValue) {
+        if (!isPromptInputEnabled) {
+            return
+        }
         textFieldValue = nextValue
         currentOnValueChange(nextValue.text)
     }
@@ -239,11 +256,12 @@ private fun UserPromptInputBox(
     Column(
         modifier = modifier
             .height(136.dp)
-            .background(MaterialTheme.colorScheme.surface, shape)
+            .background(inputBackgroundColor, shape)
             .border(1.dp, borderColor, shape),
     ) {
         BasicTextField(
             value = textFieldValue,
+            enabled = isPromptInputEnabled,
             onValueChange = { nextValue ->
                 updateTextFieldValue(nextValue)
             },
@@ -266,7 +284,7 @@ private fun UserPromptInputBox(
                         }
 
                         event.isPromptSubmitShortcut() -> {
-                            if (isSendEnabled) {
+                            if (effectiveSendEnabled) {
                                 onSendClicked()
                             }
                             true
@@ -276,7 +294,7 @@ private fun UserPromptInputBox(
                     }
                 },
             textStyle = MaterialTheme.typography.bodyLarge.copy(
-                color = MaterialTheme.colorScheme.onSurface,
+                color = inputTextColor,
             ),
             minLines = 3,
             maxLines = 3,
@@ -285,7 +303,9 @@ private fun UserPromptInputBox(
                     if (textFieldValue.text.isEmpty()) {
                         Text(
                             text = "Введите сообщение",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = if (isPromptInputEnabled) 1f else 0.46f,
+                            ),
                             style = MaterialTheme.typography.bodyLarge,
                         )
                     }
@@ -338,15 +358,27 @@ private fun UserPromptInputBox(
 
                 IconButton(
                     onClick = onAttachClicked,
+                    enabled = isPromptInputEnabled,
                     modifier = Modifier
                         .size(36.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                        .background(
+                            if (isPromptInputEnabled) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            CircleShape,
+                        ),
                 ) {
                     Icon(
                         imageVector = Icons.Default.AttachFile,
                         contentDescription = "attach file",
                         modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        tint = if (isPromptInputEnabled) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                        },
                     )
                 }
 
@@ -363,7 +395,7 @@ private fun UserPromptInputBox(
                         modifier = Modifier
                             .size(24.dp)
                             .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                            .clickable { onAttachmentCleared() },
+                            .clickable(enabled = isPromptInputEnabled) { onAttachmentCleared() },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -377,7 +409,7 @@ private fun UserPromptInputBox(
 
             IconButton(
                 onClick = onSendClicked,
-                enabled = isSendEnabled,
+                enabled = effectiveSendEnabled,
                 modifier = Modifier
                     .size(36.dp)
                     .background(sendButtonBackground, CircleShape),

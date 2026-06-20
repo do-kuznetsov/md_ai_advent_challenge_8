@@ -208,13 +208,15 @@ private fun TaskStateMachineChatScreen(
                             )
 
                             taskSession.selectedStageAgent?.let { agent ->
+                                val isSelectedStageActive = agent.session.state == taskSession.context?.state
                                 ChatPane(
                                     state = agent.viewModel.state,
                                     onEvent = { onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(it)) },
                                     modifier = Modifier.weight(1f - chatSplitFraction).fillMaxHeight(),
                                     leadingSystemPrompt = agent.viewModel.state.systemPrompt,
+                                    isPromptInputEnabled = isSelectedStageActive,
                                     promptHeaderContent = {
-                                        if (agent.session.state == taskSession.context?.state) {
+                                        if (isSelectedStageActive) {
                                             TaskTransitionControls(
                                                 taskSession = taskSession,
                                                 onAccept = { onEvent(AiChatAppEvent.TaskTransitionAccepted) },

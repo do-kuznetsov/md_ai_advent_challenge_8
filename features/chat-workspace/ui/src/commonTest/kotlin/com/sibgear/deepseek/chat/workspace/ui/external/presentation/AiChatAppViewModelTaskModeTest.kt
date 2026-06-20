@@ -61,6 +61,88 @@ class AiChatAppViewModelTaskModeTest {
     }
 
     @Test
+    fun orchestratorPromptAfterStartStaysInOrchestratorChat() = runTest {
+        val viewModel = createViewModel(this)
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+        val planningInput = assertNotNull(viewModel.state.activeTab?.taskSession)
+            .stageAgents
+            .first { it.session.state == TaskState.Planning }
+            .session
+            .input
+
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Explain current status")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        val taskSession = assertNotNull(viewModel.state.activeTab?.taskSession)
+        assertEquals(TaskState.Planning, taskSession.context?.state)
+        assertEquals(planningInput, taskSession.stageAgents.first { it.session.state == TaskState.Planning }.session.input)
+        assertEquals(TaskState.Execution, taskSession.pendingTransition?.to)
+        assertTrue(
+            viewModel.state.activeTab
+                ?.viewModel
+                ?.state
+                ?.messages
+                .orEmpty()
+                .any { it.role == ChatRole.User && it.content == "Explain current status" },
+        )
+    }
+
+    @Test
+    fun activeStagePromptGoesToStageAgent() = runTest {
+        val viewModel = createViewModel(this)
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        viewModel.onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(ChatEvent.PromptChanged("Refine this planning result")))
+        viewModel.onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        val planningAgent = assertNotNull(viewModel.state.activeTab?.taskSession)
+            .stageAgents
+            .first { it.session.state == TaskState.Planning }
+        assertTrue(planningAgent.session.output.orEmpty().contains("Refine this planning result"))
+        assertTrue(
+            planningAgent.viewModel.state.messages.any {
+                it.role == ChatRole.User && it.content == "Refine this planning result"
+            },
+        )
+    }
+
+    @Test
+    fun inactiveStagePromptEventsAreIgnored() = runTest {
+        val viewModel = createViewModel(this)
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+        viewModel.onEvent(AiChatAppEvent.TaskTransitionAccepted)
+        advanceUntilIdle()
+        viewModel.onEvent(AiChatAppEvent.TaskStageSelected(TaskState.Planning))
+
+        val before = assertNotNull(viewModel.state.activeTab?.taskSession)
+            .stageAgents
+            .first { it.session.state == TaskState.Planning }
+            .session
+            .output
+        viewModel.onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(ChatEvent.PromptChanged("Should be ignored")))
+        viewModel.onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        val taskSession = assertNotNull(viewModel.state.activeTab?.taskSession)
+        val planningAgent = taskSession.stageAgents.first { it.session.state == TaskState.Planning }
+        assertEquals(TaskState.Execution, taskSession.context?.state)
+        assertEquals(TaskState.Planning, taskSession.selectedStage)
+        assertEquals(before, planningAgent.session.output)
+        assertEquals("", planningAgent.viewModel.state.prompt)
+    }
+
+    @Test
     fun rejectWithRetryCurrentRerunsCurrentStage() = runTest {
         var rejectionAnalysisPrompt = ""
         val viewModel = createViewModel(this) { request ->
