@@ -66,6 +66,7 @@ internal fun PromptInputArea(
     showTaskModeToggle: Boolean = false,
     isTaskModeEnabled: Boolean = false,
     onTaskModeToggled: () -> Unit = {},
+    promptHeaderContent: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -76,20 +77,24 @@ internal fun PromptInputArea(
             onEvent = onEvent,
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("system prompt:")
+        if (promptHeaderContent == null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("system prompt:")
 
-            ShortcutOutlinedTextField(
-                value = state.systemPrompt,
-                onValueChange = { onEvent(ChatEvent.SystemPromptChanged(it)) },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                enabled = !state.isSystemPromptReadOnly,
-            )
+                ShortcutOutlinedTextField(
+                    value = state.systemPrompt,
+                    onValueChange = { onEvent(ChatEvent.SystemPromptChanged(it)) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    enabled = !state.isSystemPromptReadOnly,
+                )
+            }
+        } else {
+            promptHeaderContent()
         }
 
         Row(

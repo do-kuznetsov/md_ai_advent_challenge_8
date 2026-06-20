@@ -99,6 +99,8 @@ fun ChatPane(
     showTaskModeToggle: Boolean = false,
     isTaskModeEnabled: Boolean = false,
     onTaskModeToggled: () -> Unit = {},
+    leadingSystemPrompt: String? = null,
+    promptHeaderContent: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = modifier,
@@ -113,6 +115,7 @@ fun ChatPane(
             expandedCompressionMessageIndexes = state.expandedCompressionMessageIndexes,
             onCompressionSummaryToggled = { onEvent(ChatEvent.CompressionSummaryToggled(it)) },
             modifier = Modifier.weight(1f),
+            leadingSystemPrompt = leadingSystemPrompt,
         )
 
         PromptInputArea(
@@ -121,6 +124,7 @@ fun ChatPane(
             showTaskModeToggle = showTaskModeToggle,
             isTaskModeEnabled = isTaskModeEnabled,
             onTaskModeToggled = onTaskModeToggled,
+            promptHeaderContent = promptHeaderContent,
         )
     }
 }

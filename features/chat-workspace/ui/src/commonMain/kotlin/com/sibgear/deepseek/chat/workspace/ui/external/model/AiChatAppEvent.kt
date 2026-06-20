@@ -19,8 +19,7 @@ sealed interface AiChatAppEvent {
     data object TaskModeToggled : AiChatAppEvent
     data class TaskStageSelected(val stage: TaskState) : AiChatAppEvent
     data object TaskTransitionAccepted : AiChatAppEvent
-    data object TaskTransitionRevisionRequested : AiChatAppEvent
-    data object TaskPreviousStageRequested : AiChatAppEvent
+    data object TaskStageRejected : AiChatAppEvent
     data class ActiveChatEvent(val event: ChatEvent) : AiChatAppEvent
     data class ActiveTaskStageChatEvent(val event: ChatEvent) : AiChatAppEvent
 }

@@ -3,6 +3,7 @@ package com.sibgear.deepseek.persistence
 import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
+import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
 import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
@@ -120,6 +121,24 @@ class WorkspaceStorageTest {
                 to = TaskState.Validation,
                 reason = "execution completed",
                 inputForTarget = "validation input",
+            ),
+            pendingRejection = TaskStageRejection(
+                stage = TaskState.Execution,
+                rejectedOutput = "execution output",
+                context = TaskContext(
+                    task = "Implement FSM",
+                    state = TaskState.Execution,
+                    step = 2,
+                    total = 4,
+                    plan = listOf("Plan"),
+                    done = listOf("Planning done"),
+                    current = "execution",
+                    expectedAction = TaskExpectedAction.UserPrompt,
+                ),
+                proposedNextStage = TaskState.Validation,
+                proposedInputForTarget = "validation input",
+                question = "What should change?",
+                reason = "Needs more information",
             ),
         )
 

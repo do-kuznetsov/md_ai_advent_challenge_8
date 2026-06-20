@@ -18,7 +18,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -34,7 +33,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.chat.domain.model.TaskState
-import com.sibgear.deepseek.chat.domain.model.previous
 import com.sibgear.deepseek.chat.ui.external.view.AiModelSettingsDrawer
 import com.sibgear.deepseek.chat.ui.external.view.ChatPane
 import com.sibgear.deepseek.chat.ui.external.view.ChatScreen
@@ -174,13 +172,6 @@ private fun TaskStateMachineChatScreen(
                         onStageSelected = { onEvent(AiChatAppEvent.TaskStageSelected(it)) },
                     )
 
-                    TaskTransitionControls(
-                        taskSession = taskSession,
-                        onAccept = { onEvent(AiChatAppEvent.TaskTransitionAccepted) },
-                        onRevise = { onEvent(AiChatAppEvent.TaskTransitionRevisionRequested) },
-                        onBack = { onEvent(AiChatAppEvent.TaskPreviousStageRequested) },
-                    )
-
                     TaskStageTitleRow(
                         title = taskSession.selectedStage.title,
                         chatSplitFraction = chatSplitFraction,
@@ -221,6 +212,16 @@ private fun TaskStateMachineChatScreen(
                                     state = agent.viewModel.state,
                                     onEvent = { onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(it)) },
                                     modifier = Modifier.weight(1f - chatSplitFraction).fillMaxHeight(),
+                                    leadingSystemPrompt = agent.viewModel.state.systemPrompt,
+                                    promptHeaderContent = {
+                                        if (agent.session.state == taskSession.context?.state) {
+                                            TaskTransitionControls(
+                                                taskSession = taskSession,
+                                                onAccept = { onEvent(AiChatAppEvent.TaskTransitionAccepted) },
+                                                onReject = { onEvent(AiChatAppEvent.TaskStageRejected) },
+                                            )
+                                        }
+                                    },
                                 )
                             } ?: Box(
                                 modifier = Modifier
@@ -311,44 +312,39 @@ private fun TaskStageStrip(
 private fun TaskTransitionControls(
     taskSession: TaskModeSession,
     onAccept: () -> Unit,
-    onRevise: () -> Unit,
-    onBack: () -> Unit,
+    onReject: () -> Unit,
 ) {
     val context = taskSession.context ?: return
     val pending = taskSession.pendingTransition
-    val isCurrentStageLoading = taskSession.stageAgents
+    val isCurrentStageReady = taskSession.stageAgents
         .firstOrNull { it.session.state == context.state }
         ?.viewModel
         ?.state
-        ?.isLoading == true
+        ?.isLoading != true &&
+        taskSession.stageAgents
+            .firstOrNull { it.session.state == context.state }
+            ?.session
+            ?.isReadyForTransition == true
+    if (pending == null || !isCurrentStageReady) {
+        return
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (pending != null) {
-            Text(
-                text = "${pending.from.title} -> ${pending.to.title}",
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
-            )
-            Button(onClick = onAccept) {
-                Text("Accept")
-            }
-            OutlinedButton(onClick = onRevise) {
-                Text("Revise")
-            }
+        Text(
+            text = "${pending.from.title} -> ${pending.to.title}",
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Button(onClick = onAccept) {
+            Text("Принять")
         }
-
-        if (context.state.previous() != null) {
-            TextButton(
-                onClick = onBack,
-                enabled = !isCurrentStageLoading,
-            ) {
-                Text("Back")
-            }
+        OutlinedButton(onClick = onReject) {
+            Text("Отклонить")
         }
     }
 }

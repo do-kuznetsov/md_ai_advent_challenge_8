@@ -7,7 +7,9 @@ import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
+import com.sibgear.deepseek.chat.domain.model.TaskOrchestratorDecision
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
+import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
 import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskStateMachine
@@ -115,8 +117,7 @@ class AiChatAppViewModel(
             AiChatAppEvent.TaskModeToggled -> toggleTaskMode()
             is AiChatAppEvent.TaskStageSelected -> selectTaskStage(event.stage)
             AiChatAppEvent.TaskTransitionAccepted -> acceptTaskTransition()
-            AiChatAppEvent.TaskTransitionRevisionRequested -> requestTaskRevision()
-            AiChatAppEvent.TaskPreviousStageRequested -> requestPreviousTaskStage()
+            AiChatAppEvent.TaskStageRejected -> rejectTaskStage()
             is AiChatAppEvent.ActiveTaskStageChatEvent -> handleTaskStageChatEvent(event.event)
             is AiChatAppEvent.TabSelected -> {
                 if (state.tabs.any { it.number == event.number }) {
@@ -191,6 +192,7 @@ class AiChatAppViewModel(
                 )
             },
             pendingTransition = pendingTransition,
+            pendingRejection = pendingRejection,
         )
 
     private fun addTab() {
@@ -451,6 +453,11 @@ class AiChatAppViewModel(
         val taskSession = activeTab.taskSession
         if (taskSession?.context == null) {
             startTask(activeTab, prompt)
+        } else if (
+            taskSession.pendingRejection != null &&
+            taskSession.context.expectedAction == TaskExpectedAction.UserPrompt
+        ) {
+            sendRejectionClarificationToOrchestrator(activeTab, prompt)
         } else {
             sendAdditionalInputToCurrentStage(activeTab, prompt)
         }
@@ -512,6 +519,7 @@ class AiChatAppViewModel(
                     context = context.copy(expectedAction = TaskExpectedAction.AgentWork),
                     selectedStage = context.state,
                     pendingTransition = null,
+                    pendingRejection = null,
                 ),
             )
         }
@@ -533,6 +541,7 @@ class AiChatAppViewModel(
             context = nextContext,
             selectedStage = proposal.to,
             pendingTransition = null,
+            pendingRejection = null,
         )
 
         updateTab(activeTab.number) { tab -> tab.copy(taskSession = nextSession) }
@@ -545,67 +554,234 @@ class AiChatAppViewModel(
         sendStagePrompt(activeTab.number, proposal.to, proposal.inputForTarget)
     }
 
-    private fun requestTaskRevision() {
+    private fun rejectTaskStage() {
         val activeTab = state.activeTab ?: return
         val taskSession = activeTab.taskSession ?: return
         val context = taskSession.context ?: return
-        val revisedContext = taskMachine.requestRevision(context)
+        val proposal = taskSession.pendingTransition ?: return
+        if (activeTab.viewModel.state.isLoading) {
+            return
+        }
+        val rejectedOutput = taskSession.stageAgents
+            .firstOrNull { it.session.state == context.state }
+            ?.session
+            ?.output
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+        val rejectedContext = taskMachine.rejectStage(context)
+        val rejection = TaskStageRejection(
+            stage = context.state,
+            rejectedOutput = rejectedOutput,
+            context = context,
+            proposedNextStage = proposal.to,
+            proposedInputForTarget = proposal.inputForTarget,
+        )
 
         updateTab(activeTab.number) { tab ->
             tab.copy(
                 taskSession = taskSession.copy(
-                    context = revisedContext,
+                    context = rejectedContext,
                     selectedStage = context.state,
+                    pendingTransition = null,
+                    pendingRejection = rejection,
+                ),
+            )
+        }
+        sendRejectionAnalysisPrompt(
+            tabNumber = activeTab.number,
+            rejection = rejection,
+            userClarification = null,
+        )
+    }
+
+    private fun sendRejectionClarificationToOrchestrator(
+        activeTab: ChatTab,
+        clarification: String,
+    ) {
+        val taskSession = activeTab.taskSession ?: return
+        val rejection = taskSession.pendingRejection ?: return
+        val context = taskSession.context ?: return
+        val analysisContext = taskMachine.resumeRejectionAnalysis(context)
+
+        updateTab(activeTab.number) { tab ->
+            tab.copy(
+                taskSession = taskSession.copy(
+                    context = analysisContext,
+                    pendingRejection = rejection.copy(question = null),
                     pendingTransition = null,
                 ),
             )
         }
-        activeTab.viewModel.appendLocalMessage(
-            ChatMessage(
-                role = ChatRole.Assistant,
-                content = "Revision requested for ${context.state.title}. Send additional details in the main chat.",
-            ),
+        sendRejectionAnalysisPrompt(
+            tabNumber = activeTab.number,
+            rejection = rejection,
+            userClarification = clarification,
         )
     }
 
-    private fun requestPreviousTaskStage() {
-        val activeTab = state.activeTab ?: return
+    private fun sendRejectionAnalysisPrompt(
+        tabNumber: Int,
+        rejection: TaskStageRejection,
+        userClarification: String?,
+    ) {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = activeTab.taskSession ?: return
         val context = taskSession.context ?: return
-        if (taskSession.stageAgents.firstOrNull { it.session.state == context.state }?.viewModel?.state?.isLoading == true) {
+        if (activeTab.viewModel.state.isLoading) {
             return
         }
-        val previous = context.state.previous() ?: return
-        val completedContext = context.takeIf { it.expectedAction == TaskExpectedAction.UserConfirmation }
-            ?: taskMachine.completeStage(
-                context = context,
-                output = taskSession.stageAgents
-                    .firstOrNull { it.session.state == context.state }
-                    ?.session
-                    ?.output
-                    .orEmpty(),
-            )
-        val proposal = taskMachine.proposeTransition(
-            context = completedContext,
-            to = previous,
-            reason = "Return to ${previous.title} for refinement",
-            inputForTarget = buildStageInput(
-                context = completedContext.copy(state = previous, current = previous.title),
-                stage = previous,
-                previousOutput = taskSession.stageAgents.firstOrNull { it.session.state == previous }?.session?.output,
-                additionalInput = "The orchestrator requested a return from ${context.state.title}.",
-            ),
-        )
-
-        updateTab(activeTab.number) { tab ->
+        val analysisContext = if (context.expectedAction == TaskExpectedAction.OrchestratorDecision) {
+            context
+        } else {
+            taskMachine.resumeRejectionAnalysis(context)
+        }
+        updateTab(tabNumber) { tab ->
+            val session = tab.taskSession ?: return@updateTab tab
             tab.copy(
-                taskSession = taskSession.copy(
-                    context = completedContext,
-                    pendingTransition = proposal,
-                    selectedStage = context.state,
+                taskSession = session.copy(
+                    context = analysisContext,
+                    pendingTransition = null,
+                    pendingRejection = rejection.copy(question = null),
                 ),
             )
         }
+
+        activeTab.viewModel.setPrompt(buildRejectionAnalysisPrompt(rejection, userClarification))
+        activeTab.viewModel.sendPrompt { orchestratorState ->
+            handleRejectionDecision(
+                tabNumber = tabNumber,
+                orchestratorOutput = orchestratorState.lastAssistantOutput(),
+            )
+        }
+    }
+
+    private fun handleRejectionDecision(
+        tabNumber: Int,
+        orchestratorOutput: String,
+    ) {
+        val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
+        val taskSession = tab.taskSession ?: return
+        val rejection = taskSession.pendingRejection ?: return
+        val context = taskSession.context ?: return
+        val decision = parseTaskOrchestratorDecision(orchestratorOutput)
+            ?: TaskOrchestratorDecision.AskUser(
+                question = defaultRejectionQuestion(rejection.stage),
+                reason = "Orchestrator decision was not structured enough to parse.",
+            )
+
+        when (decision) {
+            is TaskOrchestratorDecision.RetryCurrent -> {
+                runRejectedStageDecision(
+                    tabNumber = tabNumber,
+                    rejection = rejection,
+                    target = context.state,
+                    reason = decision.reason,
+                    additionalInput = decision.additionalInput,
+                )
+            }
+
+            is TaskOrchestratorDecision.ReturnPrevious -> {
+                val previous = context.state.previous()
+                if (previous == null) {
+                    askUserForRejectionDetails(
+                        tabNumber = tabNumber,
+                        rejection = rejection,
+                        question = defaultRejectionQuestion(rejection.stage),
+                        reason = "Cannot return before ${context.state.title}.",
+                    )
+                } else {
+                    runRejectedStageDecision(
+                        tabNumber = tabNumber,
+                        rejection = rejection,
+                        target = previous,
+                        reason = decision.reason,
+                        additionalInput = decision.additionalInput,
+                    )
+                }
+            }
+
+            is TaskOrchestratorDecision.AskUser -> {
+                askUserForRejectionDetails(
+                    tabNumber = tabNumber,
+                    rejection = rejection,
+                    question = decision.question,
+                    reason = decision.reason,
+                )
+            }
+        }
+    }
+
+    private fun runRejectedStageDecision(
+        tabNumber: Int,
+        rejection: TaskStageRejection,
+        target: TaskState,
+        reason: String,
+        additionalInput: String,
+    ) {
+        val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
+        val taskSession = tab.taskSession ?: return
+        val context = taskSession.context ?: return
+        val nextContext = taskMachine.resolveRejectedStage(context, target)
+        val previousOutput = if (target == rejection.stage) {
+            rejection.rejectedOutput
+        } else {
+            taskSession.stageAgents.firstOrNull { it.session.state == target }?.session?.output
+        }
+        val input = buildStageInput(
+            context = nextContext,
+            stage = target,
+            previousOutput = previousOutput,
+            additionalInput = buildRejectedStageAdditionalInput(
+                rejection = rejection,
+                reason = reason,
+                additionalInput = additionalInput,
+            ),
+        )
+        val nextSession = taskSession.ensureStageAgent(
+            tabNumber = tabNumber,
+            storageType = state.selectedStorageType,
+            stage = target,
+            input = input,
+        ).copy(
+            context = nextContext,
+            selectedStage = target,
+            pendingTransition = null,
+            pendingRejection = null,
+        )
+
+        updateTab(tabNumber) { currentTab -> currentTab.copy(taskSession = nextSession) }
+        sendStagePrompt(tabNumber, target, input)
+    }
+
+    private fun askUserForRejectionDetails(
+        tabNumber: Int,
+        rejection: TaskStageRejection,
+        question: String,
+        reason: String,
+    ) {
+        val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
+        val taskSession = tab.taskSession ?: return
+        val context = taskSession.context ?: return
+        val waitingContext = taskMachine.awaitRejectionDetails(context)
+
+        updateTab(tabNumber) { currentTab ->
+            currentTab.copy(
+                taskSession = taskSession.copy(
+                    context = waitingContext,
+                    pendingTransition = null,
+                    pendingRejection = rejection.copy(
+                        question = question,
+                        reason = reason,
+                    ),
+                ),
+            )
+        }
+        tab.viewModel.appendLocalMessage(
+            ChatMessage(
+                role = ChatRole.Assistant,
+                content = question,
+            ),
+        )
     }
 
     private fun handleTaskStageChatEvent(event: ChatEvent) {
@@ -701,6 +877,7 @@ class AiChatAppViewModel(
                     context = session.context?.copy(expectedAction = TaskExpectedAction.AgentWork),
                     selectedStage = stage,
                     pendingTransition = null,
+                    pendingRejection = null,
                 ),
             )
         }
@@ -769,6 +946,7 @@ class AiChatAppViewModel(
                     context = completedContext,
                     stageAgents = updatedAgents,
                     pendingTransition = pendingTransition,
+                    pendingRejection = null,
                     selectedStage = stage,
                 ),
             )
@@ -916,6 +1094,127 @@ private fun buildStageInput(
         appendLine("Return only the result for the $stage stage.")
     }
 
+private fun buildRejectionAnalysisPrompt(
+    rejection: TaskStageRejection,
+    userClarification: String?,
+): String =
+    buildString {
+        appendLine("TASK_REJECTION_ANALYSIS")
+        appendLine("The user rejected the result of the ${rejection.stage.title} stage.")
+        appendLine("You are the orchestrator. Analyze why the stage was rejected and choose the next FSM action.")
+        appendLine()
+        appendLine("Return exactly one structured decision block:")
+        appendLine(RejectionDecisionStart)
+        appendLine("action: retry_current|return_previous|ask_user")
+        appendLine("reason: concise reason")
+        appendLine("additional_input: data to pass to the selected stage")
+        appendLine("question: question for the user when action is ask_user")
+        appendLine(RejectionDecisionEnd)
+        appendLine()
+        appendLine("Rules:")
+        appendLine("- Use retry_current when the same stage can be improved with more context.")
+        appendLine("- Use return_previous only when the previous stage must be refined first.")
+        appendLine("- Use ask_user when the rejection reason is unclear.")
+        if (rejection.stage.previous() == null) {
+            appendLine("- The current stage has no previous stage, so do not use return_previous.")
+        }
+        appendLine("- Do not move to the next stage after rejection.")
+        appendLine()
+        appendLine("Task: ${rejection.context.task}")
+        appendLine("Rejected stage: ${rejection.stage.title}")
+        rejection.proposedNextStage?.let { stage ->
+            appendLine("Rejected proposed next stage: ${stage.title}")
+        }
+        if (rejection.context.plan.isNotEmpty()) {
+            appendLine()
+            appendLine("Accepted plan:")
+            rejection.context.plan.forEach { item -> appendLine("- $item") }
+        }
+        if (rejection.context.done.isNotEmpty()) {
+            appendLine()
+            appendLine("Already done:")
+            rejection.context.done.forEach { item -> appendLine("- $item") }
+        }
+        appendLine()
+        appendLine("Rejected stage output:")
+        appendLine(rejection.rejectedOutput)
+        rejection.proposedInputForTarget?.takeIf { it.isNotBlank() }?.let { input ->
+            appendLine()
+            appendLine("Input that would have been sent to the next stage:")
+            appendLine(input)
+        }
+        userClarification?.takeIf { it.isNotBlank() }?.let { clarification ->
+            appendLine()
+            appendLine("User clarification after orchestrator question:")
+            appendLine(clarification)
+        }
+    }
+
+private fun buildRejectedStageAdditionalInput(
+    rejection: TaskStageRejection,
+    reason: String,
+    additionalInput: String,
+): String =
+    buildString {
+        appendLine("The user rejected the ${rejection.stage.title} stage result.")
+        reason.takeIf { it.isNotBlank() }?.let { appendLine("Orchestrator reason: $it") }
+        additionalInput.takeIf { it.isNotBlank() }?.let {
+            appendLine()
+            appendLine("Additional data for this retry/refinement:")
+            appendLine(it)
+        }
+        appendLine()
+        appendLine("Rejected ${rejection.stage.title} output:")
+        appendLine(rejection.rejectedOutput)
+    }
+
+private fun parseTaskOrchestratorDecision(output: String): TaskOrchestratorDecision? {
+    val block = output
+        .substringAfter(RejectionDecisionStart, missingDelimiterValue = "")
+        .substringBefore(RejectionDecisionEnd, missingDelimiterValue = "")
+        .takeIf { it.isNotBlank() }
+        ?: return null
+    val fields = block
+        .lineSequence()
+        .mapNotNull { line ->
+            val separatorIndex = line.indexOf(':')
+            if (separatorIndex <= 0) {
+                null
+            } else {
+                line.take(separatorIndex).trim().lowercase() to
+                    line.drop(separatorIndex + 1).trim()
+            }
+        }
+        .toMap()
+
+    val reason = fields["reason"].orEmpty()
+    return when (fields["action"]?.lowercase()) {
+        "retry_current" -> TaskOrchestratorDecision.RetryCurrent(
+            reason = reason,
+            additionalInput = fields["additional_input"].orEmpty(),
+        )
+
+        "return_previous" -> TaskOrchestratorDecision.ReturnPrevious(
+            reason = reason,
+            additionalInput = fields["additional_input"].orEmpty(),
+        )
+
+        "ask_user" -> fields["question"]
+            ?.takeIf { it.isNotBlank() }
+            ?.let { question ->
+                TaskOrchestratorDecision.AskUser(
+                    reason = reason,
+                    question = question,
+                )
+            }
+
+        else -> null
+    }
+}
+
+private fun defaultRejectionQuestion(stage: TaskState): String =
+    "Почему вы отклонили результат этапа ${stage.title}? Что нужно исправить или уточнить?"
+
 private fun extractPlanItems(output: String): List<String> {
     val lines = output
         .lineSequence()
@@ -938,3 +1237,5 @@ private fun ChatViewState.lastAssistantOutput(): String =
 private const val TaskStageChatIdMultiplier = 10
 private const val MaxExtractedPlanItems = 12
 private const val MaxFallbackPlanChars = 600
+private const val RejectionDecisionStart = "TASK_REJECTION_DECISION"
+private const val RejectionDecisionEnd = "END_TASK_REJECTION_DECISION"

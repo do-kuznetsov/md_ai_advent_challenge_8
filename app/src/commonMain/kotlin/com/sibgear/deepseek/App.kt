@@ -184,6 +184,7 @@ fun App() {
                             )
                         },
                         pendingTransition = snapshot.pendingTransition,
+                        pendingRejection = snapshot.pendingRejection,
                     )
                 },
             )

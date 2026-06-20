@@ -61,30 +61,169 @@ class AiChatAppViewModelTaskModeTest {
     }
 
     @Test
-    fun reviseKeepsCurrentStageAndAcceptsAdditionalInput() = runTest {
-        val viewModel = createViewModel(this)
+    fun rejectWithRetryCurrentRerunsCurrentStage() = runTest {
+        var rejectionAnalysisPrompt = ""
+        val viewModel = createViewModel(this) { request ->
+            if (request.prompt.contains("TASK_REJECTION_ANALYSIS")) {
+                rejectionAnalysisPrompt = request.prompt
+                """
+                    TASK_REJECTION_DECISION
+                    action: retry_current
+                    reason: Need more Kotlin test detail
+                    additional_input: Add Kotlin tests before moving forward
+                    question:
+                    END_TASK_REJECTION_DECISION
+                """.trimIndent()
+            } else {
+                "result: ${request.prompt.take(80)}"
+            }
+        }
         viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
         viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
         viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
         advanceUntilIdle()
 
-        viewModel.onEvent(AiChatAppEvent.TaskTransitionRevisionRequested)
-        val revisedSession = assertNotNull(viewModel.state.activeTab?.taskSession)
-        assertEquals(TaskState.Planning, revisedSession.context?.state)
-        assertEquals(TaskExpectedAction.UserPrompt, revisedSession.context?.expectedAction)
-        assertEquals(null, revisedSession.pendingTransition)
+        viewModel.onEvent(AiChatAppEvent.TaskStageRejected)
+        advanceUntilIdle()
 
-        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Need Kotlin tests")))
+        val updatedSession = assertNotNull(viewModel.state.activeTab?.taskSession)
+        assertEquals(TaskState.Planning, updatedSession.context?.state)
+        assertEquals(TaskState.Execution, updatedSession.pendingTransition?.to)
+        assertEquals(null, updatedSession.pendingRejection)
+        assertEquals(1, updatedSession.stageAgents.count { it.session.state == TaskState.Planning })
+        assertTrue(rejectionAnalysisPrompt.contains("Rejected stage output"))
+        assertTrue(
+            updatedSession.stageAgents
+                .first { it.session.state == TaskState.Planning }
+                .session
+                .input
+                .contains("Add Kotlin tests before moving forward"),
+        )
+    }
+
+    @Test
+    fun rejectWithReturnPreviousMovesBackWithoutUserConfirmation() = runTest {
+        val viewModel = createViewModel(this) { request ->
+            if (request.prompt.contains("TASK_REJECTION_ANALYSIS")) {
+                """
+                    TASK_REJECTION_DECISION
+                    action: return_previous
+                    reason: The implementation exposed a planning gap
+                    additional_input: Refine the plan with the rejected execution result
+                    question:
+                    END_TASK_REJECTION_DECISION
+                """.trimIndent()
+            } else {
+                "result: ${request.prompt.take(80)}"
+            }
+        }
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+        viewModel.onEvent(AiChatAppEvent.TaskTransitionAccepted)
+        advanceUntilIdle()
+
+        viewModel.onEvent(AiChatAppEvent.TaskStageRejected)
+        advanceUntilIdle()
+
+        val updatedSession = assertNotNull(viewModel.state.activeTab?.taskSession)
+        assertEquals(TaskState.Planning, updatedSession.context?.state)
+        assertEquals(TaskState.Planning, updatedSession.selectedStage)
+        assertEquals(TaskState.Execution, updatedSession.pendingTransition?.to)
+        assertEquals(null, updatedSession.pendingRejection)
+        assertTrue(
+            updatedSession.stageAgents
+                .first { it.session.state == TaskState.Planning }
+                .session
+                .input
+                .contains("Refine the plan with the rejected execution result"),
+        )
+    }
+
+    @Test
+    fun unrecognizedRejectDecisionAsksUserForClarification() = runTest {
+        val viewModel = createViewModel(this) { request ->
+            if (request.prompt.contains("TASK_REJECTION_ANALYSIS")) {
+                "I need more context."
+            } else {
+                "result: ${request.prompt.take(80)}"
+            }
+        }
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        viewModel.onEvent(AiChatAppEvent.TaskStageRejected)
+        advanceUntilIdle()
+
+        val updatedSession = assertNotNull(viewModel.state.activeTab?.taskSession)
+        assertEquals(TaskState.Planning, updatedSession.context?.state)
+        assertEquals(TaskExpectedAction.UserPrompt, updatedSession.context?.expectedAction)
+        assertEquals(null, updatedSession.pendingTransition)
+        assertNotNull(updatedSession.pendingRejection?.question)
+        assertTrue(
+            viewModel.state.activeTab
+                ?.viewModel
+                ?.state
+                ?.messages
+                .orEmpty()
+                .any { it.content.contains("Почему вы отклонили") },
+        )
+    }
+
+    @Test
+    fun userClarificationAfterRejectReturnsToOrchestratorAnalysis() = runTest {
+        var rejectionAnalysisCount = 0
+        val viewModel = createViewModel(this) { request ->
+            if (request.prompt.contains("TASK_REJECTION_ANALYSIS")) {
+                rejectionAnalysisCount += 1
+                if (rejectionAnalysisCount == 1) {
+                    "I need more context."
+                } else {
+                    """
+                        TASK_REJECTION_DECISION
+                        action: retry_current
+                        reason: User clarified missing validation details
+                        additional_input: Add validation details from the user clarification
+                        question:
+                        END_TASK_REJECTION_DECISION
+                    """.trimIndent()
+                }
+            } else {
+                "result: ${request.prompt.take(80)}"
+            }
+        }
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+        viewModel.onEvent(AiChatAppEvent.TaskStageRejected)
+        advanceUntilIdle()
+
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("The plan missed validation details")))
         viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
         advanceUntilIdle()
 
         val updatedSession = assertNotNull(viewModel.state.activeTab?.taskSession)
         assertEquals(TaskState.Planning, updatedSession.context?.state)
         assertEquals(TaskState.Execution, updatedSession.pendingTransition?.to)
-        assertEquals(1, updatedSession.stageAgents.count { it.session.state == TaskState.Planning })
+        assertEquals(null, updatedSession.pendingRejection)
+        assertEquals(2, rejectionAnalysisCount)
+        assertTrue(
+            updatedSession.stageAgents
+                .first { it.session.state == TaskState.Planning }
+                .session
+                .input
+                .contains("Add validation details from the user clarification"),
+        )
     }
 
-    private fun createViewModel(scope: CoroutineScope): AiChatAppViewModel {
+    private fun createViewModel(
+        scope: CoroutineScope,
+        assistantResponse: (AiRequestData) -> String = { request -> "result: ${request.prompt.take(40)}" },
+    ): AiChatAppViewModel {
         val dispatcher = UnconfinedTestDispatcher()
         fun chatViewModel(
             systemPrompt: String = "",
@@ -95,7 +234,8 @@ class AiChatAppViewModelTaskModeTest {
                 interactor = ChatInteractor(
                     repository = RoutingAiRepository(
                         chatRepositories = mapOf(
-                            com.sibgear.deepseek.chat.domain.model.AiProvider.DeepSeek to FakeAiChatRepository,
+                            com.sibgear.deepseek.chat.domain.model.AiProvider.DeepSeek to
+                                FakeAiChatRepository(assistantResponse),
                         ),
                         modelRepositories = emptyMap(),
                     ),
@@ -130,12 +270,14 @@ class AiChatAppViewModelTaskModeTest {
         )
     }
 
-    private object FakeAiChatRepository : AiChatRepository {
+    private class FakeAiChatRepository(
+        private val assistantResponse: (AiRequestData) -> String,
+    ) : AiChatRepository {
         override suspend fun sendMessage(request: AiRequestData): AgentResponse =
             AgentResponse(
                 messages = listOf(
                     ChatMessage(role = ChatRole.User, content = request.prompt),
-                    ChatMessage(role = ChatRole.Assistant, content = "result: ${request.prompt.take(40)}"),
+                    ChatMessage(role = ChatRole.Assistant, content = assistantResponse(request)),
                 ),
             )
     }

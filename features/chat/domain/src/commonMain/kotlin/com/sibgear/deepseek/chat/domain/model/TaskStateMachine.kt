@@ -13,6 +13,7 @@ enum class TaskExpectedAction {
     UserPrompt,
     AgentWork,
     UserConfirmation,
+    OrchestratorDecision,
     Completed,
 }
 
@@ -45,12 +46,42 @@ data class TaskTransitionProposal(
     val inputForTarget: String,
 )
 
+data class TaskStageRejection(
+    val stage: TaskState,
+    val rejectedOutput: String,
+    val context: TaskContext,
+    val proposedNextStage: TaskState? = null,
+    val proposedInputForTarget: String? = null,
+    val question: String? = null,
+    val reason: String? = null,
+)
+
+sealed interface TaskOrchestratorDecision {
+    val reason: String
+
+    data class RetryCurrent(
+        val additionalInput: String,
+        override val reason: String,
+    ) : TaskOrchestratorDecision
+
+    data class ReturnPrevious(
+        val additionalInput: String,
+        override val reason: String,
+    ) : TaskOrchestratorDecision
+
+    data class AskUser(
+        val question: String,
+        override val reason: String,
+    ) : TaskOrchestratorDecision
+}
+
 data class TaskSessionSnapshot(
     val isModeEnabled: Boolean = false,
     val context: TaskContext? = null,
     val selectedStage: TaskState = TaskState.Planning,
     val stages: List<TaskStageSession> = emptyList(),
     val pendingTransition: TaskTransitionProposal? = null,
+    val pendingRejection: TaskStageRejection? = null,
 )
 
 class TaskStateMachine {
@@ -135,8 +166,36 @@ class TaskStateMachine {
         )
     }
 
-    fun requestRevision(context: TaskContext): TaskContext =
+    fun rejectStage(context: TaskContext): TaskContext {
+        require(context.expectedAction == TaskExpectedAction.UserConfirmation) {
+            "Stage can be rejected only after a completed stage"
+        }
+        return context.copy(expectedAction = TaskExpectedAction.OrchestratorDecision)
+    }
+
+    fun awaitRejectionDetails(context: TaskContext): TaskContext =
         context.copy(expectedAction = TaskExpectedAction.UserPrompt)
+
+    fun resumeRejectionAnalysis(context: TaskContext): TaskContext =
+        context.copy(expectedAction = TaskExpectedAction.OrchestratorDecision)
+
+    fun resolveRejectedStage(
+        context: TaskContext,
+        to: TaskState,
+    ): TaskContext {
+        require(context.expectedAction == TaskExpectedAction.OrchestratorDecision) {
+            "Rejected stage can be resolved only by the orchestrator"
+        }
+        require(to == context.state || to == context.state.previous()) {
+            "Rejected stage can only be retried or returned to the previous stage: ${context.state} -> $to"
+        }
+        return context.copy(
+            state = to,
+            step = to.ordinal + 1,
+            current = to.title,
+            expectedAction = TaskExpectedAction.AgentWork,
+        )
+    }
 }
 
 fun TaskState.next(): TaskState? =

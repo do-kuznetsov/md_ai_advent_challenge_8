@@ -49,6 +49,7 @@ import kotlin.math.roundToLong
 
 private val UserMessageColor = Color(0xFFDDF7DF)
 private val AssistantMessageColor = Color(0xFFEDE1FF)
+private val SystemPromptMessageColor = Color(0xFFD8ECFF)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -58,12 +59,19 @@ internal fun ChatArea(
     expandedCompressionMessageIndexes: Set<Int>,
     onCompressionSummaryToggled: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    leadingSystemPrompt: String? = null,
 ) {
     val listState = rememberLazyListState()
+    val systemPrompt = leadingSystemPrompt?.takeIf { it.isNotBlank() }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
+    LaunchedEffect(messages.size, systemPrompt) {
+        val lastItemIndex = when {
+            messages.isNotEmpty() -> messages.lastIndex + if (systemPrompt != null) 1 else 0
+            systemPrompt != null -> 0
+            else -> null
+        }
+        if (lastItemIndex != null) {
+            listState.animateScrollToItem(lastItemIndex)
         }
     }
 
@@ -77,6 +85,12 @@ internal fun ChatArea(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            systemPrompt?.let { prompt ->
+                item(key = "system-prompt") {
+                    SystemPromptBubble(prompt = prompt)
+                }
+            }
+
             messages.forEachIndexed { index, message ->
                 if (message.kind == ChatMessageKind.CompressionSummary) {
                     item(key = "compression-$index") {
@@ -105,6 +119,37 @@ internal fun ChatArea(
             adapter = rememberScrollbarAdapter(listState),
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(8.dp),
         )
+    }
+}
+
+@Composable
+private fun SystemPromptBubble(prompt: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        SelectionContainer {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.78f)
+                    .widthIn(min = 48.dp)
+                    .background(SystemPromptMessageColor, RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = "system prompt",
+                    color = Color(0xFF5F6368),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+
+                Text(
+                    text = prompt,
+                    color = Color(0xFF202124),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
     }
 }
 

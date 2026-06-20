@@ -121,4 +121,66 @@ class TaskStateMachineTest {
 
         assertEquals(TaskState.Validation, proposal.to)
     }
+
+    @Test
+    fun rejectedStageWaitsForOrchestratorDecision() {
+        val context = machine.start("Add tests")
+            .let { machine.completeStage(it, output = "plan") }
+
+        val rejected = machine.rejectStage(context)
+
+        assertEquals(TaskExpectedAction.OrchestratorDecision, rejected.expectedAction)
+    }
+
+    @Test
+    fun rejectedStageCanRetryCurrentStage() {
+        val context = machine.start("Add tests")
+            .let { machine.completeStage(it, output = "plan") }
+            .let { machine.acceptTransition(it, machine.proposeTransition(it, TaskState.Execution, "accepted", "plan")) }
+            .let { machine.completeStage(it, output = "implementation") }
+            .let { machine.rejectStage(it) }
+
+        val resolved = machine.resolveRejectedStage(context, TaskState.Execution)
+
+        assertEquals(TaskState.Execution, resolved.state)
+        assertEquals(TaskExpectedAction.AgentWork, resolved.expectedAction)
+    }
+
+    @Test
+    fun rejectedStageCanReturnPreviousStage() {
+        val context = machine.start("Add tests")
+            .let { machine.completeStage(it, output = "plan") }
+            .let { machine.acceptTransition(it, machine.proposeTransition(it, TaskState.Execution, "accepted", "plan")) }
+            .let { machine.completeStage(it, output = "implementation") }
+            .let { machine.rejectStage(it) }
+
+        val resolved = machine.resolveRejectedStage(context, TaskState.Planning)
+
+        assertEquals(TaskState.Planning, resolved.state)
+        assertEquals(TaskExpectedAction.AgentWork, resolved.expectedAction)
+    }
+
+    @Test
+    fun rejectedStageCannotMoveForward() {
+        val context = machine.start("Add tests")
+            .let { machine.completeStage(it, output = "plan") }
+            .let { machine.acceptTransition(it, machine.proposeTransition(it, TaskState.Execution, "accepted", "plan")) }
+            .let { machine.completeStage(it, output = "implementation") }
+            .let { machine.rejectStage(it) }
+
+        assertFailsWith<IllegalArgumentException> {
+            machine.resolveRejectedStage(context, TaskState.Validation)
+        }
+    }
+
+    @Test
+    fun askUserAfterRejectionWaitsForUserPrompt() {
+        val context = machine.start("Add tests")
+            .let { machine.completeStage(it, output = "plan") }
+            .let { machine.rejectStage(it) }
+
+        val waiting = machine.awaitRejectionDetails(context)
+
+        assertEquals(TaskExpectedAction.UserPrompt, waiting.expectedAction)
+    }
 }

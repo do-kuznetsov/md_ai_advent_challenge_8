@@ -3,6 +3,7 @@ package com.sibgear.deepseek.persistence
 import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
+import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
 import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
@@ -186,6 +187,7 @@ private data class TaskSessionSnapshotDto(
     val selectedStage: String = TaskState.Planning.title,
     val stages: List<TaskStageSessionDto> = emptyList(),
     val pendingTransition: TaskTransitionProposalDto? = null,
+    val pendingRejection: TaskStageRejectionDto? = null,
 )
 
 @Serializable
@@ -220,6 +222,17 @@ private data class TaskTransitionProposalDto(
     val inputForTarget: String,
 )
 
+@Serializable
+private data class TaskStageRejectionDto(
+    val stage: String,
+    val rejectedOutput: String,
+    val context: TaskContextDto,
+    val proposedNextStage: String? = null,
+    val proposedInputForTarget: String? = null,
+    val question: String? = null,
+    val reason: String? = null,
+)
+
 private const val WorkspaceFileVersion = 1
 private const val JsonStorageValue = "json"
 private const val DatabaseStorageValue = "db"
@@ -231,6 +244,7 @@ private fun TaskSessionSnapshot.toDto(): TaskSessionSnapshotDto =
         selectedStage = selectedStage.title,
         stages = stages.map { it.toDto() },
         pendingTransition = pendingTransition?.toDto(),
+        pendingRejection = pendingRejection?.toDto(),
     )
 
 private fun TaskSessionSnapshotDto.toDomain(): TaskSessionSnapshot =
@@ -240,6 +254,7 @@ private fun TaskSessionSnapshotDto.toDomain(): TaskSessionSnapshot =
         selectedStage = selectedStage.toTaskState(),
         stages = stages.map { it.toDomain() },
         pendingTransition = pendingTransition?.toDomain(),
+        pendingRejection = pendingRejection?.toDomain(),
     )
 
 private fun TaskContext.toDto(): TaskContextDto =
@@ -304,6 +319,28 @@ private fun TaskTransitionProposalDto.toDomain(): TaskTransitionProposal =
         to = to.toTaskState(),
         reason = reason,
         inputForTarget = inputForTarget,
+    )
+
+private fun TaskStageRejection.toDto(): TaskStageRejectionDto =
+    TaskStageRejectionDto(
+        stage = stage.title,
+        rejectedOutput = rejectedOutput,
+        context = context.toDto(),
+        proposedNextStage = proposedNextStage?.title,
+        proposedInputForTarget = proposedInputForTarget,
+        question = question,
+        reason = reason,
+    )
+
+private fun TaskStageRejectionDto.toDomain(): TaskStageRejection =
+    TaskStageRejection(
+        stage = stage.toTaskState(),
+        rejectedOutput = rejectedOutput,
+        context = context.toDomain(),
+        proposedNextStage = proposedNextStage?.toTaskState(),
+        proposedInputForTarget = proposedInputForTarget,
+        question = question,
+        reason = reason,
     )
 
 private val ChatStorageType.storageValue: String
