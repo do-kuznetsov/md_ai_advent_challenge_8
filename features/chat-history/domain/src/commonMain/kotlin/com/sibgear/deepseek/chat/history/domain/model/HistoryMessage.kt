@@ -20,6 +20,7 @@ enum class HistoryRole {
 enum class HistoryMessageKind {
     Regular,
     CompressionSummary,
+    TaskStateEvent,
 }
 
 data class HistoryMessageFooter(

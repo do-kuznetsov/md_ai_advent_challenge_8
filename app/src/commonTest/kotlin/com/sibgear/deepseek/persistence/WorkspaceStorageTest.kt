@@ -1,5 +1,12 @@
 package com.sibgear.deepseek.persistence
 
+import com.sibgear.deepseek.chat.domain.model.TaskContext
+import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
+import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
+import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
+import com.sibgear.deepseek.chat.domain.model.TaskStageSession
+import com.sibgear.deepseek.chat.domain.model.TaskState
+import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import java.io.File
 import java.nio.file.Files
@@ -74,6 +81,79 @@ class WorkspaceStorageTest {
                 tabs = listOf(WorkspaceTabSnapshot(number = 2)),
                 activeTabNumber = 2,
                 nextTabNumber = 3,
+                selectedStorageType = ChatStorageType.Json,
+            ),
+            WorkspaceStorage(baseDir).load(),
+        )
+    }
+
+    @Test
+    fun savesAndRestoresTaskStateMachineSnapshot() {
+        val baseDir = tempBaseDir()
+        val storage = WorkspaceStorage(baseDir)
+        val taskSession = TaskSessionSnapshot(
+            isModeEnabled = true,
+            context = TaskContext(
+                task = "Implement FSM",
+                state = TaskState.Execution,
+                step = 2,
+                total = 4,
+                plan = listOf("Plan"),
+                done = listOf("Planning done"),
+                current = "execution",
+                expectedAction = TaskExpectedAction.UserConfirmation,
+            ),
+            selectedStage = TaskState.Execution,
+            stages = listOf(
+                TaskStageSession(
+                    state = TaskState.Planning,
+                    chatId = 11,
+                    systemPrompt = "planning system",
+                    startUserPrompt = "planning input",
+                    input = "planning input",
+                    output = "planning output",
+                    isReached = true,
+                    isReadyForTransition = true,
+                ),
+            ),
+            pendingTransition = TaskTransitionProposal(
+                from = TaskState.Execution,
+                to = TaskState.Validation,
+                reason = "execution completed",
+                inputForTarget = "validation input",
+            ),
+            pendingRejection = TaskStageRejection(
+                stage = TaskState.Execution,
+                rejectedOutput = "execution output",
+                context = TaskContext(
+                    task = "Implement FSM",
+                    state = TaskState.Execution,
+                    step = 2,
+                    total = 4,
+                    plan = listOf("Plan"),
+                    done = listOf("Planning done"),
+                    current = "execution",
+                    expectedAction = TaskExpectedAction.UserPrompt,
+                ),
+                proposedNextStage = TaskState.Validation,
+                proposedInputForTarget = "validation input",
+                question = "What should change?",
+                reason = "Needs more information",
+            ),
+        )
+
+        storage.save(
+            tabs = listOf(WorkspaceTabSnapshot(number = 1, taskSession = taskSession)),
+            activeTabNumber = 1,
+            nextTabNumber = 2,
+            selectedStorageType = ChatStorageType.Json,
+        )
+
+        assertEquals(
+            WorkspaceSnapshot(
+                tabs = listOf(WorkspaceTabSnapshot(number = 1, taskSession = taskSession)),
+                activeTabNumber = 1,
+                nextTabNumber = 2,
                 selectedStorageType = ChatStorageType.Json,
             ),
             WorkspaceStorage(baseDir).load(),

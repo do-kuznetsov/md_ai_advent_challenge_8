@@ -323,7 +323,10 @@ class ChatContextPlanner {
 
     private fun List<ContextMessage>.activeContextMessages(): List<ContextMessage> {
         val lastCompressionIndex = indexOfLast { it.kind == ChatMessageKind.CompressionSummary }
-        return if (lastCompressionIndex >= 0) drop(lastCompressionIndex) else this
+        val messages = if (lastCompressionIndex >= 0) drop(lastCompressionIndex) else this
+        return messages.filter { message ->
+            message.kind == ChatMessageKind.Regular || message.kind == ChatMessageKind.CompressionSummary
+        }
     }
 
     private fun List<ContextMessage>.branchPathMessages(

@@ -277,6 +277,7 @@ class SqldelightChatHistoryRepository(
         get() = when (this) {
             HistoryMessageKind.Regular -> RegularKind
             HistoryMessageKind.CompressionSummary -> CompressionSummaryKind
+            HistoryMessageKind.TaskStateEvent -> TaskStateEventKind
         }
 
     private fun String.toHistoryRole(): HistoryRole =
@@ -289,6 +290,7 @@ class SqldelightChatHistoryRepository(
     private fun String?.toHistoryMessageKind(): HistoryMessageKind =
         when (this) {
             CompressionSummaryKind -> HistoryMessageKind.CompressionSummary
+            TaskStateEventKind -> HistoryMessageKind.TaskStateEvent
             else -> HistoryMessageKind.Regular
         }
 
@@ -297,6 +299,7 @@ class SqldelightChatHistoryRepository(
         const val AssistantRole = "assistant"
         const val RegularKind = "regular"
         const val CompressionSummaryKind = "compression_summary"
+        const val TaskStateEventKind = "task_state_event"
     }
 }
 

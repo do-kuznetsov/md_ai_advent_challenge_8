@@ -31,11 +31,18 @@ class ChatViewModel(
     initialMessages: List<ChatMessage> = emptyList(),
     initialStickyFacts: List<StickyFact> = emptyList(),
     initialBranches: List<ChatBranch> = emptyList(),
+    initialSystemPrompt: String = "",
+    initialPrompt: String = "",
+    isSystemPromptReadOnly: Boolean = false,
+    private val persistMessage: (suspend (ChatMessage) -> List<ChatMessage>)? = null,
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
 
     var state by mutableStateOf(
         ChatViewState(
+            systemPrompt = initialSystemPrompt,
+            isSystemPromptReadOnly = isSystemPromptReadOnly,
+            prompt = initialPrompt,
             messages = initialMessages,
             stickyFacts = initialStickyFacts,
             branches = initialBranches,
@@ -144,7 +151,9 @@ class ChatViewModel(
             }
 
             is ChatEvent.SystemPromptChanged -> {
-                state = state.copy(systemPrompt = event.systemPrompt)
+                if (!state.isSystemPromptReadOnly) {
+                    state = state.copy(systemPrompt = event.systemPrompt)
+                }
             }
 
             is ChatEvent.TemperatureChanged -> {
@@ -193,14 +202,17 @@ class ChatViewModel(
         }
     }
 
-    fun sendPrompt() {
+    fun sendPrompt(
+        runtimeSystemPrompt: String? = null,
+        onCompleted: ((ChatViewState) -> Unit)? = null,
+    ) {
         val prompt = state.prompt.trim()
         if (prompt.isEmpty() || state.isLoading) {
             return
         }
 
         val request = AiRequestData(
-            systemPrompt = state.systemPrompt,
+            systemPrompt = state.systemPrompt.withRuntimeSystemPrompt(runtimeSystemPrompt),
             prompt = prompt,
             attachment = state.attachment,
             model = state.selectedModel,
@@ -252,6 +264,7 @@ class ChatViewModel(
                     activeBranchId = response.activeBranchId,
                     branchingStatus = response.activeBranchId?.let { "branch: $it" },
                 ).withContextPresentation()
+                onCompleted?.invoke(state)
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -264,8 +277,56 @@ class ChatViewModel(
                     isLoading = false,
                     messages = state.messages + errorMessage,
                 ).withContextPresentation()
+                onCompleted?.invoke(state)
             }
         }
+    }
+
+    fun setPrompt(prompt: String) {
+        state = state.copy(prompt = prompt)
+    }
+
+    fun appendLocalMessage(message: ChatMessage) {
+        state = state.copy(messages = state.messages + message).withContextPresentation()
+    }
+
+    fun appendPersistentMessage(
+        message: ChatMessage,
+        onCompleted: ((ChatViewState) -> Unit)? = null,
+    ) {
+        val persist = persistMessage
+        if (persist == null) {
+            appendLocalMessage(message)
+            onCompleted?.invoke(state)
+            return
+        }
+
+        coroutineScope.launch {
+            try {
+                state = state.copy(messages = persist(message)).withContextPresentation()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Throwable) {
+                state = state.copy(messages = state.messages + message).withContextPresentation()
+            }
+            onCompleted?.invoke(state)
+        }
+    }
+
+    fun syncRequestSettingsFrom(source: ChatViewState) {
+        state = state.copy(
+            selectedModel = source.selectedModel,
+            openRouterModels = source.openRouterModels,
+            deepSeekModels = source.deepSeekModels,
+            modelFilter = source.modelFilter,
+            openRouterModelsStatus = source.openRouterModelsStatus,
+            contextManagementMode = source.contextManagementMode,
+            summaryIntervalInput = source.summaryIntervalInput,
+            slidingWindowMessagesInput = source.slidingWindowMessagesInput,
+            stickyFactsWindowInput = source.stickyFactsWindowInput,
+            apiSettings = source.apiSettings,
+            maxTokensInput = source.maxTokensInput,
+        ).withContextPresentation()
     }
 
     private fun applyOpenRouterFilter() {
@@ -306,3 +367,19 @@ class ChatViewModel(
 
 private fun Set<Int>.toggle(value: Int): Set<Int> =
     if (value in this) this - value else this + value
+
+private fun String.withRuntimeSystemPrompt(runtimeSystemPrompt: String?): String {
+    val runtime = runtimeSystemPrompt?.trim().orEmpty()
+    if (runtime.isEmpty()) {
+        return this
+    }
+
+    val base = trim()
+    return buildString {
+        if (base.isNotEmpty()) {
+            appendLine(base)
+            appendLine()
+        }
+        append(runtime)
+    }
+}

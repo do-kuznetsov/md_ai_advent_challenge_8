@@ -6,6 +6,7 @@ data class ChatTab(
     val number: Int,
     val title: String,
     val viewModel: ChatViewModel,
+    val taskSession: TaskModeSession? = null,
 ) {
     companion object {
         const val NewTitle = "*NEW"

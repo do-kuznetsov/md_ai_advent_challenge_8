@@ -14,6 +14,7 @@ import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
 
 data class ChatViewState(
     val systemPrompt: String = "",
+    val isSystemPromptReadOnly: Boolean = false,
     val prompt: String = "",
     val attachment: PromptAttachment? = null,
     val attachmentError: String? = null,

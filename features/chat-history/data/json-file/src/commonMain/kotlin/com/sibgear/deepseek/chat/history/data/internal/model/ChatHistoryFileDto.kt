@@ -106,4 +106,7 @@ internal enum class HistoryMessageKindDto(val value: String) {
 
     @SerialName("compression_summary")
     CompressionSummary("compression_summary"),
+
+    @SerialName("task_state_event")
+    TaskStateEvent("task_state_event"),
 }

@@ -20,7 +20,10 @@ data class AiChatAppViewState(
         get() = tabs.firstOrNull { it.number == activeTabNumber }
 
     val isStorageSwitchEnabled: Boolean
-        get() = tabs.none { it.viewModel.state.isLoading }
+        get() = tabs.none { tab ->
+            tab.viewModel.state.isLoading ||
+                tab.taskSession?.stageAgents.orEmpty().any { it.viewModel.state.isLoading }
+        }
 
     val isProfileActionEnabled: Boolean
         get() = !isProfileSaving && !isProfileInterviewLoading
