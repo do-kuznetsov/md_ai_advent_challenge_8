@@ -78,7 +78,7 @@ internal fun PromptInputArea(
             onEvent = onEvent,
         )
 
-        if (promptHeaderContent == null) {
+        if (promptHeaderContent == null && state.messages.isEmpty() && !state.isSystemPromptReadOnly) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -94,7 +94,7 @@ internal fun PromptInputArea(
                     enabled = !state.isSystemPromptReadOnly,
                 )
             }
-        } else {
+        } else if (promptHeaderContent != null) {
             promptHeaderContent()
         }
 

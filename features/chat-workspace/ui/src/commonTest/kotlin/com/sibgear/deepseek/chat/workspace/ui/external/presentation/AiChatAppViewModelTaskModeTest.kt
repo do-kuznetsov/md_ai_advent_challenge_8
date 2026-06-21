@@ -501,7 +501,9 @@ class AiChatAppViewModelTaskModeTest {
 
         return AiChatAppViewModel(
             coroutineScope = scope,
-            createChatViewModel = { _, _ -> chatViewModel() },
+            createChatViewModel = { _, _, systemPrompt ->
+                chatViewModel(systemPrompt = systemPrompt)
+            },
             createTaskStageChatViewModel = { _, _, systemPrompt, initialPrompt ->
                 chatViewModel(
                     systemPrompt = systemPrompt,

@@ -42,7 +42,11 @@ import kotlinx.coroutines.launch
 
 class AiChatAppViewModel(
     private val coroutineScope: CoroutineScope,
-    private val createChatViewModel: (tabNumber: Int, storageType: ChatStorageType) -> ChatViewModel,
+    private val createChatViewModel: (
+        tabNumber: Int,
+        storageType: ChatStorageType,
+        systemPrompt: String,
+    ) -> ChatViewModel,
     private val createTaskStageChatViewModel: (
         chatId: Int,
         storageType: ChatStorageType,
@@ -62,6 +66,7 @@ class AiChatAppViewModel(
     initialActiveTabNumber: Int? = null,
     initialNextTabNumber: Int? = null,
     initialStorageType: ChatStorageType = ChatStorageType.Json,
+    initialSystemPromptsByTab: Map<Int, String> = emptyMap(),
     private val storageDirectoryLabel: String,
     private val onWorkspaceChanged: (
         tabs: List<ChatTabSnapshot>,
@@ -99,6 +104,7 @@ class AiChatAppViewModel(
     private var nextTabNumber = maxOf(
         initialNextTabNumber ?: ((initialNumbers.maxOrNull() ?: 0) + 1),
         (initialNumbers.maxOrNull() ?: 0) + 1,
+    private val initialSystemPrompts = initialSystemPromptsByTab
     )
 
     var state by mutableStateOf(
@@ -110,6 +116,7 @@ class AiChatAppViewModel(
         ),
     )
         private set
+            systemPromptsByTab = initialSystemPrompts,
 
     init {
         notifyWorkspaceChanged()
@@ -172,12 +179,14 @@ class AiChatAppViewModel(
                 storageType = storageType,
                 taskSnapshot = taskSnapshotsByTab[tabNumber],
             )
+        systemPromptsByTab: Map<Int, String>,
         }
         return AiChatAppViewState(
             tabs = tabs,
             activeTabNumber = activeTabNumber
                 ?.takeIf { number -> tabs.any { it.number == number } }
                 ?: tabs.first().number,
+                systemPrompt = systemPromptsByTab[tabNumber].orEmpty(),
             selectedStorageType = storageType,
             storageDirectoryLabel = storageDirectoryLabel,
         )
@@ -194,12 +203,13 @@ class AiChatAppViewModel(
         storageType: ChatStorageType,
         taskSnapshot: TaskSessionSnapshot? = null,
     ): ChatTab {
-        val viewModel = createChatViewModel(number, storageType)
+        val viewModel = createChatViewModel(number, storageType, systemPrompt)
         viewModel.loadModels()
 
         return ChatTab(
             number = number,
             title = createInitialTabTitle(number),
+        systemPrompt: String = "",
             viewModel = viewModel,
             taskSession = taskSnapshot?.toTaskModeSession(storageType),
         )
@@ -580,6 +590,9 @@ class AiChatAppViewModel(
     private fun toggleTaskMode() {
         val activeTab = state.activeTab ?: return
         val currentSession = activeTab.taskSession
+                if (event is ChatEvent.SystemPromptChanged) {
+                    notifyWorkspaceChanged()
+                }
         val nextSession = if (currentSession == null) {
             TaskModeSession(isModeEnabled = true)
         } else {
@@ -1532,6 +1545,7 @@ private fun buildTaskOrchestratorRuntimePrompt(taskSession: TaskModeSession): St
         appendLine("Treat this block as authoritative runtime state. The code reducer applies transitions; do not claim a transition was applied unless the state below says so.")
         appendLine()
         appendLine("Task: ${context.task}")
+                    systemPrompt = tab.viewModel.state.systemPrompt,
         appendLine("Current state: ${context.state.title}")
         appendLine("Step: ${context.step}/${context.total}")
         appendLine("Expected action: ${context.expectedAction}")

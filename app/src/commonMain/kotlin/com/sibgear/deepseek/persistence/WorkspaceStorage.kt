@@ -120,7 +120,13 @@ internal class WorkspaceStorage(
         val safeTabs = tabs
             .filter { it.number > 0 }
             .distinctBy { it.number }
-            .map { WorkspaceTabSnapshot(number = it.number, taskSession = it.taskSession?.toDomain()) }
+            .map {
+                WorkspaceTabSnapshot(
+                    number = it.number,
+                    systemPrompt = it.systemPrompt,
+                    taskSession = it.taskSession?.toDomain(),
+                )
+            }
         val active = activeTabNumber
             .takeIf { number -> safeTabs.any { it.number == number } }
             ?: safeTabs.firstOrNull()?.number
@@ -140,7 +146,13 @@ internal class WorkspaceStorage(
 
     private fun WorkspaceSnapshot.toDto(): WorkspaceFileDto =
         WorkspaceFileDto(
-            tabs = tabs.map { WorkspaceTabDto(number = it.number, taskSession = it.taskSession?.toDto()) },
+            tabs = tabs.map {
+                WorkspaceTabDto(
+                    number = it.number,
+                    systemPrompt = it.systemPrompt,
+                    taskSession = it.taskSession?.toDto(),
+                )
+            },
             activeTabNumber = activeTabNumber,
             nextTabNumber = nextTabNumber,
             selectedStorageType = selectedStorageType.storageValue,
@@ -161,6 +173,7 @@ internal data class WorkspaceSnapshot(
 
 internal data class WorkspaceTabSnapshot(
     val number: Int,
+    val systemPrompt: String = "",
     val taskSession: TaskSessionSnapshot? = null,
 )
 
@@ -177,6 +190,7 @@ private data class WorkspaceFileDto(
 private data class WorkspaceTabDto(
     val number: Int,
     val historyFileName: String? = null,
+    val systemPrompt: String = "",
     val taskSession: TaskSessionSnapshotDto? = null,
 )
 

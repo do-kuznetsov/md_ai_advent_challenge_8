@@ -151,7 +151,7 @@ class ChatViewModel(
             }
 
             is ChatEvent.SystemPromptChanged -> {
-                if (!state.isSystemPromptReadOnly) {
+                if (!state.isSystemPromptReadOnly && state.messages.isEmpty()) {
                     state = state.copy(systemPrompt = event.systemPrompt)
                 }
             }
