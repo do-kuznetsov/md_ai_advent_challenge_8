@@ -1,6 +1,8 @@
 package com.sibgear.deepseek.chat.data.openrouter.external.repository
 
 import com.sibgear.deepseek.assistant.memory.domain.interactor.AssistantMemoryInteractor
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMessages
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMemoryItems
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toChatMemoryRetrievalPlan
@@ -34,6 +36,7 @@ import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.BranchSelection
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
+import com.sibgear.deepseek.chat.domain.model.ChatInvariant
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.StickyFact
@@ -542,6 +545,15 @@ class OpenRouterChatRepository(
             errors += formatMemoryError(exception)
             ""
         }
+        val invariants = runCatching {
+            memory.getInvariants()
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            emptyList()
+        }
 
         val candidates = runCatching {
             val classificationRequest = contextPlanner.memoryClassificationRequest(request.prompt)
@@ -625,6 +637,7 @@ class OpenRouterChatRepository(
 
         val injection = contextPlanner.memoryInjection(
             originalSystemPrompt = request.systemPrompt,
+            invariants = invariants.map { it.toChatInvariant() },
             userProfile = userProfile,
             retrievalPlan = retrievalPlan ?: com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan(),
             availableMemory = currentItems.toChatMemoryItems(),
@@ -668,6 +681,25 @@ private data class PreparedMemory(
     val effectiveSystemPrompt: String,
     val metadata: HistoryMessageMemoryMetadata?,
 )
+
+private fun AssistantInvariant.toChatInvariant(): ChatInvariant =
+    ChatInvariant(
+        category = category.storageValue,
+        statement = statement,
+        rationale = rationale,
+        enabled = enabled,
+    )
+
+private val InvariantCategory.storageValue: String
+    get() = when (this) {
+        InvariantCategory.Architecture -> "architecture"
+        InvariantCategory.TechnicalDecision -> "technical_decision"
+        InvariantCategory.StackConstraint -> "stack_constraint"
+        InvariantCategory.BusinessRule -> "business_rule"
+        InvariantCategory.Process -> "process"
+        InvariantCategory.Security -> "security"
+        InvariantCategory.Other -> "other"
+    }
 
 private fun formatMemoryError(exception: Throwable): String =
     "memory: ${exception.message ?: exception::class.simpleName ?: "unknown"}"

@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,6 +49,7 @@ internal fun ChatTabBar(
     onStorageMenuExpandedChanged: (Boolean) -> Unit,
     onStorageSelected: (ChatStorageType) -> Unit,
     onProfileClicked: () -> Unit,
+    onInvariantsClicked: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -82,6 +84,7 @@ internal fun ChatTabBar(
             onStorageMenuExpandedChanged = onStorageMenuExpandedChanged,
             onStorageSelected = onStorageSelected,
             onProfileClicked = onProfileClicked,
+            onInvariantsClicked = onInvariantsClicked,
         )
     }
 }
@@ -160,6 +163,7 @@ private fun StorageSelector(
     onStorageMenuExpandedChanged: (Boolean) -> Unit,
     onStorageSelected: (ChatStorageType) -> Unit,
     onProfileClicked: () -> Unit,
+    onInvariantsClicked: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -204,6 +208,20 @@ private fun StorageSelector(
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = "user profile",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+
+            IconButton(
+                onClick = onInvariantsClicked,
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "project invariants",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )

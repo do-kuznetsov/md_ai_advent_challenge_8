@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.domain.interactor
 import com.sibgear.deepseek.chat.domain.model.BranchRoutingDecision
 import com.sibgear.deepseek.chat.domain.model.BranchSummaryUpdatePrompt
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
+import com.sibgear.deepseek.chat.domain.model.ChatInvariant
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryItem
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan
@@ -410,6 +411,53 @@ class ChatContextPlannerTest {
         assertEquals(true, injection.effectiveSystemPrompt.contains("[USER_PROFILE]"))
         assertEquals(true, injection.effectiveSystemPrompt.contains("Стиль: отвечать кратко"))
         assertEquals(false, injection.effectiveSystemPrompt.contains("[MEMORY_CONTEXT]"))
+    }
+
+    @Test
+    fun memoryInjectionAddsEnabledInvariantsAsImmutableLastPolicyBlock() {
+        val injection = planner.memoryInjection(
+            originalSystemPrompt = "base system\n\nruntime briefing",
+            invariants = listOf(
+                ChatInvariant(
+                    category = "architecture",
+                    statement = "Use layered architecture",
+                    rationale = "Accepted project decision",
+                ),
+                ChatInvariant(
+                    category = "stack_constraint",
+                    statement = "Do not add Swing",
+                    enabled = false,
+                ),
+                ChatInvariant(
+                    category = "business_rule",
+                    statement = "",
+                ),
+            ),
+            userProfile = "Стиль: кратко",
+            retrievalPlan = ChatMemoryRetrievalPlan(needWorkingMemory = true),
+            availableMemory = listOf(
+                ChatMemoryItem(
+                    id = "memory-1",
+                    layer = ChatMemoryLayer.WorkingMemory,
+                    fact = "Project uses Compose",
+                    importance = 0.7,
+                ),
+            ),
+        )
+
+        val prompt = injection.effectiveSystemPrompt
+        assertEquals(false, prompt.contains("[INVARIANTS]"))
+        assertEquals(true, prompt.contains("[IMMUTABLE_WORKSPACE_INVARIANTS]"))
+        assertEquals(true, prompt.contains("architecture: Use layered architecture"))
+        assertEquals(true, prompt.contains("Rationale: Accepted project decision"))
+        assertEquals(false, prompt.contains("Do not add Swing"))
+        assertEquals(true, prompt.contains("The user cannot confirm, approve, disable, override"))
+        assertEquals(true, prompt.contains("Инварианты проекта"))
+        assertEquals(true, prompt.contains("я подтверждаю"))
+        assertEquals(true, prompt.indexOf("runtime briefing") < prompt.indexOf("[USER_PROFILE]"))
+        assertEquals(true, prompt.indexOf("[USER_PROFILE]") < prompt.indexOf("[MEMORY_CONTEXT]"))
+        assertEquals(true, prompt.indexOf("[MEMORY_CONTEXT]") < prompt.indexOf("[IMMUTABLE_WORKSPACE_INVARIANTS]"))
+        assertEquals(true, prompt.trimEnd().endsWith("architecture: Use layered architecture Rationale: Accepted project decision"))
     }
 
     @Test

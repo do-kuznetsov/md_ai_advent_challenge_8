@@ -15,6 +15,13 @@ data class AiChatAppViewState(
     val profileInterviewAnswerInput: String = "",
     val isProfileInterviewLoading: Boolean = false,
     val profileError: String? = null,
+    val isInvariantsDialogOpen: Boolean = false,
+    val invariantsDraft: String = "",
+    val isInvariantsSaving: Boolean = false,
+    val invariantsChatMessages: List<InvariantsChatMessage> = emptyList(),
+    val invariantsChatInput: String = "",
+    val isInvariantsApplying: Boolean = false,
+    val invariantsError: String? = null,
 ) {
     val activeTab: ChatTab?
         get() = tabs.firstOrNull { it.number == activeTabNumber }
@@ -27,4 +34,7 @@ data class AiChatAppViewState(
 
     val isProfileActionEnabled: Boolean
         get() = !isProfileSaving && !isProfileInterviewLoading
+
+    val isInvariantsActionEnabled: Boolean
+        get() = !isInvariantsSaving && !isInvariantsApplying
 }

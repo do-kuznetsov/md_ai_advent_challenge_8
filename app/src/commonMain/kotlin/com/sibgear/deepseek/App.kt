@@ -8,6 +8,7 @@ import com.sibgear.deepseek.assistant.memory.data.sqldelight.external.repository
 import com.sibgear.deepseek.assistant.memory.domain.interactor.AssistantMemoryInteractor
 import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
 import com.sibgear.deepseek.assistant.memory.domain.repository.AssistantMemoryRepository
+import com.sibgear.deepseek.assistant.memory.domain.service.AssistantInvariantService
 import com.sibgear.deepseek.assistant.memory.domain.service.AssistantProfileService
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekChatRepository
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekModelsRepository
@@ -74,9 +75,15 @@ fun App() {
     }
 
     val viewModel = remember(scope, workspaceStorage) {
+        val deepSeekAssistantService = DeepSeekAssistantProfileService(apiKey = BuildConfig.DEEPSEEK_API_KEY)
+        val openRouterAssistantService = OpenRouterAssistantProfileService(apiKey = BuildConfig.OPENROUTER_AI_KEY)
         val profileServices: Map<String, AssistantProfileService> = mapOf(
-            AiProvider.DeepSeek.name to DeepSeekAssistantProfileService(apiKey = BuildConfig.DEEPSEEK_API_KEY),
-            AiProvider.OpenRouter.name to OpenRouterAssistantProfileService(apiKey = BuildConfig.OPENROUTER_AI_KEY),
+            AiProvider.DeepSeek.name to deepSeekAssistantService,
+            AiProvider.OpenRouter.name to openRouterAssistantService,
+        )
+        val invariantServices: Map<String, AssistantInvariantService> = mapOf(
+            AiProvider.DeepSeek.name to deepSeekAssistantService,
+            AiProvider.OpenRouter.name to openRouterAssistantService,
         )
 
         fun createChatViewModel(
@@ -217,9 +224,11 @@ fun App() {
             createInitialTabTitle = { tabNumber ->
                 initialTitlesByTab[tabNumber] ?: ChatTab.NewTitle
             },
-            switchStorage = { storageType, currentTabs, activeTabNumber, nextTabNumber ->
+            switchStorage = { sourceStorageType, storageType, currentTabs, activeTabNumber, nextTabNumber ->
                 val targetStorage = workspaceStorage.createHistoryStorage(storageType)
                 val targetTaskStageStorage = workspaceStorage.createTaskStageHistoryStorage(storageType)
+                val sourceMemoryRepository = workspaceStorage.createMemoryRepository(sourceStorageType)
+                val targetMemoryRepository = workspaceStorage.createMemoryRepository(storageType)
                 currentTabs.forEach { tab ->
                     runBlocking {
                         val targetRepository = targetStorage.createRepository(tab.number)
@@ -233,6 +242,11 @@ fun App() {
                             targetStageRepository.replaceBranches(agent.viewModel.state.branches.toHistoryBranches())
                         }
                     }
+                }
+                runBlocking {
+                    targetMemoryRepository.replaceItems(sourceMemoryRepository.getItems())
+                    targetMemoryRepository.saveProfile(sourceMemoryRepository.getProfile())
+                    targetMemoryRepository.replaceInvariants(sourceMemoryRepository.getInvariants())
                 }
                 val taskSnapshotsByTab = currentTabs.mapNotNull { tab ->
                     tab.taskSession?.toSnapshot()?.let { snapshot -> tab.number to snapshot }
@@ -305,6 +319,21 @@ fun App() {
                     interviewAnswers = answers,
                     modelId = modelId.takeIf { it.isNotBlank() } ?: error("Не выбрана модель для интервью."),
                 ).text
+            },
+            loadInvariantsAction = { storageType ->
+                workspaceStorage.createMemoryRepository(storageType).getInvariants()
+            },
+            saveInvariantsAction = { storageType, invariants ->
+                workspaceStorage.createMemoryRepository(storageType).replaceInvariants(invariants)
+            },
+            updateInvariantsFromChatAction = { providerName, modelId, currentInvariants, chatMessages ->
+                val invariantService = invariantServices[providerName]
+                    ?: error("Неизвестный провайдер инвариантов: $providerName")
+                invariantService.updateInvariants(
+                    currentInvariants = currentInvariants,
+                    chatMessages = chatMessages,
+                    modelId = modelId.takeIf { it.isNotBlank() } ?: error("Не выбрана модель для сбора инвариантов."),
+                )
             },
         )
     }
