@@ -26,8 +26,10 @@ import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTabSnapshot
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 import com.sibgear.deepseek.chat.workspace.ui.external.model.StorageSwitchResult
+import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskChatFocus
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskStageAgent
+import com.sibgear.deepseek.chat.workspace.ui.external.model.defaultTaskChatFocus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -179,6 +181,7 @@ class AiChatAppViewModel(
             isModeEnabled = isModeEnabled,
             context = context,
             selectedStage = selectedStage,
+            chatFocus = context.defaultTaskChatFocus(),
             stageAgents = stages.map { session ->
                 val viewModel = createTaskStageChatViewModel(
                     session.chatId,
@@ -412,7 +415,13 @@ class AiChatAppViewModel(
                     activeViewModel.sendPrompt()
                 }
             }
-            else -> activeViewModel.onEvent(event)
+            else -> {
+                val activeTab = state.activeTab
+                if (activeTab?.taskSession?.isModeEnabled == true && event.isPromptInputEvent()) {
+                    focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
+                }
+                activeViewModel.onEvent(event)
+            }
         }
     }
 
@@ -437,8 +446,13 @@ class AiChatAppViewModel(
             return
         }
 
+        val nextFocus = if (context != null && stage == context.state) {
+            TaskChatFocus.Stage(stage)
+        } else {
+            taskSession.chatFocus
+        }
         updateTab(activeTab.number) { tab ->
-            tab.copy(taskSession = taskSession.copy(selectedStage = stage))
+            tab.copy(taskSession = taskSession.copy(selectedStage = stage, chatFocus = nextFocus))
         }
     }
 
@@ -451,6 +465,7 @@ class AiChatAppViewModel(
 
         val taskSession = activeTab.taskSession
         if (taskSession?.context == null) {
+            focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
             activeTab.viewModel.setPrompt("")
             activeTab.viewModel.appendPersistentMessage(
                 ChatMessage(role = ChatRole.User, content = prompt),
@@ -461,6 +476,7 @@ class AiChatAppViewModel(
             taskSession.pendingRejection != null &&
             taskSession.context.expectedAction == TaskExpectedAction.UserPrompt
         ) {
+            focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
             activeTab.viewModel.setPrompt("")
             activeTab.viewModel.appendPersistentMessage(
                 ChatMessage(role = ChatRole.User, content = prompt),
@@ -468,6 +484,7 @@ class AiChatAppViewModel(
                 sendRejectionClarificationToOrchestrator(activeTab.number, prompt)
             }
         } else {
+            focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
             activeTab.viewModel.sendPrompt(runtimeSystemPrompt = buildTaskOrchestratorRuntimePrompt(taskSession))
         }
     }
@@ -491,6 +508,7 @@ class AiChatAppViewModel(
             isModeEnabled = true,
             context = context,
             selectedStage = TaskState.Planning,
+            chatFocus = TaskChatFocus.Stage(TaskState.Planning),
             stageAgents = listOf(agent),
             pendingTransition = null,
         )
@@ -518,6 +536,7 @@ class AiChatAppViewModel(
         ).copy(
             context = nextContext,
             selectedStage = proposal.to,
+            chatFocus = TaskChatFocus.Stage(proposal.to),
             pendingTransition = null,
             pendingRejection = null,
         )
@@ -559,6 +578,7 @@ class AiChatAppViewModel(
                 taskSession = taskSession.copy(
                     context = rejectedContext,
                     selectedStage = context.state,
+                    chatFocus = TaskChatFocus.Orchestrator,
                     pendingTransition = null,
                     pendingRejection = rejection,
                 ),
@@ -590,6 +610,7 @@ class AiChatAppViewModel(
             tab.copy(
                 taskSession = taskSession.copy(
                     context = analysisContext,
+                    chatFocus = TaskChatFocus.Orchestrator,
                     pendingRejection = rejection.copy(question = null),
                     pendingTransition = null,
                 ),
@@ -628,6 +649,7 @@ class AiChatAppViewModel(
             tab.copy(
                 taskSession = session.copy(
                     context = analysisContext,
+                    chatFocus = TaskChatFocus.Orchestrator,
                     pendingTransition = null,
                     pendingRejection = rejection.copy(question = null),
                 ),
@@ -736,6 +758,7 @@ class AiChatAppViewModel(
         ).copy(
             context = nextContext,
             selectedStage = target,
+            chatFocus = TaskChatFocus.Stage(target),
             pendingTransition = null,
             pendingRejection = null,
         )
@@ -768,6 +791,7 @@ class AiChatAppViewModel(
             currentTab.copy(
                 taskSession = taskSession.copy(
                     context = waitingContext,
+                    chatFocus = TaskChatFocus.Orchestrator,
                     pendingTransition = null,
                     pendingRejection = rejection.copy(
                         question = question,
@@ -799,6 +823,9 @@ class AiChatAppViewModel(
         val currentStage = taskSession.context?.state ?: return
         if (agent.session.state != currentStage && event.isPromptInputEvent()) {
             return
+        }
+        if (event.isPromptInputEvent()) {
+            focusTaskChat(activeTab.number, TaskChatFocus.Stage(agent.session.state))
         }
         when (event) {
             ChatEvent.SendClicked -> {
@@ -888,6 +915,7 @@ class AiChatAppViewModel(
                 taskSession = session.copy(
                     context = session.context?.copy(expectedAction = TaskExpectedAction.AgentWork),
                     selectedStage = stage,
+                    chatFocus = TaskChatFocus.Stage(stage),
                     pendingTransition = null,
                     pendingRejection = null,
                 ),
@@ -960,6 +988,11 @@ class AiChatAppViewModel(
                     pendingTransition = pendingTransition,
                     pendingRejection = null,
                     selectedStage = stage,
+                    chatFocus = if (shouldControlTransition) {
+                        TaskChatFocus.Stage(stage)
+                    } else {
+                        currentSession.chatFocus
+                    },
                 ),
             )
         }
@@ -989,6 +1022,19 @@ class AiChatAppViewModel(
             ),
         ) {
             onCompleted()
+        }
+    }
+
+    private fun focusTaskChat(
+        tabNumber: Int,
+        focus: TaskChatFocus,
+    ) {
+        val taskSession = state.tabs.firstOrNull { it.number == tabNumber }?.taskSession ?: return
+        if (taskSession.chatFocus == focus) {
+            return
+        }
+        updateTab(tabNumber) { tab ->
+            tab.copy(taskSession = taskSession.copy(chatFocus = focus))
         }
     }
 

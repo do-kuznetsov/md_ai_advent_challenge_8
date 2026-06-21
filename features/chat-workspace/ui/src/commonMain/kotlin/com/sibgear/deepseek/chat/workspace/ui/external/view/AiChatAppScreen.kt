@@ -1,8 +1,10 @@
 package com.sibgear.deepseek.chat.workspace.ui.external.view
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -39,6 +42,7 @@ import com.sibgear.deepseek.chat.ui.external.view.ChatScreen
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppEvent
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppViewState
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
+import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskChatFocus
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
 import com.sibgear.deepseek.chat.workspace.ui.internal.view.ChatTabBar
 import com.sibgear.deepseek.chat.workspace.ui.internal.view.UserProfileDialog
@@ -184,14 +188,19 @@ private fun TaskStateMachineChatScreen(
                             modifier = Modifier.fillMaxSize(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            ChatPane(
-                                state = tab.viewModel.state,
-                                onEvent = { onEvent(AiChatAppEvent.ActiveChatEvent(it)) },
+                            FocusedChatPaneFrame(
+                                isFocused = taskSession.chatFocus == TaskChatFocus.Orchestrator,
                                 modifier = Modifier.weight(chatSplitFraction).fillMaxHeight(),
-                                showTaskModeToggle = true,
-                                isTaskModeEnabled = true,
-                                onTaskModeToggled = { onEvent(AiChatAppEvent.TaskModeToggled) },
-                            )
+                            ) {
+                                ChatPane(
+                                    state = tab.viewModel.state,
+                                    onEvent = { onEvent(AiChatAppEvent.ActiveChatEvent(it)) },
+                                    modifier = Modifier.fillMaxSize(),
+                                    showTaskModeToggle = true,
+                                    isTaskModeEnabled = true,
+                                    onTaskModeToggled = { onEvent(AiChatAppEvent.TaskModeToggled) },
+                                )
+                            }
 
                             Box(
                                 modifier = Modifier
@@ -209,22 +218,30 @@ private fun TaskStateMachineChatScreen(
 
                             taskSession.selectedStageAgent?.let { agent ->
                                 val isSelectedStageActive = agent.session.state == taskSession.context?.state
-                                ChatPane(
-                                    state = agent.viewModel.state,
-                                    onEvent = { onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(it)) },
+                                val isStageFocused = taskSession.chatFocus == TaskChatFocus.Stage(agent.session.state) &&
+                                    isSelectedStageActive
+                                FocusedChatPaneFrame(
+                                    isFocused = isStageFocused,
+                                    isWorking = isStageFocused && agent.viewModel.state.isLoading,
                                     modifier = Modifier.weight(1f - chatSplitFraction).fillMaxHeight(),
-                                    leadingSystemPrompt = agent.viewModel.state.systemPrompt,
-                                    isPromptInputEnabled = isSelectedStageActive,
-                                    promptHeaderContent = {
-                                        if (isSelectedStageActive) {
-                                            TaskTransitionControls(
-                                                taskSession = taskSession,
-                                                onAccept = { onEvent(AiChatAppEvent.TaskTransitionAccepted) },
-                                                onReject = { onEvent(AiChatAppEvent.TaskStageRejected) },
-                                            )
-                                        }
-                                    },
-                                )
+                                ) {
+                                    ChatPane(
+                                        state = agent.viewModel.state,
+                                        onEvent = { onEvent(AiChatAppEvent.ActiveTaskStageChatEvent(it)) },
+                                        modifier = Modifier.fillMaxSize(),
+                                        leadingSystemPrompt = agent.viewModel.state.systemPrompt,
+                                        isPromptInputEnabled = isSelectedStageActive,
+                                        promptHeaderContent = {
+                                            if (isSelectedStageActive) {
+                                                TaskTransitionControls(
+                                                    taskSession = taskSession,
+                                                    onAccept = { onEvent(AiChatAppEvent.TaskTransitionAccepted) },
+                                                    onReject = { onEvent(AiChatAppEvent.TaskStageRejected) },
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
                             } ?: Box(
                                 modifier = Modifier
                                     .weight(1f - chatSplitFraction)
@@ -249,6 +266,29 @@ private fun TaskStateMachineChatScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun FocusedChatPaneFrame(
+    isFocused: Boolean,
+    modifier: Modifier = Modifier,
+    isWorking: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val borderColor = when {
+        !isFocused -> Color.Transparent
+        isWorking -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+    }
+    Box(
+        modifier = modifier.border(
+            width = FocusedChatPaneBorderWidth,
+            color = borderColor,
+            shape = RoundedCornerShape(FocusedChatPaneCornerRadius),
+        ),
+    ) {
+        content()
     }
 }
 
@@ -362,3 +402,5 @@ private const val AiModelDrawerMinWidthFraction = 0.16f
 private const val AiModelDrawerMaxWidthFraction = 0.30f
 private val TaskChatSplitHandleWidth: Dp = 6.dp
 private val AiModelDrawerTabWidth: Dp = 38.dp
+private val FocusedChatPaneBorderWidth: Dp = 2.dp
+private val FocusedChatPaneCornerRadius: Dp = 8.dp

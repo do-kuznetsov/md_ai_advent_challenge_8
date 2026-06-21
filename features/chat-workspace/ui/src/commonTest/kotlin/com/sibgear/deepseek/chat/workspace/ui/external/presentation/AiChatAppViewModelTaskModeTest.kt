@@ -15,6 +15,7 @@ import com.sibgear.deepseek.chat.ui.external.presentation.ChatViewModel
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppEvent
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import com.sibgear.deepseek.chat.workspace.ui.external.model.StorageSwitchResult
+import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskChatFocus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -41,6 +42,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Planning, taskSession.selectedStage)
         assertTrue(taskSession.stageAgents.any { it.session.state == TaskState.Planning })
         assertEquals(TaskState.Execution, taskSession.pendingTransition?.to)
+        assertEquals(TaskChatFocus.Stage(TaskState.Planning), taskSession.chatFocus)
     }
 
     @Test
@@ -59,6 +61,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Execution, taskSession.selectedStage)
         assertTrue(taskSession.stageAgents.any { it.session.state == TaskState.Execution })
         assertEquals(TaskState.Validation, taskSession.pendingTransition?.to)
+        assertEquals(TaskChatFocus.Stage(TaskState.Execution), taskSession.chatFocus)
         assertTrue(orchestratorEvents(viewModel).any { it.contains("Transition accepted by user") })
     }
 
@@ -83,6 +86,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Planning, taskSession.context?.state)
         assertEquals(planningInput, taskSession.stageAgents.first { it.session.state == TaskState.Planning }.session.input)
         assertEquals(TaskState.Execution, taskSession.pendingTransition?.to)
+        assertEquals(TaskChatFocus.Orchestrator, taskSession.chatFocus)
         assertTrue(
             viewModel.state.activeTab
                 ?.viewModel
@@ -147,6 +151,7 @@ class AiChatAppViewModelTaskModeTest {
             .stageAgents
             .first { it.session.state == TaskState.Planning }
         assertTrue(planningAgent.session.output.orEmpty().contains("Refine this planning result"))
+        assertEquals(TaskChatFocus.Stage(TaskState.Planning), viewModel.state.activeTab?.taskSession?.chatFocus)
         assertTrue(
             planningAgent.viewModel.state.messages.any {
                 it.role == ChatRole.User && it.content == "Refine this planning result"
@@ -178,6 +183,7 @@ class AiChatAppViewModelTaskModeTest {
         val planningAgent = taskSession.stageAgents.first { it.session.state == TaskState.Planning }
         assertEquals(TaskState.Execution, taskSession.context?.state)
         assertEquals(TaskState.Planning, taskSession.selectedStage)
+        assertEquals(TaskChatFocus.Stage(TaskState.Execution), taskSession.chatFocus)
         assertEquals(before, planningAgent.session.output)
         assertEquals("", planningAgent.viewModel.state.prompt)
     }
@@ -213,6 +219,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Execution, updatedSession.pendingTransition?.to)
         assertEquals(null, updatedSession.pendingRejection)
         assertEquals(1, updatedSession.stageAgents.count { it.session.state == TaskState.Planning })
+        assertEquals(TaskChatFocus.Stage(TaskState.Planning), updatedSession.chatFocus)
         assertTrue(rejectionAnalysisPrompt.contains("Rejected stage output"))
         assertTrue(orchestratorEvents(viewModel).any { it.contains("retry current stage") })
         assertTrue(
@@ -255,6 +262,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Planning, updatedSession.selectedStage)
         assertEquals(TaskState.Execution, updatedSession.pendingTransition?.to)
         assertEquals(null, updatedSession.pendingRejection)
+        assertEquals(TaskChatFocus.Stage(TaskState.Planning), updatedSession.chatFocus)
         assertTrue(orchestratorEvents(viewModel).any { it.contains("return to previous stage") })
         assertTrue(
             updatedSession.stageAgents
@@ -286,6 +294,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Planning, updatedSession.context?.state)
         assertEquals(TaskExpectedAction.UserPrompt, updatedSession.context?.expectedAction)
         assertEquals(null, updatedSession.pendingTransition)
+        assertEquals(TaskChatFocus.Orchestrator, updatedSession.chatFocus)
         assertNotNull(updatedSession.pendingRejection?.question)
         assertTrue(orchestratorEvents(viewModel).any { it.contains("needs user clarification") })
         assertTrue(
@@ -335,6 +344,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Planning, updatedSession.context?.state)
         assertEquals(TaskState.Execution, updatedSession.pendingTransition?.to)
         assertEquals(null, updatedSession.pendingRejection)
+        assertEquals(TaskChatFocus.Stage(TaskState.Planning), updatedSession.chatFocus)
         assertEquals(2, rejectionAnalysisCount)
         assertTrue(
             updatedSession.stageAgents

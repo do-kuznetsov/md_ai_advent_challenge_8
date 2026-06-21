@@ -32,6 +32,7 @@ import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 import com.sibgear.deepseek.chat.workspace.ui.external.model.StorageSwitchResult
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskStageAgent
+import com.sibgear.deepseek.chat.workspace.ui.external.model.defaultTaskChatFocus
 import com.sibgear.deepseek.chat.workspace.ui.external.presentation.AiChatAppViewModel
 import com.sibgear.deepseek.chat.workspace.ui.external.view.AiChatAppScreen
 import com.sibgear.deepseek.config.BuildConfig
@@ -171,6 +172,7 @@ fun App() {
                         isModeEnabled = snapshot.isModeEnabled,
                         context = snapshot.context,
                         selectedStage = snapshot.selectedStage,
+                        chatFocus = snapshot.context.defaultTaskChatFocus(),
                         stageAgents = snapshot.stages.map { session ->
                             val stageViewModel = createChatViewModel(
                                 tabNumber = session.chatId,
