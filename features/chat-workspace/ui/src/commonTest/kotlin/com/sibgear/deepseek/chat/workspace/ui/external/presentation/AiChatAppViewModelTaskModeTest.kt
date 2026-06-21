@@ -4,6 +4,7 @@ import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
+import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
 import com.sibgear.deepseek.chat.domain.model.TaskState
@@ -58,6 +59,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Execution, taskSession.selectedStage)
         assertTrue(taskSession.stageAgents.any { it.session.state == TaskState.Execution })
         assertEquals(TaskState.Validation, taskSession.pendingTransition?.to)
+        assertTrue(orchestratorEvents(viewModel).any { it.contains("Transition accepted by user") })
     }
 
     @Test
@@ -88,6 +90,44 @@ class AiChatAppViewModelTaskModeTest {
                 ?.messages
                 .orEmpty()
                 .any { it.role == ChatRole.User && it.content == "Explain current status" },
+        )
+        assertTrue(
+            viewModel.state.activeTab
+                ?.viewModel
+                ?.state
+                ?.messages
+                .orEmpty()
+                .any { it.kind == ChatMessageKind.TaskStateEvent && it.content.contains("Task State Machine started") },
+        )
+    }
+
+    @Test
+    fun orchestratorPromptInTaskModeReceivesRuntimeBriefing() = runTest {
+        val requestSystemPrompts = mutableListOf<String>()
+        val viewModel = createViewModel(this) { request ->
+            requestSystemPrompts += request.systemPrompt
+            "result: ${request.prompt.take(80)}"
+        }
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Explain current status")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        assertTrue(
+            requestSystemPrompts.any {
+                it.contains("[TASK_STATE_MACHINE_ORCHESTRATOR_CONTEXT]") &&
+                    it.contains("Current state: planning")
+            },
+        )
+        assertTrue(
+            requestSystemPrompts.any {
+                it.contains("isolated planning agent") &&
+                    !it.contains("[TASK_STATE_MACHINE_ORCHESTRATOR_CONTEXT]")
+            },
         )
     }
 
@@ -174,6 +214,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(null, updatedSession.pendingRejection)
         assertEquals(1, updatedSession.stageAgents.count { it.session.state == TaskState.Planning })
         assertTrue(rejectionAnalysisPrompt.contains("Rejected stage output"))
+        assertTrue(orchestratorEvents(viewModel).any { it.contains("retry current stage") })
         assertTrue(
             updatedSession.stageAgents
                 .first { it.session.state == TaskState.Planning }
@@ -214,6 +255,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskState.Planning, updatedSession.selectedStage)
         assertEquals(TaskState.Execution, updatedSession.pendingTransition?.to)
         assertEquals(null, updatedSession.pendingRejection)
+        assertTrue(orchestratorEvents(viewModel).any { it.contains("return to previous stage") })
         assertTrue(
             updatedSession.stageAgents
                 .first { it.session.state == TaskState.Planning }
@@ -245,6 +287,7 @@ class AiChatAppViewModelTaskModeTest {
         assertEquals(TaskExpectedAction.UserPrompt, updatedSession.context?.expectedAction)
         assertEquals(null, updatedSession.pendingTransition)
         assertNotNull(updatedSession.pendingRejection?.question)
+        assertTrue(orchestratorEvents(viewModel).any { it.contains("needs user clarification") })
         assertTrue(
             viewModel.state.activeTab
                 ?.viewModel
@@ -302,6 +345,15 @@ class AiChatAppViewModelTaskModeTest {
         )
     }
 
+    private fun orchestratorEvents(viewModel: AiChatAppViewModel): List<String> =
+        viewModel.state.activeTab
+            ?.viewModel
+            ?.state
+            ?.messages
+            .orEmpty()
+            .filter { it.kind == ChatMessageKind.TaskStateEvent }
+            .map { it.content }
+
     private fun createViewModel(
         scope: CoroutineScope,
         assistantResponse: (AiRequestData) -> String = { request -> "result: ${request.prompt.take(40)}" },
@@ -311,13 +363,14 @@ class AiChatAppViewModelTaskModeTest {
             systemPrompt: String = "",
             initialPrompt: String = "",
             isSystemPromptReadOnly: Boolean = false,
-        ): ChatViewModel =
-            ChatViewModel(
+        ): ChatViewModel {
+            val history = mutableListOf<ChatMessage>()
+            return ChatViewModel(
                 interactor = ChatInteractor(
                     repository = RoutingAiRepository(
                         chatRepositories = mapOf(
                             com.sibgear.deepseek.chat.domain.model.AiProvider.DeepSeek to
-                                FakeAiChatRepository(assistantResponse),
+                                FakeAiChatRepository(history, assistantResponse),
                         ),
                         modelRepositories = emptyMap(),
                     ),
@@ -327,7 +380,12 @@ class AiChatAppViewModelTaskModeTest {
                 initialSystemPrompt = systemPrompt,
                 initialPrompt = initialPrompt,
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
+                persistMessage = { message ->
+                    history += message
+                    history.toList()
+                },
             )
+        }
 
         return AiChatAppViewModel(
             coroutineScope = scope,
@@ -353,14 +411,16 @@ class AiChatAppViewModelTaskModeTest {
     }
 
     private class FakeAiChatRepository(
+        private val history: MutableList<ChatMessage>,
         private val assistantResponse: (AiRequestData) -> String,
     ) : AiChatRepository {
-        override suspend fun sendMessage(request: AiRequestData): AgentResponse =
-            AgentResponse(
-                messages = listOf(
-                    ChatMessage(role = ChatRole.User, content = request.prompt),
-                    ChatMessage(role = ChatRole.Assistant, content = assistantResponse(request)),
-                ),
+        override suspend fun sendMessage(request: AiRequestData): AgentResponse {
+            history += ChatMessage(role = ChatRole.User, content = request.prompt)
+            history += ChatMessage(
+                role = ChatRole.Assistant,
+                content = assistantResponse(request),
             )
+            return AgentResponse(messages = history.toList())
+        }
     }
 }

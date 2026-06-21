@@ -53,12 +53,20 @@ class OpenRouterChatMapperTest {
                 content = "summary",
                 kind = HistoryMessageKind.CompressionSummary,
             ),
+            HistoryMessage(
+                role = HistoryRole.Assistant,
+                content = "task event",
+                kind = HistoryMessageKind.TaskStateEvent,
+            ),
         )
 
         val contextMessages = history.toContextMessages()
 
-        assertEquals("summary", contextMessages.single().content)
-        assertEquals(ChatMessageKind.CompressionSummary, contextMessages.single().kind)
+        assertEquals(listOf("summary", "task event"), contextMessages.map { it.content })
+        assertEquals(
+            listOf(ChatMessageKind.CompressionSummary, ChatMessageKind.TaskStateEvent),
+            contextMessages.map { it.kind },
+        )
     }
 
     @Test

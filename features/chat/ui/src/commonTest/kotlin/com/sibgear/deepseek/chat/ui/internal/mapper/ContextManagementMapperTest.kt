@@ -55,6 +55,24 @@ class ContextManagementMapperTest {
         assertEquals(2, index)
     }
 
+    @Test
+    fun slidingWindowIgnoresTaskStateEventsWhenCalculatingBoundary() {
+        val messages = listOf(
+            message("task event", kind = ChatMessageKind.TaskStateEvent),
+            message("first"),
+            message("second"),
+            message("third"),
+        )
+
+        val index = buildPinnedContextMessageIndex(
+            messages = messages,
+            mode = ContextManagementMode.SlidingWindow,
+            slidingWindowMessagesInput = "2",
+        )
+
+        assertEquals(2, index)
+    }
+
     private fun message(
         content: String,
         kind: ChatMessageKind = ChatMessageKind.Regular,

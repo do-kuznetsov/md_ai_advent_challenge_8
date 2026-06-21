@@ -28,12 +28,32 @@ class ChatContextPlannerTest {
             messages = listOf(
                 message("old"),
                 message("summary", kind = ChatMessageKind.CompressionSummary),
+                message("task event", kind = ChatMessageKind.TaskStateEvent),
                 message("new"),
             ),
             contextManagementSettings = ContextManagementSettings(mode = ContextManagementMode.None),
         )
 
         assertEquals(listOf("old", "new"), plan.apiMessages.map { it.content })
+        assertNull(plan.compressionRequest)
+    }
+
+    @Test
+    fun contextSummaryIgnoresTaskStateEvents() {
+        val plan = planner.plan(
+            messages = listOf(
+                message("old"),
+                message("summary", kind = ChatMessageKind.CompressionSummary),
+                message("task event", kind = ChatMessageKind.TaskStateEvent),
+                message("new"),
+            ),
+            contextManagementSettings = ContextManagementSettings(
+                mode = ContextManagementMode.ContextSummary,
+                summaryIntervalMessages = 10,
+            ),
+        )
+
+        assertEquals(listOf("summary", "new"), plan.apiMessages.map { it.content })
         assertNull(plan.compressionRequest)
     }
 

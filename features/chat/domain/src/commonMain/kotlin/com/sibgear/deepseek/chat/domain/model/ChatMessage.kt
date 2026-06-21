@@ -20,6 +20,7 @@ enum class ChatRole {
 enum class ChatMessageKind {
     Regular,
     CompressionSummary,
+    TaskStateEvent,
 }
 
 data class ChatMessageFooter(

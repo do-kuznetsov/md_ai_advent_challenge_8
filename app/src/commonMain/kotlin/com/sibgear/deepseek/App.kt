@@ -144,6 +144,9 @@ fun App() {
                 initialSystemPrompt = initialSystemPrompt,
                 initialPrompt = initialPrompt,
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
+                persistMessage = { message ->
+                    historyInteractor.add(listOf(message).toHistoryMessages().single()).toChatMessages()
+                },
             )
         }
 

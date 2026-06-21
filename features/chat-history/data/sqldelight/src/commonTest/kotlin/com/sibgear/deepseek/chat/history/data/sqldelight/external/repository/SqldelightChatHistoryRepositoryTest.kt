@@ -100,6 +100,21 @@ class SqldelightChatHistoryRepositoryTest {
     }
 
     @Test
+    fun storesAndRestoresTaskStateEventKind() = runTest {
+        val file = tempDatabaseFile()
+        val repository = SqldelightChatHistoryRepository(file, chatId = 1)
+        val event = HistoryMessage(
+            role = HistoryRole.Assistant,
+            content = "Stage completed: planning",
+            kind = HistoryMessageKind.TaskStateEvent,
+        )
+
+        repository.add(event)
+
+        assertEquals(listOf(event), SqldelightChatHistoryRepository(file, chatId = 1).getMessages())
+    }
+
+    @Test
     fun replacesMessages() = runTest {
         val repository = SqldelightChatHistoryRepository(tempDatabaseFile(), chatId = 1)
         val replacement = listOf(

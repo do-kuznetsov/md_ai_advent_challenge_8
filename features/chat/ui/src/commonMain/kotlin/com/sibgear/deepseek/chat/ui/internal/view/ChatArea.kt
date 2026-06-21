@@ -50,6 +50,7 @@ import kotlin.math.roundToLong
 private val UserMessageColor = Color(0xFFDDF7DF)
 private val AssistantMessageColor = Color(0xFFEDE1FF)
 private val SystemPromptMessageColor = Color(0xFFD8ECFF)
+private val TaskStateEventMessageColor = Color(0xFFE7EEF8)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -92,7 +93,11 @@ internal fun ChatArea(
             }
 
             messages.forEachIndexed { index, message ->
-                if (message.kind == ChatMessageKind.CompressionSummary) {
+                if (message.kind == ChatMessageKind.TaskStateEvent) {
+                    item(key = "task-state-event-$index") {
+                        TaskStateEventBlock(message = message)
+                    }
+                } else if (message.kind == ChatMessageKind.CompressionSummary) {
                     item(key = "compression-$index") {
                         CompressionSummaryBlock(
                             message = message,
@@ -168,6 +173,37 @@ private fun SlidingWindowBoundaryHeader() {
             style = MaterialTheme.typography.labelSmall,
         )
         HorizontalDivider(color = Color(0xFF9AA0A6))
+    }
+}
+
+@Composable
+private fun TaskStateEventBlock(message: ChatMessage) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        SelectionContainer {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.72f)
+                    .widthIn(min = 48.dp)
+                    .background(TaskStateEventMessageColor, RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = "task state",
+                    color = Color(0xFF5F6368),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+
+                Text(
+                    text = message.content,
+                    color = Color(0xFF202124),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
     }
 }
 

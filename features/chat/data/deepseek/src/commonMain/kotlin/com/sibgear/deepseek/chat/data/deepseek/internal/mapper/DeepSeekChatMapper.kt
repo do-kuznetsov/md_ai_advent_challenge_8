@@ -283,6 +283,7 @@ private fun HistoryMessageKind.toChatMessageKind(): ChatMessageKind =
     when (this) {
         HistoryMessageKind.Regular -> ChatMessageKind.Regular
         HistoryMessageKind.CompressionSummary -> ChatMessageKind.CompressionSummary
+        HistoryMessageKind.TaskStateEvent -> ChatMessageKind.TaskStateEvent
     }
 
 private fun HistoryMessageFooter.toChatMessageFooter(): ChatMessageFooter =

@@ -92,6 +92,21 @@ class FileChatHistoryRepositoryTest {
     }
 
     @Test
+    fun storesAndRestoresTaskStateEventKind() = runTest {
+        val file = tempHistoryFile()
+        val repository = FileChatHistoryRepository(file, chatId = 1)
+        val event = HistoryMessage(
+            role = HistoryRole.Assistant,
+            content = "Stage completed: planning",
+            kind = HistoryMessageKind.TaskStateEvent,
+        )
+
+        repository.add(event)
+
+        assertEquals(listOf(event), FileChatHistoryRepository(file, chatId = 1).getMessages())
+    }
+
+    @Test
     fun replacesMessages() = runTest {
         val file = tempHistoryFile()
         val repository = FileChatHistoryRepository(file, chatId = 1)

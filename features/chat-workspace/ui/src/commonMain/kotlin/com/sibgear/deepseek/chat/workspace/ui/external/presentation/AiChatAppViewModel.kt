@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
+import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
@@ -451,21 +452,28 @@ class AiChatAppViewModel(
         val taskSession = activeTab.taskSession
         if (taskSession?.context == null) {
             activeTab.viewModel.setPrompt("")
-            activeTab.viewModel.appendLocalMessage(ChatMessage(role = ChatRole.User, content = prompt))
-            startTask(activeTab, prompt)
+            activeTab.viewModel.appendPersistentMessage(
+                ChatMessage(role = ChatRole.User, content = prompt),
+            ) {
+                startTask(activeTab.number, prompt)
+            }
         } else if (
             taskSession.pendingRejection != null &&
             taskSession.context.expectedAction == TaskExpectedAction.UserPrompt
         ) {
             activeTab.viewModel.setPrompt("")
-            activeTab.viewModel.appendLocalMessage(ChatMessage(role = ChatRole.User, content = prompt))
-            sendRejectionClarificationToOrchestrator(activeTab, prompt)
+            activeTab.viewModel.appendPersistentMessage(
+                ChatMessage(role = ChatRole.User, content = prompt),
+            ) {
+                sendRejectionClarificationToOrchestrator(activeTab.number, prompt)
+            }
         } else {
-            activeTab.viewModel.sendPrompt()
+            activeTab.viewModel.sendPrompt(runtimeSystemPrompt = buildTaskOrchestratorRuntimePrompt(taskSession))
         }
     }
 
-    private fun startTask(activeTab: ChatTab, task: String) {
+    private fun startTask(tabNumber: Int, task: String) {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val context = taskMachine.start(task)
         val input = buildStageInput(
             context = context,
@@ -487,14 +495,13 @@ class AiChatAppViewModel(
             pendingTransition = null,
         )
 
-        activeTab.viewModel.appendLocalMessage(
-            ChatMessage(
-                role = ChatRole.Assistant,
-                content = "Task State Machine started: planning",
-            ),
-        )
         updateTab(activeTab.number) { tab -> tab.copy(taskSession = session) }
-        sendStagePrompt(activeTab.number, TaskState.Planning, input)
+        appendTaskStateEvent(
+            tabNumber = activeTab.number,
+            content = buildTaskStartedEvent(context),
+        ) {
+            sendStagePrompt(activeTab.number, TaskState.Planning, input)
+        }
     }
 
     private fun acceptTaskTransition() {
@@ -516,13 +523,12 @@ class AiChatAppViewModel(
         )
 
         updateTab(activeTab.number) { tab -> tab.copy(taskSession = nextSession) }
-        activeTab.viewModel.appendLocalMessage(
-            ChatMessage(
-                role = ChatRole.Assistant,
-                content = "Transition accepted: ${proposal.from.title} -> ${proposal.to.title}",
-            ),
-        )
-        sendStagePrompt(activeTab.number, proposal.to, proposal.inputForTarget)
+        appendTaskStateEvent(
+            tabNumber = activeTab.number,
+            content = buildTransitionAcceptedEvent(proposal),
+        ) {
+            sendStagePrompt(activeTab.number, proposal.to, proposal.inputForTarget)
+        }
     }
 
     private fun rejectTaskStage() {
@@ -558,17 +564,23 @@ class AiChatAppViewModel(
                 ),
             )
         }
-        sendRejectionAnalysisPrompt(
+        appendTaskStateEvent(
             tabNumber = activeTab.number,
-            rejection = rejection,
-            userClarification = null,
-        )
+            content = buildStageRejectedEvent(rejection),
+        ) {
+            sendRejectionAnalysisPrompt(
+                tabNumber = activeTab.number,
+                rejection = rejection,
+                userClarification = null,
+            )
+        }
     }
 
     private fun sendRejectionClarificationToOrchestrator(
-        activeTab: ChatTab,
+        tabNumber: Int,
         clarification: String,
     ) {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = activeTab.taskSession ?: return
         val rejection = taskSession.pendingRejection ?: return
         val context = taskSession.context ?: return
@@ -583,11 +595,16 @@ class AiChatAppViewModel(
                 ),
             )
         }
-        sendRejectionAnalysisPrompt(
+        appendTaskStateEvent(
             tabNumber = activeTab.number,
-            rejection = rejection,
-            userClarification = clarification,
-        )
+            content = buildRejectionClarificationEvent(rejection),
+        ) {
+            sendRejectionAnalysisPrompt(
+                tabNumber = activeTab.number,
+                rejection = rejection,
+                userClarification = clarification,
+            )
+        }
     }
 
     private fun sendRejectionAnalysisPrompt(
@@ -617,8 +634,11 @@ class AiChatAppViewModel(
             )
         }
 
+        val updatedTaskSession = state.tabs.firstOrNull { it.number == tabNumber }?.taskSession ?: taskSession
         activeTab.viewModel.setPrompt(buildRejectionAnalysisPrompt(rejection, userClarification))
-        activeTab.viewModel.sendPrompt { orchestratorState ->
+        activeTab.viewModel.sendPrompt(
+            runtimeSystemPrompt = buildTaskOrchestratorRuntimePrompt(updatedTaskSession),
+        ) { orchestratorState ->
             handleRejectionDecision(
                 tabNumber = tabNumber,
                 orchestratorOutput = orchestratorState.lastAssistantOutput(),
@@ -721,7 +741,16 @@ class AiChatAppViewModel(
         )
 
         updateTab(tabNumber) { currentTab -> currentTab.copy(taskSession = nextSession) }
-        sendStagePrompt(tabNumber, target, input)
+        appendTaskStateEvent(
+            tabNumber = tabNumber,
+            content = buildRejectedStageDecisionEvent(
+                rejection = rejection,
+                target = target,
+                reason = reason,
+            ),
+        ) {
+            sendStagePrompt(tabNumber, target, input)
+        }
     }
 
     private fun askUserForRejectionDetails(
@@ -747,12 +776,20 @@ class AiChatAppViewModel(
                 ),
             )
         }
-        tab.viewModel.appendLocalMessage(
-            ChatMessage(
-                role = ChatRole.Assistant,
-                content = question,
+        appendTaskStateEvent(
+            tabNumber = tabNumber,
+            content = buildRejectionQuestionEvent(
+                rejection = rejection,
+                reason = reason,
             ),
-        )
+        ) {
+            tab.viewModel.appendPersistentMessage(
+                ChatMessage(
+                    role = ChatRole.Assistant,
+                    content = question,
+                ),
+            )
+        }
     }
 
     private fun handleTaskStageChatEvent(event: ChatEvent) {
@@ -925,6 +962,33 @@ class AiChatAppViewModel(
                     selectedStage = stage,
                 ),
             )
+        }
+        if (shouldControlTransition) {
+            appendTaskStateEvent(
+                tabNumber = tabNumber,
+                content = buildStageCompletedEvent(
+                    stage = stage,
+                    pendingTransition = pendingTransition,
+                    completedContext = completedContext,
+                ),
+            )
+        }
+    }
+
+    private fun appendTaskStateEvent(
+        tabNumber: Int,
+        content: String,
+        onCompleted: () -> Unit = {},
+    ) {
+        val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
+        tab.viewModel.appendPersistentMessage(
+            ChatMessage(
+                role = ChatRole.Assistant,
+                content = content,
+                kind = ChatMessageKind.TaskStateEvent,
+            ),
+        ) {
+            onCompleted()
         }
     }
 
@@ -1143,6 +1207,137 @@ private fun buildRejectedStageAdditionalInput(
         appendLine(rejection.rejectedOutput)
     }
 
+private fun buildTaskOrchestratorRuntimePrompt(taskSession: TaskModeSession): String? {
+    val context = taskSession.context ?: return null
+    return buildString {
+        appendLine("[TASK_STATE_MACHINE_ORCHESTRATOR_CONTEXT]")
+        appendLine("You are the orchestrator chat for an active Task State Machine.")
+        appendLine("Treat this block as authoritative runtime state. The code reducer applies transitions; do not claim a transition was applied unless the state below says so.")
+        appendLine()
+        appendLine("Task: ${context.task}")
+        appendLine("Current state: ${context.state.title}")
+        appendLine("Step: ${context.step}/${context.total}")
+        appendLine("Expected action: ${context.expectedAction}")
+        appendLine("Current work: ${context.current}")
+        if (context.plan.isNotEmpty()) {
+            appendLine()
+            appendLine("Accepted plan:")
+            context.plan.forEach { item -> appendLine("- $item") }
+        }
+        if (context.done.isNotEmpty()) {
+            appendLine()
+            appendLine("Done so far:")
+            context.done.forEach { item -> appendLine("- ${item.excerpt()}") }
+        }
+        taskSession.pendingTransition?.let { proposal ->
+            appendLine()
+            appendLine("Pending transition: ${proposal.from.title} -> ${proposal.to.title}")
+            appendLine("Transition reason: ${proposal.reason}")
+        }
+        taskSession.pendingRejection?.let { rejection ->
+            appendLine()
+            appendLine("Pending rejection:")
+            appendLine("- rejected stage: ${rejection.stage.title}")
+            rejection.reason?.takeIf { it.isNotBlank() }?.let { appendLine("- reason: $it") }
+            rejection.question?.takeIf { it.isNotBlank() }?.let { appendLine("- question to user: $it") }
+            appendLine("- rejected output: ${rejection.rejectedOutput.excerpt()}")
+        }
+        if (taskSession.stageAgents.isNotEmpty()) {
+            appendLine()
+            appendLine("Stage agents:")
+            taskSession.stageAgents.sortedBy { it.session.state.ordinal }.forEach { agent ->
+                val session = agent.session
+                appendLine(
+                    "- ${session.state.title}: reached=${session.isReached}, ready=${session.isReadyForTransition}, " +
+                        "input=${session.input.excerpt()}, output=${session.output.orEmpty().excerpt()}",
+                )
+            }
+        }
+        appendLine()
+        appendLine("Rules:")
+        appendLine("- The user may talk to you independently from stage agents.")
+        appendLine("- Forward movement is allowed only after the user accepts the current stage result.")
+        appendLine("- After rejection, decide whether to retry the current stage, return to the previous stage, or ask the user for clarification.")
+        appendLine("- Keep user-facing answers consistent with the current FSM state and stage-agent outputs.")
+        append("[/TASK_STATE_MACHINE_ORCHESTRATOR_CONTEXT]")
+    }
+}
+
+private fun buildTaskStartedEvent(context: TaskContext): String =
+    buildString {
+        appendLine("Task State Machine started.")
+        appendLine("Task: ${context.task}")
+        appendLine("Current stage: ${context.state.title}")
+        append("Expected action: ${context.expectedAction}")
+    }
+
+private fun buildTransitionAcceptedEvent(proposal: TaskTransitionProposal): String =
+    buildString {
+        appendLine("Transition accepted by user.")
+        appendLine("From: ${proposal.from.title}")
+        appendLine("To: ${proposal.to.title}")
+        append("Reason: ${proposal.reason}")
+    }
+
+private fun buildStageRejectedEvent(rejection: TaskStageRejection): String =
+    buildString {
+        appendLine("Stage result rejected by user.")
+        appendLine("Rejected stage: ${rejection.stage.title}")
+        rejection.proposedNextStage?.let { appendLine("Canceled next stage: ${it.title}") }
+        append("Next action: orchestrator decision")
+    }
+
+private fun buildRejectionClarificationEvent(rejection: TaskStageRejection): String =
+    buildString {
+        appendLine("User clarification received for rejected stage.")
+        appendLine("Rejected stage: ${rejection.stage.title}")
+        append("Next action: orchestrator decision")
+    }
+
+private fun buildRejectedStageDecisionEvent(
+    rejection: TaskStageRejection,
+    target: TaskState,
+    reason: String,
+): String =
+    buildString {
+        if (target == rejection.stage) {
+            appendLine("Orchestrator decision: retry current stage.")
+        } else {
+            appendLine("Orchestrator decision: return to previous stage.")
+        }
+        appendLine("Rejected stage: ${rejection.stage.title}")
+        appendLine("Target stage: ${target.title}")
+        reason.takeIf { it.isNotBlank() }?.let { append("Reason: $it") }
+    }.trimEnd()
+
+private fun buildRejectionQuestionEvent(
+    rejection: TaskStageRejection,
+    reason: String,
+): String =
+    buildString {
+        appendLine("Orchestrator needs user clarification before choosing the next stage.")
+        appendLine("Rejected stage: ${rejection.stage.title}")
+        reason.takeIf { it.isNotBlank() }?.let { append("Reason: $it") }
+    }.trimEnd()
+
+private fun buildStageCompletedEvent(
+    stage: TaskState,
+    pendingTransition: TaskTransitionProposal?,
+    completedContext: TaskContext,
+): String =
+    buildString {
+        appendLine("Stage completed: ${stage.title}")
+        appendLine("Expected action: ${completedContext.expectedAction}")
+        if (pendingTransition != null) {
+            appendLine("Pending transition: ${pendingTransition.from.title} -> ${pendingTransition.to.title}")
+            append("Waiting for user decision.")
+        } else if (stage == TaskState.Done) {
+            append("Task State Machine completed.")
+        } else {
+            append("No pending transition.")
+        }
+    }
+
 private fun parseTaskOrchestratorDecision(output: String): TaskOrchestratorDecision? {
     val block = output
         .substringAfter(RejectionDecisionStart, missingDelimiterValue = "")
@@ -1206,8 +1401,23 @@ private fun extractPlanItems(output: String): List<String> {
     return lines.ifEmpty { listOf(output.trim().take(MaxFallbackPlanChars)) }
 }
 
+private fun String.excerpt(maxChars: Int = MaxRuntimeBriefingExcerptChars): String {
+    val normalized = lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .joinToString(separator = " ")
+    return if (normalized.length <= maxChars) {
+        normalized
+    } else {
+        normalized.take(maxChars).trimEnd() + "..."
+    }
+}
+
 private fun ChatViewState.lastAssistantOutput(): String =
-    messages.lastOrNull { it.role == ChatRole.Assistant }?.content.orEmpty()
+    messages
+        .lastOrNull { it.role == ChatRole.Assistant && it.kind == ChatMessageKind.Regular }
+        ?.content
+        .orEmpty()
 
 private fun ChatEvent.isPromptInputEvent(): Boolean =
     when (this) {
@@ -1224,5 +1434,6 @@ private fun ChatEvent.isPromptInputEvent(): Boolean =
 private const val TaskStageChatIdMultiplier = 10
 private const val MaxExtractedPlanItems = 12
 private const val MaxFallbackPlanChars = 600
+private const val MaxRuntimeBriefingExcerptChars = 800
 private const val RejectionDecisionStart = "TASK_REJECTION_DECISION"
 private const val RejectionDecisionEnd = "END_TASK_REJECTION_DECISION"

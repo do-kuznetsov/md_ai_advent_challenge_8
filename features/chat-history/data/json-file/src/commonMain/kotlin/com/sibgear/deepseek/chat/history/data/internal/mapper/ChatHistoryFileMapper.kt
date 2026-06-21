@@ -169,11 +169,13 @@ private fun HistoryMessageKind.toDto(): HistoryMessageKindDto =
     when (this) {
         HistoryMessageKind.Regular -> HistoryMessageKindDto.Regular
         HistoryMessageKind.CompressionSummary -> HistoryMessageKindDto.CompressionSummary
+        HistoryMessageKind.TaskStateEvent -> HistoryMessageKindDto.TaskStateEvent
     }
 
 private fun String.toHistoryMessageKind(): HistoryMessageKind =
     when (this) {
         HistoryMessageKindDto.CompressionSummary.value -> HistoryMessageKind.CompressionSummary
+        HistoryMessageKindDto.TaskStateEvent.value -> HistoryMessageKind.TaskStateEvent
         else -> HistoryMessageKind.Regular
     }
 
