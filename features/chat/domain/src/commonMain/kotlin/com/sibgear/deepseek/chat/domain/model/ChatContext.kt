@@ -69,6 +69,13 @@ data class ChatMemoryItem(
     val importance: Double,
 )
 
+data class ChatInvariant(
+    val category: String,
+    val statement: String,
+    val rationale: String = "",
+    val enabled: Boolean = true,
+)
+
 enum class ChatMemoryLayer {
     ShortTerm,
     WorkingMemory,

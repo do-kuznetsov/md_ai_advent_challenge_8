@@ -1,5 +1,7 @@
 package com.sibgear.deepseek.assistant.memory.data.sqldelight.external.repository
 
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
@@ -20,6 +22,7 @@ class SqldelightAssistantMemoryRepository(
             connection.createStatement().use { statement ->
                 statement.execute(createMemoryTableSql())
                 statement.execute(createProfileTableSql())
+                statement.execute(createInvariantTableSql())
             }
         }
     }
@@ -132,6 +135,49 @@ class SqldelightAssistantMemoryRepository(
         return safeProfile
     }
 
+    override suspend fun getInvariants(): List<AssistantInvariant> =
+        withConnection { connection ->
+            connection.prepareStatement(selectInvariantsSql()).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            resultSet.toAssistantInvariant()?.let(::add)
+                        }
+                    }
+                }
+            }
+        }
+
+    override suspend fun replaceInvariants(invariants: List<AssistantInvariant>): List<AssistantInvariant> {
+        val safeInvariants = invariants.sanitizedInvariants()
+        withConnection { connection ->
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(deleteInvariantsSql())
+                }
+                connection.prepareStatement(insertInvariantSql()).use { statement ->
+                    safeInvariants.forEach { invariant ->
+                        statement.setString(1, invariant.id)
+                        statement.setString(2, invariant.category.storageValue)
+                        statement.setString(3, invariant.statement)
+                        statement.setString(4, invariant.rationale)
+                        statement.setInt(5, if (invariant.enabled) 1 else 0)
+                        statement.addBatch()
+                    }
+                    statement.executeBatch()
+                }
+                connection.commit()
+            } catch (exception: Throwable) {
+                connection.rollback()
+                throw exception
+            } finally {
+                connection.autoCommit = true
+            }
+        }
+        return getInvariants()
+    }
+
     override suspend fun clear() {
         withConnection { connection ->
             connection.createStatement().use { statement ->
@@ -159,6 +205,22 @@ private fun ResultSet.toMemoryItem(): MemoryItem? {
     )
 }
 
+private fun ResultSet.toAssistantInvariant(): AssistantInvariant? {
+    val id = getString("invariant_id")?.trim().orEmpty()
+    val statement = getString("statement")?.trim().orEmpty()
+    if (id.isEmpty() || statement.isEmpty()) {
+        return null
+    }
+
+    return AssistantInvariant(
+        id = id,
+        category = getString("category").toInvariantCategory() ?: InvariantCategory.Other,
+        statement = statement,
+        rationale = getString("rationale").orEmpty().trim(),
+        enabled = getInt("enabled") != 0,
+    )
+}
+
 private fun List<MemoryItem>.sanitized(): List<MemoryItem> =
     filter { item ->
         item.id.isNotBlank() &&
@@ -169,6 +231,19 @@ private fun List<MemoryItem>.sanitized(): List<MemoryItem> =
 
 private fun UserProfile.sanitized(): UserProfile =
     copy(text = text.trim())
+
+private fun List<AssistantInvariant>.sanitizedInvariants(): List<AssistantInvariant> =
+    filter { invariant ->
+        invariant.id.isNotBlank() &&
+            invariant.statement.isNotBlank()
+    }.distinctBy { it.id }
+        .map { invariant ->
+            invariant.copy(
+                id = invariant.id.trim(),
+                statement = invariant.statement.trim(),
+                rationale = invariant.rationale.trim(),
+            )
+        }
 
 private fun List<MemoryItem>.nextMemoryId(): String {
     val next = mapNotNull { item ->
@@ -186,11 +261,34 @@ private val MemoryLayer.storageValue: String
         MemoryLayer.LongTermMemory -> "long_term_memory"
     }
 
+private val InvariantCategory.storageValue: String
+    get() = when (this) {
+        InvariantCategory.Architecture -> "architecture"
+        InvariantCategory.TechnicalDecision -> "technical_decision"
+        InvariantCategory.StackConstraint -> "stack_constraint"
+        InvariantCategory.BusinessRule -> "business_rule"
+        InvariantCategory.Process -> "process"
+        InvariantCategory.Security -> "security"
+        InvariantCategory.Other -> "other"
+    }
+
 private fun String?.toMemoryLayer(): MemoryLayer? =
     when (this) {
         "short_term" -> MemoryLayer.ShortTerm
         "working_memory" -> MemoryLayer.WorkingMemory
         "long_term_memory" -> MemoryLayer.LongTermMemory
+        else -> null
+    }
+
+private fun String?.toInvariantCategory(): InvariantCategory? =
+    when (this) {
+        "architecture" -> InvariantCategory.Architecture
+        "technical_decision" -> InvariantCategory.TechnicalDecision
+        "stack_constraint" -> InvariantCategory.StackConstraint
+        "business_rule" -> InvariantCategory.BusinessRule
+        "process" -> InvariantCategory.Process
+        "security" -> InvariantCategory.Security
+        "other" -> InvariantCategory.Other
         else -> null
     }
 
@@ -212,11 +310,25 @@ private fun createProfileTableSql(): String =
     )
     """.trimIndent()
 
+private fun createInvariantTableSql(): String =
+    """
+    CREATE TABLE IF NOT EXISTS $InvariantTableName (
+        invariant_id TEXT NOT NULL PRIMARY KEY,
+        category TEXT NOT NULL,
+        statement TEXT NOT NULL,
+        rationale TEXT NOT NULL,
+        enabled INTEGER NOT NULL
+    )
+    """.trimIndent()
+
 private fun selectAllSql(): String =
     "SELECT * FROM $MemoryTableName ORDER BY memory_id ASC"
 
 private fun selectProfileSql(): String =
     "SELECT profile_text FROM $ProfileTableName WHERE profile_id = ?"
+
+private fun selectInvariantsSql(): String =
+    "SELECT * FROM $InvariantTableName ORDER BY invariant_id ASC"
 
 private fun insertSql(): String =
     """
@@ -232,6 +344,9 @@ private fun insertSql(): String =
 private fun deleteAllSql(): String =
     "DELETE FROM $MemoryTableName"
 
+private fun deleteInvariantsSql(): String =
+    "DELETE FROM $InvariantTableName"
+
 private fun upsertProfileSql(): String =
     """
     INSERT INTO $ProfileTableName(profile_id, profile_text)
@@ -239,8 +354,21 @@ private fun upsertProfileSql(): String =
     ON CONFLICT(profile_id) DO UPDATE SET profile_text = ?
     """.trimIndent()
 
+private fun insertInvariantSql(): String =
+    """
+    INSERT INTO $InvariantTableName(
+        invariant_id,
+        category,
+        statement,
+        rationale,
+        enabled
+    )
+    VALUES (?, ?, ?, ?, ?)
+    """.trimIndent()
+
 private const val MemoryTableName = "assistant_memory_item"
 private const val ProfileTableName = "assistant_user_profile"
+private const val InvariantTableName = "assistant_invariant"
 private const val ProfileId = "default"
 private const val MemoryIdPrefix = "memory-"
 private const val DefaultImportance = 0.5

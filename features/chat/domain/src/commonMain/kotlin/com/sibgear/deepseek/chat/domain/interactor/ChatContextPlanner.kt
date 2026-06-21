@@ -6,6 +6,7 @@ import com.sibgear.deepseek.chat.domain.model.BranchSelection
 import com.sibgear.deepseek.chat.domain.model.BranchSummaryUpdatePrompt
 import com.sibgear.deepseek.chat.domain.model.BranchSummaryUpdateRequest
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
+import com.sibgear.deepseek.chat.domain.model.ChatInvariant
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryCandidate
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryItem
 import com.sibgear.deepseek.chat.domain.model.ChatMemoryLayer
@@ -198,10 +199,20 @@ class ChatContextPlanner {
 
     fun memoryInjection(
         originalSystemPrompt: String,
+        invariants: List<ChatInvariant> = emptyList(),
         userProfile: String = "",
         retrievalPlan: ChatMemoryRetrievalPlan,
         availableMemory: List<ChatMemoryItem>,
     ): MemoryInjection {
+        val activeInvariants = invariants
+            .filter { it.enabled && it.statement.isNotBlank() }
+            .map {
+                it.copy(
+                    category = it.category.trim().ifBlank { "other" },
+                    statement = it.statement.trim(),
+                    rationale = it.rationale.trim(),
+                )
+            }
         val selectedItems = availableMemory.filter { item ->
             val layerSelected = when (item.layer) {
                 ChatMemoryLayer.ShortTerm -> false
@@ -224,7 +235,7 @@ class ChatContextPlanner {
         }
 
         val trimmedProfile = userProfile.trim()
-        val effectiveSystemPrompt = if (selectedItems.isEmpty() && trimmedProfile.isEmpty()) {
+        val effectiveSystemPrompt = if (activeInvariants.isEmpty() && selectedItems.isEmpty() && trimmedProfile.isEmpty()) {
             originalSystemPrompt
         } else {
             buildString {
@@ -232,6 +243,21 @@ class ChatContextPlanner {
                 if (isNotEmpty()) {
                     appendLine()
                     appendLine()
+                }
+                if (activeInvariants.isNotEmpty()) {
+                    appendLine("[INVARIANTS]")
+                    appendLine("These constraints are mandatory. Do not propose solutions that violate them.")
+                    appendLine("If the user asks for a conflicting solution, explain which invariant blocks it and offer a compatible alternative.")
+                    activeInvariants.forEach { invariant ->
+                        append("- ${invariant.category}: ${invariant.statement}")
+                        if (invariant.rationale.isNotEmpty()) {
+                            append(" Rationale: ${invariant.rationale}")
+                        }
+                        appendLine()
+                    }
+                    if (trimmedProfile.isNotEmpty() || selectedItems.isNotEmpty()) {
+                        appendLine()
+                    }
                 }
                 if (trimmedProfile.isNotEmpty()) {
                     appendLine("[USER_PROFILE]")

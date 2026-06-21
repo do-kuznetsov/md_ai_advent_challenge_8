@@ -1,9 +1,11 @@
 package com.sibgear.deepseek.assistant.memory.data.jsonfile.external.repository
 
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper.toAssistantMemoryFileDto
+import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper.toInvariants
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper.toMemoryItems
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.mapper.toUserProfile
 import com.sibgear.deepseek.assistant.memory.data.jsonfile.internal.model.AssistantMemoryFileDto
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
@@ -28,7 +30,7 @@ class JsonFileAssistantMemoryRepository(
 
     override suspend fun replaceItems(items: List<MemoryItem>): List<MemoryItem> {
         val safeItems = items.sanitized()
-        writeDto(safeItems.toAssistantMemoryFileDto(readProfile()))
+        writeDto(safeItems.toAssistantMemoryFileDto(readProfile(), readInvariants()))
         return safeItems
     }
 
@@ -78,12 +80,21 @@ class JsonFileAssistantMemoryRepository(
 
     override suspend fun saveProfile(profile: UserProfile): UserProfile {
         val safeProfile = profile.sanitized()
-        writeDto(readItems().toAssistantMemoryFileDto(safeProfile))
+        writeDto(readItems().toAssistantMemoryFileDto(safeProfile, readInvariants()))
         return safeProfile
     }
 
+    override suspend fun getInvariants(): List<AssistantInvariant> =
+        readInvariants()
+
+    override suspend fun replaceInvariants(invariants: List<AssistantInvariant>): List<AssistantInvariant> {
+        val safeInvariants = invariants.sanitizedInvariants()
+        writeDto(readItems().toAssistantMemoryFileDto(readProfile(), safeInvariants))
+        return safeInvariants
+    }
+
     override suspend fun clear() {
-        writeDto(emptyList<MemoryItem>().toAssistantMemoryFileDto(readProfile()))
+        writeDto(emptyList<MemoryItem>().toAssistantMemoryFileDto(readProfile(), readInvariants()))
     }
 
     private fun readItems(): List<MemoryItem> {
@@ -92,6 +103,10 @@ class JsonFileAssistantMemoryRepository(
 
     private fun readProfile(): UserProfile {
         return readDto().toUserProfile()
+    }
+
+    private fun readInvariants(): List<AssistantInvariant> {
+        return readDto().toInvariants()
     }
 
     private fun readDto(): AssistantMemoryFileDto {
@@ -142,6 +157,19 @@ private fun List<MemoryItem>.sanitized(): List<MemoryItem> =
 
 private fun UserProfile.sanitized(): UserProfile =
     copy(text = text.trim())
+
+private fun List<AssistantInvariant>.sanitizedInvariants(): List<AssistantInvariant> =
+    filter { invariant ->
+        invariant.id.isNotBlank() &&
+            invariant.statement.isNotBlank()
+    }.distinctBy { it.id }
+        .map { invariant ->
+            invariant.copy(
+                id = invariant.id.trim(),
+                statement = invariant.statement.trim(),
+                rationale = invariant.rationale.trim(),
+            )
+        }
 
 private fun List<MemoryItem>.nextMemoryId(): String {
     val next = mapNotNull { item ->

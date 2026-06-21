@@ -1,7 +1,13 @@
 package com.sibgear.deepseek.chat.data.deepseek.external.service
 
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionMessage
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRole
 import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
+import com.sibgear.deepseek.assistant.memory.domain.service.AssistantInvariantService
 import com.sibgear.deepseek.assistant.memory.domain.service.AssistantProfileService
+import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toAssistantInvariants
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toUserProfile
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiChatMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiErrorResponse
@@ -24,7 +30,8 @@ import kotlinx.serialization.json.Json
 
 class DeepSeekAssistantProfileService(
     private val apiKey: String,
-) : AssistantProfileService {
+) : AssistantProfileService,
+    AssistantInvariantService {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -79,6 +86,46 @@ class DeepSeekAssistantProfileService(
             ?: error("DeepSeek вернул профиль в неожиданном формате.")
     }
 
+    override suspend fun updateInvariants(
+        currentInvariants: List<AssistantInvariant>,
+        chatMessages: List<InvariantCollectionMessage>,
+        modelId: String,
+    ): List<AssistantInvariant> {
+        val response = client.post(ChatCompletionsUrl) {
+            bearerAuth(apiKey)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+                DeepSeekChatCompletionRequest(
+                    model = modelId,
+                    messages = listOf(
+                        DeepSeekApiChatMessage(
+                            role = "user",
+                            content = buildInvariantsUpdatePrompt(currentInvariants, chatMessages),
+                        ),
+                    ),
+                    stream = false,
+                    thinking = DeepSeekThinking(type = "disabled"),
+                ),
+            )
+        }
+
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            error(formatApiError(response.status.value, response.status.description, body))
+        }
+
+        val content = json.decodeFromString<DeepSeekChatCompletionResponse>(body)
+            .choices
+            .firstOrNull()
+            ?.message
+            ?.content
+            ?.takeIf { it.isNotBlank() }
+            ?: error("DeepSeek вернул пустой список инвариантов.")
+
+        return content.toAssistantInvariants(json)
+            ?: error("DeepSeek вернул инварианты в неожиданном формате.")
+    }
+
     private fun formatApiError(
         statusCode: Int,
         statusDescription: String,
@@ -92,6 +139,58 @@ class DeepSeekAssistantProfileService(
         return "Ошибка DeepSeek API: HTTP $statusCode $statusDescription\n$message"
     }
 }
+
+internal fun buildInvariantsUpdatePrompt(
+    currentInvariants: List<AssistantInvariant>,
+    chatMessages: List<InvariantCollectionMessage>,
+): String =
+    buildString {
+        appendLine("Ты обновляешь список инвариантов проекта для код-ассистента.")
+        appendLine("Инварианты - это жесткие правила, которые ассистент не должен нарушать.")
+        appendLine("Верни только JSON object без markdown.")
+        appendLine()
+        appendLine("Schema:")
+        appendLine(
+            """{"invariants":[{"id":"invariant-1","category":"architecture","statement":"...","rationale":"...","enabled":true}]}""",
+        )
+        appendLine()
+        appendLine("Allowed categories:")
+        appendLine("architecture, technical_decision, stack_constraint, business_rule, process, security, other")
+        appendLine()
+        appendLine("Rules:")
+        appendLine("- Сохрани существующие актуальные инварианты и их id.")
+        appendLine("- Удали только явно отмененные или противоречащие новым ответам инварианты.")
+        appendLine("- Добавляй только устойчивые обязательные правила, явно указанные пользователем в диалоге.")
+        appendLine("- Вопросы ассистента в диалоге не являются фактами или инвариантами сами по себе.")
+        appendLine("- Statement должен быть коротким, конкретным и проверяемым.")
+        appendLine("- Не выдумывай факты и не добавляй ничего, чего нет в сообщениях пользователя.")
+        appendLine()
+        appendLine("Текущие инварианты:")
+        if (currentInvariants.isEmpty()) {
+            appendLine("- пусто")
+        } else {
+            currentInvariants.forEach { invariant ->
+                appendLine(
+                    "- id=${invariant.id}; category=${invariant.category.storageValue}; enabled=${invariant.enabled}; statement=${invariant.statement}; rationale=${invariant.rationale}",
+                )
+            }
+        }
+        appendLine()
+        appendLine("Диалог сбора инвариантов:")
+        if (chatMessages.isEmpty()) {
+            appendLine("- пусто")
+        } else {
+            chatMessages.forEach { message ->
+                appendLine("${message.role.promptLabel}: ${message.text.ifBlank { "пусто" }}")
+            }
+        }
+    }
+
+private val InvariantCollectionRole.promptLabel: String
+    get() = when (this) {
+        InvariantCollectionRole.Assistant -> "assistant"
+        InvariantCollectionRole.User -> "user"
+    }
 
 private fun profileUpdatePrompt(
     currentProfile: UserProfile,
@@ -118,6 +217,17 @@ private fun profileUpdatePrompt(
         interviewAnswers.forEachIndexed { index, answer ->
             appendLine("${index + 1}. ${answer.ifBlank { "нет ответа" }}")
         }
+    }
+
+private val InvariantCategory.storageValue: String
+    get() = when (this) {
+        InvariantCategory.Architecture -> "architecture"
+        InvariantCategory.TechnicalDecision -> "technical_decision"
+        InvariantCategory.StackConstraint -> "stack_constraint"
+        InvariantCategory.BusinessRule -> "business_rule"
+        InvariantCategory.Process -> "process"
+        InvariantCategory.Security -> "security"
+        InvariantCategory.Other -> "other"
     }
 
 private const val ChatCompletionsUrl = "https://api.deepseek.com/chat/completions"

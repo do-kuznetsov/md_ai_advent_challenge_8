@@ -1,5 +1,7 @@
 package com.sibgear.deepseek.assistant.memory.data.sqldelight.external.repository
 
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
@@ -89,6 +91,35 @@ class SqldelightAssistantMemoryRepositoryTest {
     @Test
     fun newDatabaseRestoresEmptyProfile() = runTest {
         assertEquals(UserProfile(), SqldelightAssistantMemoryRepository(tempDatabaseFile()).getProfile())
+    }
+
+    @Test
+    fun storesAndRestoresInvariants() = runTest {
+        val file = tempDatabaseFile()
+        val repository = SqldelightAssistantMemoryRepository(file)
+        val invariants = listOf(
+            AssistantInvariant(
+                id = "invariant-1",
+                category = InvariantCategory.BusinessRule,
+                statement = "Never expose private data",
+                rationale = "Security requirement",
+            ),
+            AssistantInvariant(
+                id = "invariant-2",
+                category = InvariantCategory.Process,
+                statement = "Run tests before final report",
+                enabled = false,
+            ),
+        )
+
+        repository.replaceInvariants(invariants)
+
+        assertEquals(invariants, SqldelightAssistantMemoryRepository(file).getInvariants())
+    }
+
+    @Test
+    fun newDatabaseRestoresEmptyInvariants() = runTest {
+        assertEquals(emptyList(), SqldelightAssistantMemoryRepository(tempDatabaseFile()).getInvariants())
     }
 
     private fun tempDatabaseFile(): File =

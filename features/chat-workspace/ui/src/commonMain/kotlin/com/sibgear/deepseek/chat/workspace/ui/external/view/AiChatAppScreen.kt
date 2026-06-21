@@ -45,6 +45,7 @@ import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskChatFocus
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
 import com.sibgear.deepseek.chat.workspace.ui.internal.view.ChatTabBar
+import com.sibgear.deepseek.chat.workspace.ui.internal.view.ProjectInvariantsDialog
 import com.sibgear.deepseek.chat.workspace.ui.internal.view.UserProfileDialog
 
 @Composable
@@ -80,6 +81,7 @@ fun AiChatAppScreen(
                         },
                         onStorageSelected = { onEvent(AiChatAppEvent.StorageSelected(it)) },
                         onProfileClicked = { onEvent(AiChatAppEvent.ProfileDialogOpened) },
+                        onInvariantsClicked = { onEvent(AiChatAppEvent.InvariantsDialogOpened) },
                         modifier = Modifier
                             .fillMaxHeight()
                             .width(tabsWidth)
@@ -136,6 +138,23 @@ fun AiChatAppScreen(
                     onInterviewClicked = { onEvent(AiChatAppEvent.ProfileInterviewStarted) },
                     onInterviewAnswerChanged = { onEvent(AiChatAppEvent.ProfileInterviewAnswerChanged(it)) },
                     onInterviewAnswerSubmitted = { onEvent(AiChatAppEvent.ProfileInterviewAnswerSubmitted) },
+                )
+            }
+
+            if (state.isInvariantsDialogOpen) {
+                ProjectInvariantsDialog(
+                    invariantsDraft = state.invariantsDraft,
+                    isActionEnabled = state.isInvariantsActionEnabled,
+                    chatMessages = state.invariantsChatMessages,
+                    chatInput = state.invariantsChatInput,
+                    isApplying = state.isInvariantsApplying,
+                    error = state.invariantsError,
+                    onDismissRequest = { onEvent(AiChatAppEvent.InvariantsDialogClosed) },
+                    onInvariantsChanged = { onEvent(AiChatAppEvent.InvariantsDraftChanged(it)) },
+                    onSaveClicked = { onEvent(AiChatAppEvent.InvariantsSaved) },
+                    onApplyClicked = { onEvent(AiChatAppEvent.InvariantsApplied) },
+                    onChatInputChanged = { onEvent(AiChatAppEvent.InvariantsChatInputChanged(it)) },
+                    onChatMessageSent = { onEvent(AiChatAppEvent.InvariantsChatMessageSent) },
                 )
             }
         }

@@ -1,5 +1,9 @@
 package com.sibgear.deepseek.chat.workspace.ui.external.presentation
 
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionMessage
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRole
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
@@ -28,6 +32,98 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AiChatAppViewModelTaskModeTest {
+    @Test
+    fun invariantsDialogLoadsAndSavesDraft() = runTest {
+        var savedInvariants = emptyList<AssistantInvariant>()
+        val viewModel = createViewModel(
+            scope = this,
+            loadInvariants = {
+                listOf(
+                    AssistantInvariant(
+                        id = "invariant-1",
+                        category = InvariantCategory.Architecture,
+                        statement = "Use layered architecture",
+                        rationale = "Accepted decision",
+                    ),
+                )
+            },
+            saveInvariants = { invariants ->
+                savedInvariants = invariants
+                invariants
+            },
+        )
+
+        viewModel.onEvent(AiChatAppEvent.InvariantsDialogOpened)
+        advanceUntilIdle()
+        assertEquals(true, viewModel.state.isInvariantsDialogOpen)
+        assertTrue(viewModel.state.invariantsDraft.contains("Use layered architecture"))
+
+        viewModel.onEvent(
+            AiChatAppEvent.InvariantsDraftChanged(
+                "stack_constraint | true | Do not add Swing | Compose app",
+            ),
+        )
+        viewModel.onEvent(AiChatAppEvent.InvariantsSaved)
+        advanceUntilIdle()
+
+        assertEquals(false, viewModel.state.isInvariantsDialogOpen)
+        assertEquals(
+            listOf(
+                AssistantInvariant(
+                    id = "invariant-1",
+                    category = InvariantCategory.StackConstraint,
+                    statement = "Do not add Swing",
+                    rationale = "Compose app",
+                ),
+            ),
+            savedInvariants,
+        )
+    }
+
+    @Test
+    fun invariantsChatAppliesDraftWithoutSaving() = runTest {
+        var saveCount = 0
+        val viewModel = createViewModel(
+            scope = this,
+            updateInvariants = { current, messages ->
+                assertEquals(emptyList(), current)
+                assertEquals(InvariantCollectionRole.Assistant, messages.first().role)
+                assertTrue(messages.first().text.contains("Какая архитектура обязательна"))
+                assertTrue(
+                    messages.any { message ->
+                        message.role == InvariantCollectionRole.User &&
+                            message.text == "Запрещено раскрывать персональные данные клиентов."
+                    },
+                )
+                listOf(
+                    AssistantInvariant(
+                        id = "invariant-1",
+                        category = InvariantCategory.BusinessRule,
+                        statement = "Never expose private customer data",
+                    ),
+                )
+            },
+            saveInvariants = { invariants ->
+                saveCount += 1
+                invariants
+            },
+        )
+
+        viewModel.onEvent(AiChatAppEvent.InvariantsDialogOpened)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.invariantsChatMessages.first().text.contains("Какая архитектура обязательна"))
+
+        viewModel.onEvent(
+            AiChatAppEvent.InvariantsChatInputChanged("Запрещено раскрывать персональные данные клиентов."),
+        )
+        viewModel.onEvent(AiChatAppEvent.InvariantsChatMessageSent)
+        viewModel.onEvent(AiChatAppEvent.InvariantsApplied)
+        advanceUntilIdle()
+
+        assertEquals(0, saveCount)
+        assertTrue(viewModel.state.invariantsDraft.contains("Never expose private customer data"))
+    }
+
     @Test
     fun toggleThenNextSendStartsPlanning() = runTest {
         val viewModel = createViewModel(this)
@@ -366,6 +462,12 @@ class AiChatAppViewModelTaskModeTest {
 
     private fun createViewModel(
         scope: CoroutineScope,
+        loadInvariants: suspend () -> List<AssistantInvariant> = { emptyList() },
+        saveInvariants: suspend (List<AssistantInvariant>) -> List<AssistantInvariant> = { it },
+        updateInvariants: suspend (
+            currentInvariants: List<AssistantInvariant>,
+            messages: List<InvariantCollectionMessage>,
+        ) -> List<AssistantInvariant> = { currentInvariants, _ -> currentInvariants },
         assistantResponse: (AiRequestData) -> String = { request -> "result: ${request.prompt.take(40)}" },
     ): AiChatAppViewModel {
         val dispatcher = UnconfinedTestDispatcher()
@@ -407,7 +509,7 @@ class AiChatAppViewModelTaskModeTest {
                     isSystemPromptReadOnly = true,
                 )
             },
-            switchStorage = { _, currentTabs, activeTabNumber, nextTabNumber ->
+            switchStorage = { _, _, currentTabs, activeTabNumber, nextTabNumber ->
                 StorageSwitchResult(
                     tabs = currentTabs,
                     activeTabNumber = activeTabNumber,
@@ -417,6 +519,11 @@ class AiChatAppViewModelTaskModeTest {
             initialTabNumbers = listOf(1),
             initialStorageType = ChatStorageType.Json,
             storageDirectoryLabel = "test",
+            loadInvariantsAction = { loadInvariants() },
+            saveInvariantsAction = { _, invariants -> saveInvariants(invariants) },
+            updateInvariantsFromChatAction = { _, _, currentInvariants, messages ->
+                updateInvariants(currentInvariants, messages)
+            },
         )
     }
 

@@ -1,5 +1,6 @@
 package com.sibgear.deepseek.assistant.memory.domain.interactor
 
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryItem
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
@@ -34,6 +35,16 @@ class AssistantMemoryInteractor(
     suspend fun saveProfile(profile: UserProfile): UserProfile =
         withContext(dispatcher) {
             repository.saveProfile(profile)
+        }
+
+    suspend fun getInvariants(): List<AssistantInvariant> =
+        withContext(dispatcher) {
+            repository.getInvariants()
+        }
+
+    suspend fun replaceInvariants(invariants: List<AssistantInvariant>): List<AssistantInvariant> =
+        withContext(dispatcher) {
+            repository.replaceInvariants(invariants)
         }
 
     suspend fun clear() {

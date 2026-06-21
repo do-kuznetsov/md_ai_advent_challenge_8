@@ -1,5 +1,7 @@
 package com.sibgear.deepseek.chat.data.openrouter.internal.mapper
 
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryRetrievalPlan
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
@@ -89,6 +91,31 @@ internal fun String.toUserProfile(json: Json): UserProfile? =
         UserProfile(text = profile)
     }.getOrNull()
 
+internal fun String.toAssistantInvariants(json: Json): List<AssistantInvariant>? =
+    runCatching {
+        json.parseToJsonElement(extractJsonObject())
+            .jsonObject["invariants"]
+            ?.jsonArrayOrNull()
+            .orEmpty()
+            .mapNotNull { element ->
+                val item = element.jsonObject
+                val id = item["id"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: return@mapNotNull null
+                val statement = item["statement"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: return@mapNotNull null
+                AssistantInvariant(
+                    id = id,
+                    category = item["category"]?.jsonPrimitive?.contentOrNull?.toInvariantCategory()
+                        ?: InvariantCategory.Other,
+                    statement = statement,
+                    rationale = item["rationale"]?.jsonPrimitive?.contentOrNull.orEmpty().trim(),
+                    enabled = item["enabled"]?.jsonPrimitive?.booleanOrNull ?: true,
+                )
+            }
+    }.getOrNull()
+
 internal fun ChatMemoryRetrievalPlan.toMemoryRetrievalPlan(): MemoryRetrievalPlan =
     MemoryRetrievalPlan(
         needShortTerm = needShortTerm,
@@ -135,6 +162,18 @@ private fun String.toMemoryLayer(): MemoryLayer? =
         "short_term" -> MemoryLayer.ShortTerm
         "working_memory" -> MemoryLayer.WorkingMemory
         "long_term_memory" -> MemoryLayer.LongTermMemory
+        else -> null
+    }
+
+private fun String.toInvariantCategory(): InvariantCategory? =
+    when (this) {
+        "architecture" -> InvariantCategory.Architecture
+        "technical_decision" -> InvariantCategory.TechnicalDecision
+        "stack_constraint" -> InvariantCategory.StackConstraint
+        "business_rule" -> InvariantCategory.BusinessRule
+        "process" -> InvariantCategory.Process
+        "security" -> InvariantCategory.Security
+        "other" -> InvariantCategory.Other
         else -> null
     }
 

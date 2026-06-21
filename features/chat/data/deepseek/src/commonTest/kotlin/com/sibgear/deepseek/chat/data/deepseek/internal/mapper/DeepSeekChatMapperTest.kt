@@ -1,5 +1,7 @@
 package com.sibgear.deepseek.chat.data.deepseek.internal.mapper
 
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
@@ -205,5 +207,27 @@ class DeepSeekChatMapperTest {
         """.trimIndent().toUserProfile(Json)
 
         assertEquals(UserProfile(text = "Стиль: кратко"), profile)
+    }
+
+    @Test
+    fun parsesAssistantInvariants() {
+        val invariants = """
+            ```json
+            {"invariants":[{"id":"invariant-1","category":"security","statement":"Do not expose tokens","rationale":"Secret safety","enabled":false}]}
+            ```
+        """.trimIndent().toAssistantInvariants(Json)
+
+        assertEquals(
+            listOf(
+                AssistantInvariant(
+                    id = "invariant-1",
+                    category = InvariantCategory.Security,
+                    statement = "Do not expose tokens",
+                    rationale = "Secret safety",
+                    enabled = false,
+                ),
+            ),
+            invariants,
+        )
     }
 }
