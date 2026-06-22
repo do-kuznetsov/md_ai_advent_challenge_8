@@ -10,11 +10,16 @@ import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRol
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.TaskActionAvailability
+import com.sibgear.deepseek.chat.domain.model.TaskAllowedAction
 import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
+import com.sibgear.deepseek.chat.domain.model.TaskMachineRuntimeState
 import com.sibgear.deepseek.chat.domain.model.TaskOrchestratorDecision
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
 import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
+import com.sibgear.deepseek.chat.domain.model.TaskStageResult
+import com.sibgear.deepseek.chat.domain.model.TaskStageResultStatus
 import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskStateMachine
@@ -63,10 +68,10 @@ class AiChatAppViewModel(
     ) -> StorageSwitchResult,
     initialTabNumbers: List<Int> = emptyList(),
     initialTaskSessionsByTab: Map<Int, TaskSessionSnapshot> = emptyMap(),
+    initialSystemPromptsByTab: Map<Int, String> = emptyMap(),
     initialActiveTabNumber: Int? = null,
     initialNextTabNumber: Int? = null,
     initialStorageType: ChatStorageType = ChatStorageType.Json,
-    initialSystemPromptsByTab: Map<Int, String> = emptyMap(),
     private val storageDirectoryLabel: String,
     private val onWorkspaceChanged: (
         tabs: List<ChatTabSnapshot>,
@@ -101,10 +106,10 @@ class AiChatAppViewModel(
         .distinct()
         .ifEmpty { listOf(1) }
     private val initialTaskSnapshots = initialTaskSessionsByTab
+    private val initialSystemPrompts = initialSystemPromptsByTab
     private var nextTabNumber = maxOf(
         initialNextTabNumber ?: ((initialNumbers.maxOrNull() ?: 0) + 1),
         (initialNumbers.maxOrNull() ?: 0) + 1,
-    private val initialSystemPrompts = initialSystemPromptsByTab
     )
 
     var state by mutableStateOf(
@@ -113,10 +118,10 @@ class AiChatAppViewModel(
             activeTabNumber = initialActiveTabNumber,
             storageType = initialStorageType,
             taskSnapshotsByTab = initialTaskSnapshots,
+            systemPromptsByTab = initialSystemPrompts,
         ),
     )
         private set
-            systemPromptsByTab = initialSystemPrompts,
 
     init {
         notifyWorkspaceChanged()
@@ -155,8 +160,12 @@ class AiChatAppViewModel(
             AiChatAppEvent.InvariantsApplied -> applyInvariantsChat()
             AiChatAppEvent.TaskModeToggled -> toggleTaskMode()
             is AiChatAppEvent.TaskStageSelected -> selectTaskStage(event.stage)
-            AiChatAppEvent.TaskTransitionAccepted -> acceptTaskTransition()
-            AiChatAppEvent.TaskStageRejected -> rejectTaskStage()
+            AiChatAppEvent.TaskTransitionAccepted -> {
+                state.activeTabNumber.takeIf { it > 0 }?.let { tabNumber -> acceptTaskTransition(tabNumber) }
+            }
+            AiChatAppEvent.TaskStageRejected -> {
+                state.activeTabNumber.takeIf { it > 0 }?.let { tabNumber -> rejectTaskStage(tabNumber) }
+            }
             is AiChatAppEvent.ActiveTaskStageChatEvent -> handleTaskStageChatEvent(event.event)
             is AiChatAppEvent.TabSelected -> {
                 if (state.tabs.any { it.number == event.number }) {
@@ -172,21 +181,21 @@ class AiChatAppViewModel(
         activeTabNumber: Int?,
         storageType: ChatStorageType,
         taskSnapshotsByTab: Map<Int, TaskSessionSnapshot>,
+        systemPromptsByTab: Map<Int, String>,
     ): AiChatAppViewState {
         val tabs = tabNumbers.map { tabNumber ->
             createTab(
                 number = tabNumber,
                 storageType = storageType,
                 taskSnapshot = taskSnapshotsByTab[tabNumber],
+                systemPrompt = systemPromptsByTab[tabNumber].orEmpty(),
             )
-        systemPromptsByTab: Map<Int, String>,
         }
         return AiChatAppViewState(
             tabs = tabs,
             activeTabNumber = activeTabNumber
                 ?.takeIf { number -> tabs.any { it.number == number } }
                 ?: tabs.first().number,
-                systemPrompt = systemPromptsByTab[tabNumber].orEmpty(),
             selectedStorageType = storageType,
             storageDirectoryLabel = storageDirectoryLabel,
         )
@@ -202,6 +211,7 @@ class AiChatAppViewModel(
         number: Int,
         storageType: ChatStorageType,
         taskSnapshot: TaskSessionSnapshot? = null,
+        systemPrompt: String = "",
     ): ChatTab {
         val viewModel = createChatViewModel(number, storageType, systemPrompt)
         viewModel.loadModels()
@@ -209,7 +219,6 @@ class AiChatAppViewModel(
         return ChatTab(
             number = number,
             title = createInitialTabTitle(number),
-        systemPrompt: String = "",
             viewModel = viewModel,
             taskSession = taskSnapshot?.toTaskModeSession(storageType),
         )
@@ -583,6 +592,9 @@ class AiChatAppViewModel(
                     focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
                 }
                 activeViewModel.onEvent(event)
+                if (event is ChatEvent.SystemPromptChanged) {
+                    notifyWorkspaceChanged()
+                }
             }
         }
     }
@@ -590,9 +602,6 @@ class AiChatAppViewModel(
     private fun toggleTaskMode() {
         val activeTab = state.activeTab ?: return
         val currentSession = activeTab.taskSession
-                if (event is ChatEvent.SystemPromptChanged) {
-                    notifyWorkspaceChanged()
-                }
         val nextSession = if (currentSession == null) {
             TaskModeSession(isModeEnabled = true)
         } else {
@@ -649,10 +658,182 @@ class AiChatAppViewModel(
                 sendRejectionClarificationToOrchestrator(activeTab.number, prompt)
             }
         } else {
+            if (taskSession.isOrchestratorFsmFlowRunning) {
+                return
+            }
             focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
-            activeTab.viewModel.sendPrompt(runtimeSystemPrompt = buildTaskOrchestratorRuntimePrompt(taskSession))
+            setOrchestratorFsmFlowRunning(activeTab.number, true)
+            activeTab.viewModel.sendPrompt(runtimeSystemPrompt = buildTaskOrchestratorRuntimePrompt(taskSession)) {
+                handleTaskOrchestratorCommand(
+                    tabNumber = activeTab.number,
+                    orchestratorOutput = it.lastAssistantOutput(),
+                )
+            }
         }
     }
+
+    private fun handleTaskOrchestratorCommand(
+        tabNumber: Int,
+        orchestratorOutput: String,
+    ) {
+        val command = parseTaskOrchestratorCommand(orchestratorOutput)
+        when (command) {
+            TaskOrchestratorCommand.DiscussOnly,
+            is TaskOrchestratorCommand.AskUser -> {
+                setOrchestratorFsmFlowRunning(tabNumber, false)
+            }
+
+            is TaskOrchestratorCommand.DelegateCurrentStage -> {
+                handleTaskStageDelegationCommand(tabNumber, command)
+            }
+
+            is TaskOrchestratorCommand.AcceptCurrentStage -> {
+                handleTaskButtonOnlyCommand(tabNumber, command)
+            }
+
+            is TaskOrchestratorCommand.RejectCurrentStage -> {
+                handleTaskButtonOnlyCommand(tabNumber, command)
+            }
+
+            is TaskOrchestratorCommand.RequestStageTransition -> {
+                handleTaskStageTransitionRequest(tabNumber, command)
+            }
+        }
+    }
+
+    private fun handleTaskStageDelegationCommand(
+        tabNumber: Int,
+        command: TaskOrchestratorCommand.DelegateCurrentStage,
+    ) {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber }
+        val taskSession = activeTab?.taskSession
+        val context = taskSession?.context
+        if (activeTab == null || taskSession == null || context == null) {
+            setOrchestratorFsmFlowRunning(tabNumber, false)
+            return
+        }
+        val runtimeState = taskSession.toMachineRuntimeState()
+        val availability = taskMachine.allowedActions(context, runtimeState)
+        val blockReason = taskSession.blockedDelegationReason(
+            context = context,
+            availability = availability,
+            command = command,
+        )
+        if (blockReason != null) {
+            appendTaskStateEvent(
+                tabNumber = tabNumber,
+                content = buildTaskOrchestratorCommandBlockedEvent(
+                    command = command,
+                    currentStage = context.state,
+                    reason = blockReason,
+                ),
+            ) {
+                sendTaskMachineFollowUpPrompt(
+                    tabNumber = tabNumber,
+                    command = command,
+                    result = "Task State Machine blocked the command. Reason: $blockReason",
+                )
+            }
+            return
+        }
+
+        val stage = command.targetStage
+        val input = command.inputForStage
+        val nextSession = taskSession.ensureStageAgent(
+            tabNumber = tabNumber,
+            storageType = state.selectedStorageType,
+            stage = stage,
+            input = input,
+        ).copy(
+            context = context,
+            selectedStage = stage,
+            chatFocus = TaskChatFocus.Stage(stage),
+            pendingTransition = null,
+            pendingRejection = null,
+        )
+        updateTab(tabNumber) { tab -> tab.copy(taskSession = nextSession) }
+        appendTaskStateEvent(
+            tabNumber = tabNumber,
+            content = buildTaskOrchestratorDelegatedStageEvent(
+                stage = stage,
+                reason = command.reason,
+            ),
+        ) {
+            sendStagePrompt(tabNumber, stage, input) {
+                setOrchestratorFsmFlowRunning(tabNumber, false)
+            }
+        }
+    }
+
+    private fun handleTaskButtonOnlyCommand(
+        tabNumber: Int,
+        command: TaskOrchestratorCommand,
+    ) {
+        val taskSession = state.tabs.firstOrNull { it.number == tabNumber }?.taskSession
+        if (taskSession == null) {
+            setOrchestratorFsmFlowRunning(tabNumber, false)
+            return
+        }
+        val reason = "Stage results can be accepted or rejected only through the explicit UI buttons."
+        appendTaskStateEvent(
+            tabNumber = tabNumber,
+            content = buildTaskOrchestratorCommandBlockedEvent(
+                command = command,
+                currentStage = taskSession.context?.state,
+                reason = reason,
+            ),
+        ) {
+            sendTaskMachineFollowUpPrompt(
+                tabNumber = tabNumber,
+                command = command,
+                result = "Task State Machine blocked the command. Reason: $reason",
+            )
+        }
+    }
+
+    private fun handleTaskStageTransitionRequest(
+        tabNumber: Int,
+        command: TaskOrchestratorCommand.RequestStageTransition,
+    ) {
+        val taskSession = state.tabs.firstOrNull { it.number == tabNumber }?.taskSession
+        if (taskSession == null) {
+            setOrchestratorFsmFlowRunning(tabNumber, false)
+            return
+        }
+        val reason = taskSession.blockedTransitionRequestReason()
+        appendTaskStateEvent(
+            tabNumber = tabNumber,
+            content = buildTaskOrchestratorCommandBlockedEvent(
+                command = command,
+                currentStage = taskSession.context?.state,
+                reason = reason,
+            ),
+        ) {
+            sendTaskMachineFollowUpPrompt(
+                tabNumber = tabNumber,
+                command = command,
+                result = "Task State Machine blocked the direct transition request. Reason: $reason",
+            )
+        }
+    }
+
+    private fun TaskModeSession.blockedDelegationReason(
+        context: TaskContext,
+        availability: TaskActionAvailability,
+        command: TaskOrchestratorCommand.DelegateCurrentStage,
+    ): String? =
+        when {
+            command.targetStage != context.state ->
+                "Cannot delegate ${command.targetStage.title}; current FSM stage is ${context.state.title}."
+            !availability.isAllowed(TaskAllowedAction.DelegateCurrentStage) ->
+                availability.reasonFor(TaskAllowedAction.DelegateCurrentStage)
+                    ?: "Current FSM state does not allow stage delegation."
+            stageAgents.firstOrNull { it.session.state == context.state }?.viewModel?.state?.isLoading == true ->
+                "Current ${context.state.title} stage agent is already working."
+            command.inputForStage.isBlank() ->
+                "Delegation command does not contain input_for_stage."
+            else -> null
+        }
 
     private fun startTask(tabNumber: Int, task: String) {
         val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
@@ -687,55 +868,129 @@ class AiChatAppViewModel(
         }
     }
 
-    private fun acceptTaskTransition() {
-        val activeTab = state.activeTab ?: return
-        val taskSession = activeTab.taskSession ?: return
-        val context = taskSession.context ?: return
-        val proposal = taskSession.pendingTransition ?: return
-        val nextContext = taskMachine.acceptTransition(context, proposal)
+    private fun acceptTaskTransition(
+        tabNumber: Int,
+        onCompleted: (() -> Unit)? = null,
+    ): Boolean {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return false
+        val taskSession = activeTab.taskSession ?: return false
+        val context = taskSession.context ?: return false
+        val stageResult = taskSession.currentFinalStageResult(context) ?: return false
+        if (stageResult.status == TaskStageResultStatus.Blocked) {
+            acceptBlockedTaskStage(
+                tabNumber = tabNumber,
+                taskSession = taskSession,
+                context = context,
+                stageResult = stageResult,
+                onCompleted = onCompleted,
+            )
+            return true
+        }
+        val output = stageResult.output.takeIf { it.isNotBlank() } ?: return false
+        val completedContext = taskMachine.completeStage(
+            context = context,
+            output = output,
+            plan = if (context.state == TaskState.Planning) extractPlanItems(output) else context.plan,
+        )
+        val nextStage = context.state.next()
+        if (nextStage == null) {
+            updateTab(tabNumber) { tab ->
+                tab.copy(
+                    taskSession = taskSession.copy(
+                        context = completedContext,
+                        pendingTransition = null,
+                        pendingRejection = null,
+                        selectedStage = context.state,
+                        chatFocus = TaskChatFocus.Stage(context.state),
+                    ),
+                )
+            }
+            appendTaskStateEvent(
+                tabNumber = tabNumber,
+                content = buildStageResultAcceptedEvent(context.state, output, pendingTransition = null),
+            ) {
+                onCompleted?.invoke()
+            }
+            return true
+        }
+        val proposal = taskMachine.proposeTransition(
+            context = completedContext,
+            to = nextStage,
+            reason = "${context.state.title} accepted by user",
+            inputForTarget = buildStageInput(
+                context = completedContext.copy(state = nextStage, current = nextStage.title),
+                stage = nextStage,
+                previousOutput = output,
+                additionalInput = null,
+            ),
+        )
+        val acceptedContext = taskMachine.acceptTransition(completedContext, proposal)
         val nextSession = taskSession.ensureStageAgent(
-            tabNumber = activeTab.number,
+            tabNumber = tabNumber,
             storageType = state.selectedStorageType,
             stage = proposal.to,
             input = proposal.inputForTarget,
         ).copy(
-            context = nextContext,
+            context = acceptedContext,
             selectedStage = proposal.to,
             chatFocus = TaskChatFocus.Stage(proposal.to),
             pendingTransition = null,
             pendingRejection = null,
         )
 
-        updateTab(activeTab.number) { tab -> tab.copy(taskSession = nextSession) }
+        updateTab(tabNumber) { tab -> tab.copy(taskSession = nextSession) }
         appendTaskStateEvent(
-            tabNumber = activeTab.number,
-            content = buildTransitionAcceptedEvent(proposal),
+            tabNumber = tabNumber,
+            content = buildStageResultAcceptedEvent(context.state, output, pendingTransition = proposal),
         ) {
-            sendStagePrompt(activeTab.number, proposal.to, proposal.inputForTarget)
+            sendStagePrompt(tabNumber, proposal.to, proposal.inputForTarget, onCompleted = onCompleted)
         }
+        return true
     }
 
-    private fun rejectTaskStage() {
-        val activeTab = state.activeTab ?: return
-        val taskSession = activeTab.taskSession ?: return
-        val context = taskSession.context ?: return
-        val proposal = taskSession.pendingTransition ?: return
+    private fun rejectTaskStage(
+        tabNumber: Int,
+        userClarification: String? = null,
+        onCompleted: (() -> Unit)? = null,
+    ): Boolean {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return false
+        val taskSession = activeTab.taskSession ?: return false
+        val context = taskSession.context ?: return false
         if (activeTab.viewModel.state.isLoading) {
-            return
+            return false
         }
-        val rejectedOutput = taskSession.stageAgents
-            .firstOrNull { it.session.state == context.state }
-            ?.session
-            ?.output
-            ?.takeIf { it.isNotBlank() }
-            ?: return
-        val rejectedContext = taskMachine.rejectStage(context)
+        val stageResult = taskSession.currentFinalStageResult(context) ?: return false
+        val rejectedOutput = stageResult.output.takeIf { it.isNotBlank() } ?: return false
+        val completedContext = if (stageResult.status == TaskStageResultStatus.Completed) {
+            taskMachine.completeStage(
+                context = context,
+                output = rejectedOutput,
+                plan = if (context.state == TaskState.Planning) extractPlanItems(rejectedOutput) else context.plan,
+            )
+        } else {
+            context.copy(expectedAction = TaskExpectedAction.UserConfirmation)
+        }
+        val rejectedContext = if (completedContext.expectedAction == TaskExpectedAction.UserConfirmation) {
+            taskMachine.rejectStage(completedContext)
+        } else {
+            completedContext.copy(expectedAction = TaskExpectedAction.OrchestratorDecision)
+        }
+        val proposedNextStage = if (stageResult.status == TaskStageResultStatus.Completed) context.state.next() else null
+        val proposedInputForTarget = proposedNextStage?.let { target ->
+            buildStageInput(
+                context = completedContext.copy(state = target, current = target.title),
+                stage = target,
+                previousOutput = rejectedOutput,
+                additionalInput = null,
+            )
+        }
         val rejection = TaskStageRejection(
             stage = context.state,
             rejectedOutput = rejectedOutput,
-            context = context,
-            proposedNextStage = proposal.to,
-            proposedInputForTarget = proposal.inputForTarget,
+            context = completedContext,
+            proposedNextStage = proposedNextStage,
+            proposedInputForTarget = proposedInputForTarget,
+            reason = stageResult.reason.takeIf { it.isNotBlank() },
         )
 
         updateTab(activeTab.number) { tab ->
@@ -750,13 +1005,54 @@ class AiChatAppViewModel(
             )
         }
         appendTaskStateEvent(
-            tabNumber = activeTab.number,
+            tabNumber = tabNumber,
             content = buildStageRejectedEvent(rejection),
         ) {
             sendRejectionAnalysisPrompt(
-                tabNumber = activeTab.number,
+                tabNumber = tabNumber,
                 rejection = rejection,
-                userClarification = null,
+                userClarification = userClarification,
+                onCompleted = onCompleted,
+            )
+        }
+        return true
+    }
+
+    private fun acceptBlockedTaskStage(
+        tabNumber: Int,
+        taskSession: TaskModeSession,
+        context: TaskContext,
+        stageResult: TaskStageResult,
+        onCompleted: (() -> Unit)?,
+    ) {
+        val analysisContext = context.copy(expectedAction = TaskExpectedAction.OrchestratorDecision)
+        val rejection = TaskStageRejection(
+            stage = context.state,
+            rejectedOutput = stageResult.output,
+            context = context,
+            reason = stageResult.reason.takeIf { it.isNotBlank() }
+                ?: "User accepted that the stage is blocked.",
+        )
+        updateTab(tabNumber) { tab ->
+            tab.copy(
+                taskSession = taskSession.copy(
+                    context = analysisContext,
+                    selectedStage = context.state,
+                    chatFocus = TaskChatFocus.Orchestrator,
+                    pendingTransition = null,
+                    pendingRejection = rejection,
+                ),
+            )
+        }
+        appendTaskStateEvent(
+            tabNumber = tabNumber,
+            content = buildBlockedStageAcceptedEvent(context.state, stageResult),
+        ) {
+            sendRejectionAnalysisPrompt(
+                tabNumber = tabNumber,
+                rejection = rejection,
+                userClarification = "The user accepted the blocked result. Analyze how the FSM should proceed without treating this as a successful stage completion.",
+                onCompleted = onCompleted,
             )
         }
     }
@@ -789,6 +1085,7 @@ class AiChatAppViewModel(
                 tabNumber = activeTab.number,
                 rejection = rejection,
                 userClarification = clarification,
+                onCompleted = null,
             )
         }
     }
@@ -797,6 +1094,7 @@ class AiChatAppViewModel(
         tabNumber: Int,
         rejection: TaskStageRejection,
         userClarification: String?,
+        onCompleted: (() -> Unit)?,
     ) {
         val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = activeTab.taskSession ?: return
@@ -822,13 +1120,14 @@ class AiChatAppViewModel(
         }
 
         val updatedTaskSession = state.tabs.firstOrNull { it.number == tabNumber }?.taskSession ?: taskSession
-        activeTab.viewModel.setPrompt(buildRejectionAnalysisPrompt(rejection, userClarification))
-        activeTab.viewModel.sendPrompt(
+        activeTab.viewModel.sendSyntheticPrompt(
+            prompt = buildRejectionAnalysisPrompt(rejection, userClarification),
             runtimeSystemPrompt = buildTaskOrchestratorRuntimePrompt(updatedTaskSession),
         ) { orchestratorState ->
             handleRejectionDecision(
                 tabNumber = tabNumber,
                 orchestratorOutput = orchestratorState.lastAssistantOutput(),
+                onCompleted = onCompleted,
             )
         }
     }
@@ -836,6 +1135,7 @@ class AiChatAppViewModel(
     private fun handleRejectionDecision(
         tabNumber: Int,
         orchestratorOutput: String,
+        onCompleted: (() -> Unit)? = null,
     ) {
         val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = tab.taskSession ?: return
@@ -855,6 +1155,7 @@ class AiChatAppViewModel(
                     target = context.state,
                     reason = decision.reason,
                     additionalInput = decision.additionalInput,
+                    onCompleted = onCompleted,
                 )
             }
 
@@ -866,6 +1167,7 @@ class AiChatAppViewModel(
                         rejection = rejection,
                         question = defaultRejectionQuestion(rejection.stage),
                         reason = "Cannot return before ${context.state.title}.",
+                        onCompleted = onCompleted,
                     )
                 } else {
                     runRejectedStageDecision(
@@ -874,6 +1176,7 @@ class AiChatAppViewModel(
                         target = previous,
                         reason = decision.reason,
                         additionalInput = decision.additionalInput,
+                        onCompleted = onCompleted,
                     )
                 }
             }
@@ -884,6 +1187,7 @@ class AiChatAppViewModel(
                     rejection = rejection,
                     question = decision.question,
                     reason = decision.reason,
+                    onCompleted = onCompleted,
                 )
             }
         }
@@ -895,6 +1199,7 @@ class AiChatAppViewModel(
         target: TaskState,
         reason: String,
         additionalInput: String,
+        onCompleted: (() -> Unit)? = null,
     ) {
         val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = tab.taskSession ?: return
@@ -937,7 +1242,7 @@ class AiChatAppViewModel(
                 reason = reason,
             ),
         ) {
-            sendStagePrompt(tabNumber, target, input)
+            sendStagePrompt(tabNumber, target, input, onCompleted = onCompleted)
         }
     }
 
@@ -946,6 +1251,7 @@ class AiChatAppViewModel(
         rejection: TaskStageRejection,
         question: String,
         reason: String,
+        onCompleted: (() -> Unit)? = null,
     ) {
         val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = tab.taskSession ?: return
@@ -977,7 +1283,9 @@ class AiChatAppViewModel(
                     role = ChatRole.Assistant,
                     content = question,
                 ),
-            )
+            ) {
+                onCompleted?.invoke()
+            }
         }
     }
 
@@ -996,10 +1304,10 @@ class AiChatAppViewModel(
             ChatEvent.SendClicked -> {
                 agent.viewModel.syncRequestSettingsFrom(activeTab.viewModel.state)
                 agent.viewModel.sendPrompt { stageState ->
-                    completeTaskStage(
+                    handleTaskStageResponse(
                         tabNumber = activeTab.number,
                         stage = agent.session.state,
-                        output = stageState.lastAssistantOutput(),
+                        assistantOutput = stageState.lastAssistantOutput(),
                     )
                 }
             }
@@ -1053,8 +1361,10 @@ class AiChatAppViewModel(
                             startUserPrompt = input,
                             input = input,
                             output = null,
+                            resultStatus = TaskStageResultStatus.InProgress,
+                            resultQuestion = "",
+                            resultReason = "",
                             isReached = true,
-                            isReadyForTransition = false,
                         ),
                     )
                 } else {
@@ -1068,6 +1378,7 @@ class AiChatAppViewModel(
         tabNumber: Int,
         stage: TaskState,
         input: String,
+        onCompleted: (() -> Unit)? = null,
     ) {
         val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = activeTab.taskSession ?: return
@@ -1087,73 +1398,50 @@ class AiChatAppViewModel(
             )
         }
         agent.viewModel.sendPrompt { stageState ->
-            completeTaskStage(
+            handleTaskStageResponse(
                 tabNumber = tabNumber,
                 stage = stage,
-                output = stageState.lastAssistantOutput(),
+                assistantOutput = stageState.lastAssistantOutput(),
+                onCompleted = onCompleted,
             )
         }
     }
 
-    private fun completeTaskStage(
+    private fun handleTaskStageResponse(
         tabNumber: Int,
         stage: TaskState,
-        output: String,
+        assistantOutput: String,
+        onCompleted: (() -> Unit)? = null,
     ) {
         val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = tab.taskSession ?: return
         val context = taskSession.context ?: return
+        val result = parseTaskStageResult(assistantOutput)
+        val finalOutput = result.finalOutput()
         val updatedAgents = taskSession.stageAgents.map { agent ->
             if (agent.session.state == stage) {
                 agent.copy(
                     session = agent.session.copy(
-                        output = output,
-                        isReadyForTransition = output.isNotBlank(),
+                        output = finalOutput,
+                        resultStatus = result.status,
+                        resultQuestion = result.question,
+                        resultReason = result.reason,
                     ),
                 )
             } else {
                 agent
             }
         }
-        val shouldControlTransition = stage == context.state && output.isNotBlank()
-        val completedContext = if (shouldControlTransition) {
-            taskMachine.completeStage(
-                context = context,
-                output = output,
-                plan = if (stage == TaskState.Planning) extractPlanItems(output) else context.plan,
-            )
-        } else {
-            context
-        }
-        val pendingTransition = if (shouldControlTransition) {
-            val nextStage = stage.next()
-            nextStage?.let { target ->
-                taskMachine.proposeTransition(
-                    context = completedContext,
-                    to = target,
-                    reason = "${stage.title} completed",
-                    inputForTarget = buildStageInput(
-                        context = completedContext.copy(state = target, current = target.title),
-                        stage = target,
-                        previousOutput = output,
-                        additionalInput = null,
-                    ),
-                )
-            }
-        } else {
-            taskSession.pendingTransition
-        }
-
         updateTab(tabNumber) { currentTab ->
             val currentSession = currentTab.taskSession ?: return@updateTab currentTab
             currentTab.copy(
                 taskSession = currentSession.copy(
-                    context = completedContext,
+                    context = context,
                     stageAgents = updatedAgents,
-                    pendingTransition = pendingTransition,
+                    pendingTransition = null,
                     pendingRejection = null,
                     selectedStage = stage,
-                    chatFocus = if (shouldControlTransition) {
+                    chatFocus = if (stage == context.state) {
                         TaskChatFocus.Stage(stage)
                     } else {
                         currentSession.chatFocus
@@ -1161,16 +1449,7 @@ class AiChatAppViewModel(
                 ),
             )
         }
-        if (shouldControlTransition) {
-            appendTaskStateEvent(
-                tabNumber = tabNumber,
-                content = buildStageCompletedEvent(
-                    stage = stage,
-                    pendingTransition = pendingTransition,
-                    completedContext = completedContext,
-                ),
-            )
-        }
+        onCompleted?.invoke()
     }
 
     private fun appendTaskStateEvent(
@@ -1190,6 +1469,32 @@ class AiChatAppViewModel(
         }
     }
 
+    private fun sendTaskMachineFollowUpPrompt(
+        tabNumber: Int,
+        command: TaskOrchestratorCommand,
+        result: String,
+    ) {
+        val tab = state.tabs.firstOrNull { it.number == tabNumber }
+        val taskSession = tab?.taskSession
+        if (tab == null || taskSession == null) {
+            setOrchestratorFsmFlowRunning(tabNumber, false)
+            return
+        }
+        tab.viewModel.sendSyntheticPrompt(
+            prompt = buildTaskMachineFollowUpPrompt(
+                command = command,
+                result = result,
+                taskSession = taskSession,
+            ),
+            runtimeSystemPrompt = buildTaskOrchestratorRuntimePrompt(
+                taskSession = taskSession,
+                allowCommands = false,
+            ),
+        ) {
+            setOrchestratorFsmFlowRunning(tabNumber, false)
+        }
+    }
+
     private fun focusTaskChat(
         tabNumber: Int,
         focus: TaskChatFocus,
@@ -1200,6 +1505,20 @@ class AiChatAppViewModel(
         }
         updateTab(tabNumber) { tab ->
             tab.copy(taskSession = taskSession.copy(chatFocus = focus))
+        }
+    }
+
+    private fun setOrchestratorFsmFlowRunning(
+        tabNumber: Int,
+        isRunning: Boolean,
+    ) {
+        val taskSession = state.tabs.firstOrNull { it.number == tabNumber }?.taskSession ?: return
+        if (taskSession.isOrchestratorFsmFlowRunning == isRunning) {
+            return
+        }
+        updateTab(tabNumber) { tab ->
+            val session = tab.taskSession ?: return@updateTab tab
+            tab.copy(taskSession = session.copy(isOrchestratorFsmFlowRunning = isRunning))
         }
     }
 
@@ -1242,6 +1561,7 @@ class AiChatAppViewModel(
             state.tabs.map { tab ->
                 ChatTabSnapshot(
                     number = tab.number,
+                    systemPrompt = tab.viewModel.state.systemPrompt,
                     taskSession = tab.taskSession?.toSnapshot(),
                 )
             },
@@ -1407,7 +1727,7 @@ private fun buildStageSystemPrompt(stage: TaskState): String =
         TaskState.Planning -> """
             You are the isolated planning agent for a coding assistant task.
             Work only on the planning stage. Gather missing information, choose technologies from the project context, and produce an implementable plan.
-            Do not claim implementation is done. End with a concise result that the orchestrator can pass to execution.
+            Do not claim implementation is done.
         """.trimIndent()
 
         TaskState.Execution -> """
@@ -1427,7 +1747,26 @@ private fun buildStageSystemPrompt(stage: TaskState): String =
             Summarize the accepted plan, execution result, validation result, and final outcome.
             Do not start new work. Produce the final done-stage response.
         """.trimIndent()
-    }
+    }.withStageResultProtocol()
+
+private fun String.withStageResultProtocol(): String =
+    buildString {
+        appendLine(this@withStageResultProtocol)
+        appendLine()
+        appendLine("Stage result protocol:")
+        appendLine("Every response may include exactly one structured block when you need to report stage state to the application.")
+        appendLine("If you are asking the user a question or need more information, use status needs_user_input.")
+        appendLine("If you are still working or discussing without a final stage artifact, use status in_progress or omit the block.")
+        appendLine("Use status completed only when the final result for this stage is ready for the user's accept/reject decision.")
+        appendLine("Use status blocked only when this stage cannot be completed under the current constraints.")
+        appendLine(TaskStageResultStart)
+        appendLine("status: in_progress|needs_user_input|completed|blocked")
+        appendLine("output: final result only for completed/blocked")
+        appendLine("question: user question only for needs_user_input")
+        appendLine("reason: short reason or blocker")
+        appendLine(TaskStageResultEnd)
+        appendLine("Do not mark clarifying questions as completed. Do not use completed until you are confident the stage is finished.")
+    }.trimEnd()
 
 private fun buildStageInput(
     context: TaskContext,
@@ -1460,7 +1799,7 @@ private fun buildStageInput(
             appendLine(input)
         }
         appendLine()
-        appendLine("Return only the result for the $stage stage.")
+        appendLine("Work only on the ${stage.title} stage. Use the stage result protocol only when you need to report whether this stage is in progress, waiting for the user, completed, or blocked.")
     }
 
 private fun buildRejectionAnalysisPrompt(
@@ -1468,9 +1807,15 @@ private fun buildRejectionAnalysisPrompt(
     userClarification: String?,
 ): String =
     buildString {
+        val isAcceptedBlockedResult = userClarification
+            ?.contains("accepted the blocked result", ignoreCase = true) == true
         appendLine("TASK_REJECTION_ANALYSIS")
-        appendLine("The user rejected the result of the ${rejection.stage.title} stage.")
-        appendLine("You are the orchestrator. Analyze why the stage was rejected and choose the next FSM action.")
+        if (isAcceptedBlockedResult) {
+            appendLine("The user accepted that the ${rejection.stage.title} stage is blocked and cannot be completed as-is.")
+        } else {
+            appendLine("The user rejected the result of the ${rejection.stage.title} stage.")
+        }
+        appendLine("You are the orchestrator. Analyze the stage outcome and choose the next FSM action.")
         appendLine()
         appendLine("Return exactly one structured decision block:")
         appendLine(RejectionDecisionStart)
@@ -1505,7 +1850,7 @@ private fun buildRejectionAnalysisPrompt(
             rejection.context.done.forEach { item -> appendLine("- $item") }
         }
         appendLine()
-        appendLine("Rejected stage output:")
+        appendLine(if (isAcceptedBlockedResult) "Blocked stage output:" else "Rejected stage output:")
         appendLine(rejection.rejectedOutput)
         rejection.proposedInputForTarget?.takeIf { it.isNotBlank() }?.let { input ->
             appendLine()
@@ -1537,15 +1882,19 @@ private fun buildRejectedStageAdditionalInput(
         appendLine(rejection.rejectedOutput)
     }
 
-private fun buildTaskOrchestratorRuntimePrompt(taskSession: TaskModeSession): String? {
+private fun buildTaskOrchestratorRuntimePrompt(
+    taskSession: TaskModeSession,
+    allowCommands: Boolean = true,
+): String? {
     val context = taskSession.context ?: return null
+    val availability = TaskStateMachine().allowedActions(context, taskSession.toMachineRuntimeState())
     return buildString {
         appendLine("[TASK_STATE_MACHINE_ORCHESTRATOR_CONTEXT]")
-        appendLine("You are the orchestrator chat for an active Task State Machine.")
+        appendLine("You are the orchestrator chat for an active FSM: Finite State Machine / конечный автомат состояний.")
         appendLine("Treat this block as authoritative runtime state. The code reducer applies transitions; do not claim a transition was applied unless the state below says so.")
+        appendLine("You are an interface to the code-owned FSM, not an executor for planning/execution/validation/done deliverables.")
         appendLine()
         appendLine("Task: ${context.task}")
-                    systemPrompt = tab.viewModel.state.systemPrompt,
         appendLine("Current state: ${context.state.title}")
         appendLine("Step: ${context.step}/${context.total}")
         appendLine("Expected action: ${context.expectedAction}")
@@ -1578,17 +1927,59 @@ private fun buildTaskOrchestratorRuntimePrompt(taskSession: TaskModeSession): St
             appendLine("Stage agents:")
             taskSession.stageAgents.sortedBy { it.session.state.ordinal }.forEach { agent ->
                 val session = agent.session
+                val output = if (taskSession.canExposeStageOutputToOrchestrator(session)) {
+                    session.output.orEmpty().excerpt()
+                } else if (session.isReadyForTransition) {
+                    "waiting for explicit user accept/reject decision"
+                } else {
+                    ""
+                }
                 appendLine(
-                    "- ${session.state.title}: reached=${session.isReached}, ready=${session.isReadyForTransition}, " +
-                        "input=${session.input.excerpt()}, output=${session.output.orEmpty().excerpt()}",
+                    "- ${session.state.title}: reached=${session.isReached}, status=${session.resultStatus}, " +
+                        "ready=${session.isReadyForTransition}, input=${session.input.excerpt()}, output=$output",
                 )
             }
         }
         appendLine()
+        appendLine("Current allowed actions:")
+        availability.allowed.sortedBy { it.ordinal }.forEach { action ->
+            appendLine("- ${action.name}")
+        }
+        appendLine()
+        appendLine("Forbidden actions:")
+        availability.forbiddenReasons.entries.sortedBy { it.key.ordinal }.forEach { (action, reason) ->
+            appendLine("- ${action.name}: $reason")
+        }
+        if (allowCommands) {
+            appendLine()
+            appendLine("Structured command protocol:")
+            appendLine("Use it only when you want the code to apply an allowed FSM action after your reply.")
+            appendLine(TaskOrchestratorCommandStart)
+            appendLine("action: discuss_only|delegate_current_stage|accept_current_stage|reject_current_stage|request_stage_transition|ask_user")
+            appendLine("target_stage: planning|execution|validation|done")
+            appendLine("reason: concise reason")
+            appendLine("input_for_stage: exact input for the stage agent when action is delegate_current_stage")
+            appendLine("user_clarification: user's rejection clarification when action is reject_current_stage")
+            appendLine(TaskOrchestratorCommandEnd)
+        } else {
+            appendLine()
+            appendLine("This is a follow-up response after the code-owned FSM processed a previous command.")
+            appendLine("Do not emit a ${TaskOrchestratorCommandStart} block in this response.")
+            appendLine("Only explain the FSM result to the user using the current state above.")
+        }
+        appendLine()
         appendLine("Rules:")
         appendLine("- The user may talk to you independently from stage agents.")
+        appendLine("- Do not say that you accepted, rejected, returned, moved, switched state, or changed the FSM unless a task state event above already records that code applied it.")
+        appendLine("- If you want the code to perform an FSM action, say that you are requesting the code action and return the structured command.")
+        appendLine("- Ordinary questions, facts, explanations, and discussion must be discuss_only and must not change the FSM.")
+        appendLine("- Never perform the deliverable of the current or future stage yourself; delegate stage work with a structured command.")
+        appendLine("- Delegation is valid only for the current FSM stage and only when DelegateCurrentStage is allowed above.")
+        appendLine("- Current stage output is not available to you until the user explicitly clicks accept or reject.")
         appendLine("- Forward movement is allowed only after the user accepts the current stage result.")
+        appendLine("- Ordinary chat text such as 'accept', 'continue', or 'go next' must not apply transitions.")
         appendLine("- After rejection, decide whether to retry the current stage, return to the previous stage, or ask the user for clarification.")
+        appendLine("- If the user requests an action forbidden above, explain why it is blocked by the FSM state.")
         appendLine("- Keep user-facing answers consistent with the current FSM state and stage-agent outputs.")
         append("[/TASK_STATE_MACHINE_ORCHESTRATOR_CONTEXT]")
     }
@@ -1667,6 +2058,344 @@ private fun buildStageCompletedEvent(
         } else {
             append("No pending transition.")
         }
+    }
+
+private fun buildStageResultAcceptedEvent(
+    stage: TaskState,
+    output: String,
+    pendingTransition: TaskTransitionProposal?,
+): String =
+    buildString {
+        appendLine("Stage result accepted by user.")
+        appendLine("Stage: ${stage.title}")
+        if (pendingTransition != null) {
+            appendLine("Transition: ${pendingTransition.from.title} -> ${pendingTransition.to.title}")
+            appendLine("Reason: ${pendingTransition.reason}")
+        } else {
+            appendLine("Task State Machine completed.")
+        }
+        appendLine()
+        appendLine("Accepted stage output:")
+        append(output.excerpt())
+    }
+
+private fun buildBlockedStageAcceptedEvent(
+    stage: TaskState,
+    result: TaskStageResult,
+): String =
+    buildString {
+        appendLine("Blocked stage result accepted by user.")
+        appendLine("Stage: ${stage.title}")
+        result.reason.takeIf { it.isNotBlank() }?.let { appendLine("Reason: $it") }
+        appendLine("The orchestrator will analyze how to proceed.")
+    }.trimEnd()
+
+private fun buildTaskOrchestratorDelegatedStageEvent(
+    stage: TaskState,
+    reason: String,
+): String =
+    buildString {
+        appendLine("Orchestrator delegated work to the current stage agent.")
+        appendLine("Target stage: ${stage.title}")
+        reason.takeIf { it.isNotBlank() }?.let { append("Reason: $it") }
+    }.trimEnd()
+
+private fun buildTaskMachineFollowUpPrompt(
+    command: TaskOrchestratorCommand,
+    result: String,
+    taskSession: TaskModeSession,
+): String =
+    buildString {
+        appendLine("This is a Task State Machine result, not a user message.")
+        appendLine("The previous assistant response contained an FSM command. The code-owned FSM processed it.")
+        appendLine()
+        appendLine("Processed command:")
+        appendLine("- action: ${command.actionName}")
+        command.targetStage?.let { appendLine("- target_stage: ${it.title}") }
+        command.reason.takeIf { it.isNotBlank() }?.let { appendLine("- reason: $it") }
+        appendLine()
+        appendLine("FSM result:")
+        appendLine(result)
+        taskSession.context?.let { context ->
+            appendLine()
+            appendLine("Current FSM snapshot after processing:")
+            appendLine("- state: ${context.state.title}")
+            appendLine("- expected_action: ${context.expectedAction}")
+            appendLine("- current: ${context.current}")
+            taskSession.pendingTransition?.let { proposal ->
+                appendLine("- pending_transition: ${proposal.from.title} -> ${proposal.to.title}")
+            }
+            taskSession.pendingRejection?.let { rejection ->
+                appendLine("- pending_rejection_stage: ${rejection.stage.title}")
+                rejection.question?.takeIf { it.isNotBlank() }?.let { appendLine("- pending_question: $it") }
+            }
+        }
+        appendLine()
+        append("Explain this result to the user. Do not emit another FSM command block.")
+    }
+
+private fun buildTaskOrchestratorCommandBlockedEvent(
+    command: TaskOrchestratorCommand,
+    currentStage: TaskState?,
+    reason: String,
+): String =
+    buildString {
+        appendLine("Orchestrator command blocked by Task State Machine.")
+        appendLine("Requested action: ${command.actionName}")
+        command.targetStage?.let { appendLine("Requested stage: ${it.title}") }
+        currentStage?.let { appendLine("Current stage: ${it.title}") }
+        append("Reason: $reason")
+    }
+
+private fun TaskModeSession.blockedAcceptReason(): String =
+    when {
+        context == null -> "Task State Machine is not started."
+        currentFinalStageResult(context) == null ->
+            "There is no completed or blocked stage result waiting for acceptance."
+        else -> "Current FSM state does not allow accepting a transition."
+    }
+
+private fun TaskModeSession.blockedRejectReason(): String =
+    when {
+        context == null -> "Task State Machine is not started."
+        currentFinalStageResult(context) == null ->
+            "There is no completed or blocked stage result waiting for rejection."
+        else -> "Current FSM state does not allow rejecting a stage."
+    }
+
+private fun TaskModeSession.blockedTransitionRequestReason(): String {
+    val context = context ?: return "Task State Machine is not started."
+    return when (context.expectedAction) {
+        TaskExpectedAction.UserConfirmation ->
+            "Direct stage navigation from chat is not allowed. Accept or reject the current ${context.state.title} result first."
+        TaskExpectedAction.AgentWork ->
+            "Direct stage navigation from chat is not allowed while the ${context.state.title} stage is active."
+        TaskExpectedAction.OrchestratorDecision ->
+            "Direct stage navigation from chat is not allowed while the orchestrator analyzes the rejected ${context.state.title} stage."
+        TaskExpectedAction.UserPrompt ->
+            "Direct stage navigation from chat is not allowed while the FSM is waiting for rejection clarification."
+        TaskExpectedAction.Completed ->
+            "Direct stage navigation from chat is not allowed because the task is completed."
+    }
+}
+
+private fun TaskModeSession.currentFinalStageResult(context: TaskContext): TaskStageResult? {
+    val session = stageAgents
+        .firstOrNull { it.session.state == context.state }
+        ?.session
+        ?: return null
+    if (!session.isReadyForTransition) {
+        return null
+    }
+    val output = session.output.orEmpty()
+    if (output.isBlank()) {
+        return null
+    }
+    return TaskStageResult(
+        status = session.resultStatus,
+        output = output,
+        question = session.resultQuestion,
+        reason = session.resultReason,
+    )
+}
+
+private fun TaskModeSession.canExposeStageOutputToOrchestrator(session: TaskStageSession): Boolean {
+    val context = context ?: return false
+    return session.output != null &&
+        (
+            session.state != context.state ||
+                context.expectedAction != TaskExpectedAction.AgentWork ||
+                pendingRejection?.stage == session.state
+            )
+}
+
+private fun TaskModeSession.toMachineRuntimeState(): TaskMachineRuntimeState {
+    val currentStage = context?.state
+    val currentAgent = stageAgents.firstOrNull { it.session.state == currentStage }
+    return TaskMachineRuntimeState(
+        isCurrentStageLoading = currentAgent?.viewModel?.state?.isLoading == true,
+        hasPendingTransition = pendingTransition != null || currentAgent?.session?.isReadyForTransition == true,
+        hasPendingRejection = pendingRejection != null,
+    )
+}
+
+private sealed interface TaskOrchestratorCommand {
+    data object DiscussOnly : TaskOrchestratorCommand
+
+    data class AcceptCurrentStage(
+        val reason: String,
+    ) : TaskOrchestratorCommand
+
+    data class RejectCurrentStage(
+        val reason: String,
+        val userClarification: String,
+    ) : TaskOrchestratorCommand
+
+    data class DelegateCurrentStage(
+        val targetStage: TaskState,
+        val reason: String,
+        val inputForStage: String,
+    ) : TaskOrchestratorCommand
+
+    data class RequestStageTransition(
+        val targetStage: TaskState?,
+        val reason: String,
+    ) : TaskOrchestratorCommand
+
+    data class AskUser(
+        val reason: String,
+    ) : TaskOrchestratorCommand
+}
+
+private val TaskOrchestratorCommand.actionName: String
+    get() = when (this) {
+        TaskOrchestratorCommand.DiscussOnly -> "discuss_only"
+        is TaskOrchestratorCommand.AcceptCurrentStage -> "accept_current_stage"
+        is TaskOrchestratorCommand.RejectCurrentStage -> "reject_current_stage"
+        is TaskOrchestratorCommand.DelegateCurrentStage -> "delegate_current_stage"
+        is TaskOrchestratorCommand.RequestStageTransition -> "request_stage_transition"
+        is TaskOrchestratorCommand.AskUser -> "ask_user"
+    }
+
+private val TaskOrchestratorCommand.targetStage: TaskState?
+    get() = when (this) {
+        is TaskOrchestratorCommand.DelegateCurrentStage -> targetStage
+        is TaskOrchestratorCommand.RequestStageTransition -> targetStage
+        else -> null
+    }
+
+private val TaskOrchestratorCommand.reason: String
+    get() = when (this) {
+        TaskOrchestratorCommand.DiscussOnly -> ""
+        is TaskOrchestratorCommand.AcceptCurrentStage -> reason
+        is TaskOrchestratorCommand.RejectCurrentStage -> reason
+        is TaskOrchestratorCommand.DelegateCurrentStage -> reason
+        is TaskOrchestratorCommand.RequestStageTransition -> reason
+        is TaskOrchestratorCommand.AskUser -> reason
+    }
+
+private fun parseTaskStageResult(output: String): TaskStageResult {
+    val block = output
+        .substringAfter(TaskStageResultStart, missingDelimiterValue = "")
+        .substringBefore(TaskStageResultEnd, missingDelimiterValue = "")
+        .takeIf { it.isNotBlank() }
+        ?: return TaskStageResult(status = TaskStageResultStatus.InProgress)
+    val fields = block.toStructuredFields(StageResultFieldNames)
+    val status = fields["status"]?.trim()?.lowercase()
+        ?.toTaskStageResultStatusOrNull()
+        ?: return TaskStageResult(status = TaskStageResultStatus.InProgress)
+    val result = TaskStageResult(
+        status = status,
+        output = fields["output"].orEmpty().trim(),
+        question = fields["question"].orEmpty().trim(),
+        reason = fields["reason"].orEmpty().trim(),
+    )
+    return when (status) {
+        TaskStageResultStatus.Completed ->
+            result.takeIf { it.output.isNotBlank() }
+                ?: TaskStageResult(status = TaskStageResultStatus.InProgress)
+        TaskStageResultStatus.Blocked ->
+            result.copy(output = result.output.ifBlank { result.reason })
+                .takeIf { it.output.isNotBlank() }
+                ?: TaskStageResult(status = TaskStageResultStatus.InProgress)
+        TaskStageResultStatus.NeedsUserInput,
+        TaskStageResultStatus.InProgress -> result
+    }
+}
+
+private fun TaskStageResult.finalOutput(): String? =
+    when (status) {
+        TaskStageResultStatus.Completed,
+        TaskStageResultStatus.Blocked -> output.takeIf { it.isNotBlank() }
+        TaskStageResultStatus.InProgress,
+        TaskStageResultStatus.NeedsUserInput -> null
+    }
+
+private fun parseTaskOrchestratorCommand(output: String): TaskOrchestratorCommand {
+    val block = output
+        .substringAfter(TaskOrchestratorCommandStart, missingDelimiterValue = "")
+        .substringBefore(TaskOrchestratorCommandEnd, missingDelimiterValue = "")
+        .takeIf { it.isNotBlank() }
+        ?: return TaskOrchestratorCommand.DiscussOnly
+    val fields = block.toTaskCommandFields()
+    val reason = fields["reason"].orEmpty()
+    return when (fields["action"]?.lowercase()) {
+        "discuss_only" -> TaskOrchestratorCommand.DiscussOnly
+        "accept_current_stage" -> TaskOrchestratorCommand.AcceptCurrentStage(reason = reason)
+        "reject_current_stage" -> TaskOrchestratorCommand.RejectCurrentStage(
+            reason = reason,
+            userClarification = fields["user_clarification"].orEmpty(),
+        )
+        "delegate_current_stage" -> {
+            val targetStage = fields["target_stage"]?.toTaskStateOrNull()
+                ?: return TaskOrchestratorCommand.DiscussOnly
+            val inputForStage = fields["input_for_stage"].orEmpty()
+                .takeIf { it.isNotBlank() }
+                ?: return TaskOrchestratorCommand.DiscussOnly
+            TaskOrchestratorCommand.DelegateCurrentStage(
+                targetStage = targetStage,
+                reason = reason,
+                inputForStage = inputForStage,
+            )
+        }
+
+        "request_stage_transition" -> TaskOrchestratorCommand.RequestStageTransition(
+            targetStage = fields["target_stage"]?.toTaskStateOrNull(),
+            reason = reason,
+        )
+        "ask_user" -> TaskOrchestratorCommand.AskUser(reason = reason)
+        else -> TaskOrchestratorCommand.DiscussOnly
+    }
+}
+
+private fun String.toTaskCommandFields(): Map<String, String> =
+    lineSequence()
+        .mapNotNull { line ->
+            val separatorIndex = line.indexOf(':')
+            if (separatorIndex <= 0) {
+                null
+            } else {
+                line.take(separatorIndex).trim().lowercase() to
+                    line.drop(separatorIndex + 1).trim()
+            }
+        }
+        .toMap()
+
+private fun String.toStructuredFields(fieldNames: Set<String>): Map<String, String> {
+    val result = linkedMapOf<String, StringBuilder>()
+    var currentKey: String? = null
+    lineSequence().forEach { line ->
+        val separatorIndex = line.indexOf(':')
+        val key = if (separatorIndex > 0) {
+            line.take(separatorIndex).trim().lowercase()
+        } else {
+            ""
+        }
+        if (key in fieldNames) {
+            currentKey = key
+            result.getOrPut(key) { StringBuilder() }
+                .append(line.drop(separatorIndex + 1).trimStart())
+        } else {
+            currentKey?.let { activeKey ->
+                result.getOrPut(activeKey) { StringBuilder() }
+                    .appendLine()
+                    .append(line)
+            }
+        }
+    }
+    return result.mapValues { (_, value) -> value.toString().trim() }
+}
+
+private fun String.toTaskStateOrNull(): TaskState? =
+    TaskState.entries.firstOrNull { stage -> stage.title == trim().lowercase() }
+
+private fun String.toTaskStageResultStatusOrNull(): TaskStageResultStatus? =
+    when (this) {
+        "in_progress" -> TaskStageResultStatus.InProgress
+        "needs_user_input" -> TaskStageResultStatus.NeedsUserInput
+        "completed" -> TaskStageResultStatus.Completed
+        "blocked" -> TaskStageResultStatus.Blocked
+        else -> null
     }
 
 private fun parseTaskOrchestratorDecision(output: String): TaskOrchestratorDecision? {
@@ -1766,5 +2495,10 @@ private const val TaskStageChatIdMultiplier = 10
 private const val MaxExtractedPlanItems = 12
 private const val MaxFallbackPlanChars = 600
 private const val MaxRuntimeBriefingExcerptChars = 800
+private const val TaskStageResultStart = "[TASK_STAGE_RESULT]"
+private const val TaskStageResultEnd = "[/TASK_STAGE_RESULT]"
+private const val TaskOrchestratorCommandStart = "[TASK_ORCHESTRATOR_COMMAND]"
+private const val TaskOrchestratorCommandEnd = "[/TASK_ORCHESTRATOR_COMMAND]"
 private const val RejectionDecisionStart = "TASK_REJECTION_DECISION"
 private const val RejectionDecisionEnd = "END_TASK_REJECTION_DECISION"
+private val StageResultFieldNames = setOf("status", "output", "question", "reason")

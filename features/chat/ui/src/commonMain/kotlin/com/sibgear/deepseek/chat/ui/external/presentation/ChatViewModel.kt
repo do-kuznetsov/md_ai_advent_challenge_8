@@ -13,6 +13,7 @@ import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
@@ -211,25 +212,12 @@ class ChatViewModel(
             return
         }
 
-        val request = AiRequestData(
-            systemPrompt = state.systemPrompt.withRuntimeSystemPrompt(runtimeSystemPrompt),
+        val request = buildRequest(
             prompt = prompt,
+            runtimeSystemPrompt = runtimeSystemPrompt,
             attachment = state.attachment,
-            model = state.selectedModel,
-            apiSettings = state.apiSettings,
-            contextManagementSettings = ContextManagementSettings(
-                mode = state.contextManagementMode,
-                summaryIntervalMessages = state.summaryIntervalInput.toIntOrNull()
-                    ?.coerceAtLeast(1)
-                    ?: DefaultContextManagementMessages,
-                    slidingWindowMessages = state.slidingWindowMessagesInput.toIntOrNull()
-                        ?.coerceAtLeast(1)
-                        ?: DefaultContextManagementMessages,
-                    stickyFactsWindowMessages = state.stickyFactsWindowInput.toIntOrNull()
-                        ?.coerceAtLeast(1)
-                        ?: DefaultContextManagementMessages,
-                ),
-            )
+            persistUserMessage = true,
+        )
         val userMessage = ChatMessage(
             role = ChatRole.User,
             content = prompt,
@@ -252,19 +240,49 @@ class ChatViewModel(
             ).withContextPresentation()
 
             try {
-                val response = interactor.sendMessage(request)
+                sendRequestAndUpdateState(request, onCompleted)
+            } catch (exception: CancellationException) {
+                state = state.copy(isLoading = false)
+                throw exception
+            } catch (exception: Throwable) {
+                val errorMessage = ChatMessage(
+                    role = ChatRole.Assistant,
+                    content = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                )
                 state = state.copy(
                     isLoading = false,
-                    messages = response.messages,
-                    stickyFacts = response.stickyFacts,
-                    stickyFactsStatus = response.stickyFacts
-                        .takeIf { it.isNotEmpty() }
-                        ?.let { "facts: ${it.size}" },
-                    branches = response.branches,
-                    activeBranchId = response.activeBranchId,
-                    branchingStatus = response.activeBranchId?.let { "branch: $it" },
+                    messages = state.messages + errorMessage,
                 ).withContextPresentation()
                 onCompleted?.invoke(state)
+            }
+        }
+    }
+
+    fun sendSyntheticPrompt(
+        prompt: String,
+        runtimeSystemPrompt: String? = null,
+        onCompleted: ((ChatViewState) -> Unit)? = null,
+    ) {
+        val trimmedPrompt = prompt.trim()
+        if (trimmedPrompt.isEmpty() || state.isLoading) {
+            return
+        }
+
+        val request = buildRequest(
+            prompt = trimmedPrompt,
+            runtimeSystemPrompt = runtimeSystemPrompt,
+            attachment = null,
+            persistUserMessage = false,
+        )
+
+        coroutineScope.launch {
+            state = state.copy(
+                isLoading = true,
+                attachmentError = null,
+            ).withContextPresentation()
+
+            try {
+                sendRequestAndUpdateState(request, onCompleted)
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -327,6 +345,52 @@ class ChatViewModel(
             apiSettings = source.apiSettings,
             maxTokensInput = source.maxTokensInput,
         ).withContextPresentation()
+    }
+
+    private fun buildRequest(
+        prompt: String,
+        runtimeSystemPrompt: String?,
+        attachment: PromptAttachment?,
+        persistUserMessage: Boolean,
+    ): AiRequestData =
+        AiRequestData(
+            systemPrompt = state.systemPrompt.withRuntimeSystemPrompt(runtimeSystemPrompt),
+            prompt = prompt,
+            attachment = attachment,
+            model = state.selectedModel,
+            apiSettings = state.apiSettings,
+            contextManagementSettings = ContextManagementSettings(
+                mode = state.contextManagementMode,
+                summaryIntervalMessages = state.summaryIntervalInput.toIntOrNull()
+                    ?.coerceAtLeast(1)
+                    ?: DefaultContextManagementMessages,
+                slidingWindowMessages = state.slidingWindowMessagesInput.toIntOrNull()
+                    ?.coerceAtLeast(1)
+                    ?: DefaultContextManagementMessages,
+                stickyFactsWindowMessages = state.stickyFactsWindowInput.toIntOrNull()
+                    ?.coerceAtLeast(1)
+                    ?: DefaultContextManagementMessages,
+            ),
+            persistUserMessage = persistUserMessage,
+        )
+
+    private suspend fun sendRequestAndUpdateState(
+        request: AiRequestData,
+        onCompleted: ((ChatViewState) -> Unit)?,
+    ) {
+        val response = interactor.sendMessage(request)
+        state = state.copy(
+            isLoading = false,
+            messages = response.messages,
+            stickyFacts = response.stickyFacts,
+            stickyFactsStatus = response.stickyFacts
+                .takeIf { it.isNotEmpty() }
+                ?.let { "facts: ${it.size}" },
+            branches = response.branches,
+            activeBranchId = response.activeBranchId,
+            branchingStatus = response.activeBranchId?.let { "branch: $it" },
+        ).withContextPresentation()
+        onCompleted?.invoke(state)
     }
 
     private fun applyOpenRouterFilter() {

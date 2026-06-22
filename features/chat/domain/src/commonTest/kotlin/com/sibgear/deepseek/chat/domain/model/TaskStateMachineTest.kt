@@ -64,6 +64,48 @@ class TaskStateMachineTest {
     }
 
     @Test
+    fun allowsCurrentStageDelegationOnlyWhileAgentWorkIsExpected() {
+        val context = machine.start("Add tests")
+
+        val availability = machine.allowedActions(context)
+
+        assertEquals(true, availability.isAllowed(TaskAllowedAction.DelegateCurrentStage))
+        assertEquals(false, availability.isAllowed(TaskAllowedAction.RequireUserConfirmation))
+    }
+
+    @Test
+    fun runningStageAllowsWaitingButNotAnotherDelegation() {
+        val context = machine.start("Add tests")
+
+        val availability = machine.allowedActions(
+            context = context,
+            runtimeState = TaskMachineRuntimeState(isCurrentStageLoading = true),
+        )
+
+        assertEquals(true, availability.isAllowed(TaskAllowedAction.WaitStageResult))
+        assertEquals(false, availability.isAllowed(TaskAllowedAction.DelegateCurrentStage))
+        assertEquals(
+            "Current stage agent is already working; wait for its result.",
+            availability.reasonFor(TaskAllowedAction.DelegateCurrentStage),
+        )
+    }
+
+    @Test
+    fun completedStageRequiresUserConfirmationAndBlocksDelegation() {
+        val context = machine.start("Add tests")
+            .let { machine.completeStage(it, output = "plan") }
+
+        val availability = machine.allowedActions(context)
+
+        assertEquals(true, availability.isAllowed(TaskAllowedAction.RequireUserConfirmation))
+        assertEquals(false, availability.isAllowed(TaskAllowedAction.DelegateCurrentStage))
+        assertEquals(
+            "Current stage is complete and waiting for explicit user decision: accept or reject.",
+            availability.reasonFor(TaskAllowedAction.DelegateCurrentStage),
+        )
+    }
+
+    @Test
     fun allowsPreviousStageProposal() {
         val planning = machine.start("Add tests")
             .let { machine.completeStage(it, output = "plan") }
@@ -130,6 +172,14 @@ class TaskStateMachineTest {
         val rejected = machine.rejectStage(context)
 
         assertEquals(TaskExpectedAction.OrchestratorDecision, rejected.expectedAction)
+        assertEquals(
+            true,
+            machine.allowedActions(rejected).isAllowed(TaskAllowedAction.AnalyzeRejection),
+        )
+        assertEquals(
+            false,
+            machine.allowedActions(rejected).isAllowed(TaskAllowedAction.DelegateCurrentStage),
+        )
     }
 
     @Test
@@ -182,5 +232,33 @@ class TaskStateMachineTest {
         val waiting = machine.awaitRejectionDetails(context)
 
         assertEquals(TaskExpectedAction.UserPrompt, waiting.expectedAction)
+        assertEquals(
+            true,
+            machine.allowedActions(waiting).isAllowed(TaskAllowedAction.AskRejectionClarification),
+        )
+        assertEquals(
+            false,
+            machine.allowedActions(waiting).isAllowed(TaskAllowedAction.DelegateCurrentStage),
+        )
+    }
+
+    @Test
+    fun completedTaskBlocksNewStageActions() {
+        val done = TaskContext(
+            task = "Task",
+            state = TaskState.Done,
+            step = 4,
+            total = 4,
+            plan = emptyList(),
+            done = emptyList(),
+            current = "done",
+            expectedAction = TaskExpectedAction.Completed,
+        )
+
+        val availability = machine.allowedActions(done)
+
+        assertEquals(true, availability.isAllowed(TaskAllowedAction.Completed))
+        assertEquals(false, availability.isAllowed(TaskAllowedAction.DelegateCurrentStage))
+        assertEquals("Task is completed; no further stage delegation is allowed.", availability.reasonFor(TaskAllowedAction.DelegateCurrentStage))
     }
 }

@@ -68,7 +68,11 @@ internal fun PromptInputArea(
     onTaskModeToggled: () -> Unit = {},
     promptHeaderContent: (@Composable () -> Unit)? = null,
     isPromptInputEnabled: Boolean = true,
+    isPromptInputLoading: Boolean = false,
 ) {
+    val isLoading = state.isLoading || isPromptInputLoading
+    val isSendEnabled = state.prompt.isNotBlank() && !isLoading
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -105,8 +109,8 @@ internal fun PromptInputArea(
             UserPromptInputBox(
                 value = state.prompt,
                 onValueChange = { onEvent(ChatEvent.PromptChanged(it)) },
-                isLoading = state.isLoading,
-                isSendEnabled = state.isSendEnabled,
+                isLoading = isLoading,
+                isSendEnabled = isSendEnabled,
                 isPromptInputEnabled = isPromptInputEnabled,
                 attachment = state.attachment,
                 showTaskModeToggle = showTaskModeToggle,

@@ -17,6 +17,7 @@ data class TaskModeSession(
     val stageAgents: List<TaskStageAgent> = emptyList(),
     val pendingTransition: TaskTransitionProposal? = null,
     val pendingRejection: TaskStageRejection? = null,
+    val isOrchestratorFsmFlowRunning: Boolean = false,
 ) {
     val selectedStageAgent: TaskStageAgent?
         get() = stageAgents.firstOrNull { it.session.state == selectedStage }

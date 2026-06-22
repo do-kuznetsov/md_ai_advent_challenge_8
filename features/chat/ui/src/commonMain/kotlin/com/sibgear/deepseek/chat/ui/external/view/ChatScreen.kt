@@ -102,11 +102,12 @@ fun ChatPane(
     leadingSystemPrompt: String? = null,
     promptHeaderContent: (@Composable () -> Unit)? = null,
     isPromptInputEnabled: Boolean = true,
+    isPromptInputLoading: Boolean = false,
 ) {
-    Column(
     val effectiveLeadingSystemPrompt = leadingSystemPrompt
         ?: state.systemPrompt.takeIf { state.messages.isNotEmpty() && it.isNotBlank() }
 
+    Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -130,6 +131,7 @@ fun ChatPane(
             onTaskModeToggled = onTaskModeToggled,
             promptHeaderContent = promptHeaderContent,
             isPromptInputEnabled = isPromptInputEnabled,
+            isPromptInputLoading = isPromptInputLoading,
         )
     }
 }

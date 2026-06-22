@@ -4,6 +4,7 @@ import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
 import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
+import com.sibgear.deepseek.chat.domain.model.TaskStageResultStatus
 import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
@@ -224,6 +225,9 @@ private data class TaskStageSessionDto(
     val startUserPrompt: String,
     val input: String = "",
     val output: String? = null,
+    val resultStatus: String? = null,
+    val resultQuestion: String = "",
+    val resultReason: String = "",
     val isReached: Boolean = false,
     val isReadyForTransition: Boolean = false,
 )
@@ -303,8 +307,10 @@ private fun TaskStageSession.toDto(): TaskStageSessionDto =
         startUserPrompt = startUserPrompt,
         input = input,
         output = output,
+        resultStatus = resultStatus.name,
+        resultQuestion = resultQuestion,
+        resultReason = resultReason,
         isReached = isReached,
-        isReadyForTransition = isReadyForTransition,
     )
 
 private fun TaskStageSessionDto.toDomain(): TaskStageSession =
@@ -315,8 +321,15 @@ private fun TaskStageSessionDto.toDomain(): TaskStageSession =
         startUserPrompt = startUserPrompt,
         input = input,
         output = output,
+        resultStatus = resultStatus?.toTaskStageResultStatus()
+            ?: if (isReadyForTransition) {
+                TaskStageResultStatus.Completed
+            } else {
+                TaskStageResultStatus.InProgress
+            },
+        resultQuestion = resultQuestion,
+        resultReason = resultReason,
         isReached = isReached,
-        isReadyForTransition = isReadyForTransition,
     )
 
 private fun TaskTransitionProposal.toDto(): TaskTransitionProposalDto =
@@ -374,6 +387,9 @@ private fun String.toTaskState(): TaskState =
 
 private fun String.toTaskExpectedAction(): TaskExpectedAction =
     TaskExpectedAction.entries.firstOrNull { it.name == this } ?: TaskExpectedAction.UserPrompt
+
+private fun String.toTaskStageResultStatus(): TaskStageResultStatus =
+    TaskStageResultStatus.entries.firstOrNull { it.name == this } ?: TaskStageResultStatus.InProgress
 
 internal fun defaultStorageBaseDir(): File {
     val resourcesDir = System.getProperty("compose.application.resources.dir")

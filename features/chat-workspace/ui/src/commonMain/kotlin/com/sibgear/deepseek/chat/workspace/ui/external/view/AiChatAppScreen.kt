@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.sibgear.deepseek.chat.domain.model.TaskStageResultStatus
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.ui.external.view.AiModelSettingsDrawer
 import com.sibgear.deepseek.chat.ui.external.view.ChatPane
@@ -218,6 +219,8 @@ private fun TaskStateMachineChatScreen(
                                     showTaskModeToggle = true,
                                     isTaskModeEnabled = true,
                                     onTaskModeToggled = { onEvent(AiChatAppEvent.TaskModeToggled) },
+                                    isPromptInputEnabled = !taskSession.isOrchestratorFsmFlowRunning,
+                                    isPromptInputLoading = taskSession.isOrchestratorFsmFlowRunning,
                                 )
                             }
 
@@ -376,25 +379,24 @@ private fun TaskTransitionControls(
     onReject: () -> Unit,
 ) {
     val context = taskSession.context ?: return
-    val pending = taskSession.pendingTransition
-    val isCurrentStageReady = taskSession.stageAgents
-        .firstOrNull { it.session.state == context.state }
-        ?.viewModel
-        ?.state
-        ?.isLoading != true &&
-        taskSession.stageAgents
-            .firstOrNull { it.session.state == context.state }
-            ?.session
-            ?.isReadyForTransition == true
-    if (pending == null || !isCurrentStageReady) {
+    val currentAgent = taskSession.stageAgents.firstOrNull { it.session.state == context.state } ?: return
+    val isCurrentStageReady = currentAgent.viewModel.state.isLoading != true &&
+        currentAgent.session.isReadyForTransition
+    if (!isCurrentStageReady) {
         return
+    }
+    val statusLabel = when (currentAgent.session.resultStatus) {
+        TaskStageResultStatus.Completed -> "${context.state.title} result"
+        TaskStageResultStatus.Blocked -> "${context.state.title} blocked"
+        TaskStageResultStatus.InProgress,
+        TaskStageResultStatus.NeedsUserInput -> return
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = "${pending.from.title} -> ${pending.to.title}",
+            text = statusLabel,
             modifier = Modifier.weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

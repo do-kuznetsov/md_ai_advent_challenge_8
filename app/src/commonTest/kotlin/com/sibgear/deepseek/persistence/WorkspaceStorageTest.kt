@@ -4,6 +4,7 @@ import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
 import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
+import com.sibgear.deepseek.chat.domain.model.TaskStageResultStatus
 import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
@@ -135,8 +136,8 @@ class WorkspaceStorageTest {
                     startUserPrompt = "planning input",
                     input = "planning input",
                     output = "planning output",
+                    resultStatus = TaskStageResultStatus.Completed,
                     isReached = true,
-                    isReadyForTransition = true,
                 ),
             ),
             pendingTransition = TaskTransitionProposal(
