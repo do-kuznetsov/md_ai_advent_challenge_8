@@ -102,7 +102,11 @@ fun ChatPane(
     leadingSystemPrompt: String? = null,
     promptHeaderContent: (@Composable () -> Unit)? = null,
     isPromptInputEnabled: Boolean = true,
+    isPromptInputLoading: Boolean = false,
 ) {
+    val effectiveLeadingSystemPrompt = leadingSystemPrompt
+        ?: state.systemPrompt.takeIf { state.messages.isNotEmpty() && it.isNotBlank() }
+
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -116,7 +120,7 @@ fun ChatPane(
             expandedCompressionMessageIndexes = state.expandedCompressionMessageIndexes,
             onCompressionSummaryToggled = { onEvent(ChatEvent.CompressionSummaryToggled(it)) },
             modifier = Modifier.weight(1f),
-            leadingSystemPrompt = leadingSystemPrompt,
+            leadingSystemPrompt = effectiveLeadingSystemPrompt,
         )
 
         PromptInputArea(
@@ -127,6 +131,7 @@ fun ChatPane(
             onTaskModeToggled = onTaskModeToggled,
             promptHeaderContent = promptHeaderContent,
             isPromptInputEnabled = isPromptInputEnabled,
+            isPromptInputLoading = isPromptInputLoading,
         )
     }
 }

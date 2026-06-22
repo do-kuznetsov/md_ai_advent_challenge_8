@@ -17,6 +17,47 @@ enum class TaskExpectedAction {
     Completed,
 }
 
+enum class TaskAllowedAction {
+    DiscussOnly,
+    DelegateCurrentStage,
+    WaitStageResult,
+    RequireUserConfirmation,
+    AnalyzeRejection,
+    AskRejectionClarification,
+    Completed,
+}
+
+enum class TaskStageResultStatus {
+    InProgress,
+    NeedsUserInput,
+    Completed,
+    Blocked,
+}
+
+data class TaskStageResult(
+    val status: TaskStageResultStatus,
+    val output: String = "",
+    val question: String = "",
+    val reason: String = "",
+)
+
+data class TaskMachineRuntimeState(
+    val isCurrentStageLoading: Boolean = false,
+    val hasPendingTransition: Boolean = false,
+    val hasPendingRejection: Boolean = false,
+)
+
+data class TaskActionAvailability(
+    val allowed: Set<TaskAllowedAction>,
+    val forbiddenReasons: Map<TaskAllowedAction, String>,
+) {
+    fun isAllowed(action: TaskAllowedAction): Boolean =
+        action in allowed
+
+    fun reasonFor(action: TaskAllowedAction): String? =
+        forbiddenReasons[action]
+}
+
 data class TaskContext(
     val task: String,
     val state: TaskState,
@@ -35,9 +76,15 @@ data class TaskStageSession(
     val startUserPrompt: String,
     val input: String = "",
     val output: String? = null,
+    val resultStatus: TaskStageResultStatus = TaskStageResultStatus.InProgress,
+    val resultQuestion: String = "",
+    val resultReason: String = "",
     val isReached: Boolean = false,
-    val isReadyForTransition: Boolean = false,
-)
+) {
+    val isReadyForTransition: Boolean
+        get() = resultStatus == TaskStageResultStatus.Completed ||
+            resultStatus == TaskStageResultStatus.Blocked
+}
 
 data class TaskTransitionProposal(
     val from: TaskState,
@@ -85,6 +132,38 @@ data class TaskSessionSnapshot(
 )
 
 class TaskStateMachine {
+    fun allowedActions(
+        context: TaskContext,
+        runtimeState: TaskMachineRuntimeState = TaskMachineRuntimeState(),
+    ): TaskActionAvailability {
+        val allowed = buildSet {
+            add(TaskAllowedAction.DiscussOnly)
+            when (context.expectedAction) {
+                TaskExpectedAction.AgentWork -> {
+                    if (runtimeState.isCurrentStageLoading) {
+                        add(TaskAllowedAction.WaitStageResult)
+                    } else if (runtimeState.hasPendingTransition) {
+                        add(TaskAllowedAction.RequireUserConfirmation)
+                    } else {
+                        add(TaskAllowedAction.DelegateCurrentStage)
+                    }
+                }
+
+                TaskExpectedAction.UserConfirmation -> add(TaskAllowedAction.RequireUserConfirmation)
+                TaskExpectedAction.OrchestratorDecision -> add(TaskAllowedAction.AnalyzeRejection)
+                TaskExpectedAction.UserPrompt -> add(TaskAllowedAction.AskRejectionClarification)
+                TaskExpectedAction.Completed -> add(TaskAllowedAction.Completed)
+            }
+        }
+        val forbiddenReasons = TaskAllowedAction.entries
+            .filterNot { it in allowed }
+            .associateWith { action -> context.forbiddenReason(action, runtimeState) }
+        return TaskActionAvailability(
+            allowed = allowed,
+            forbiddenReasons = forbiddenReasons,
+        )
+    }
+
     fun start(task: String): TaskContext =
         TaskContext(
             task = task,
@@ -197,6 +276,35 @@ class TaskStateMachine {
         )
     }
 }
+
+private fun TaskContext.forbiddenReason(
+    action: TaskAllowedAction,
+    runtimeState: TaskMachineRuntimeState,
+): String =
+    when (action) {
+        TaskAllowedAction.DiscussOnly -> "Discussion is always allowed."
+        TaskAllowedAction.DelegateCurrentStage -> when {
+            expectedAction == TaskExpectedAction.UserConfirmation ->
+                "Current stage is complete and waiting for explicit user decision: accept or reject."
+            expectedAction == TaskExpectedAction.OrchestratorDecision ->
+                "Rejected stage is waiting for orchestrator rejection analysis, not ordinary delegation."
+            expectedAction == TaskExpectedAction.UserPrompt ->
+                "Rejected stage is waiting for user clarification before the orchestrator can choose a stage."
+            expectedAction == TaskExpectedAction.Completed ->
+                "Task is completed; no further stage delegation is allowed."
+            runtimeState.isCurrentStageLoading ->
+                "Current stage agent is already working; wait for its result."
+            runtimeState.hasPendingTransition ->
+                "A completed stage result is waiting for explicit user decision: accept or reject."
+            else -> "Current FSM state does not allow stage delegation."
+        }
+
+        TaskAllowedAction.WaitStageResult -> "Current stage agent is not running."
+        TaskAllowedAction.RequireUserConfirmation -> "No completed stage is waiting for user confirmation."
+        TaskAllowedAction.AnalyzeRejection -> "No rejected stage is waiting for orchestrator analysis."
+        TaskAllowedAction.AskRejectionClarification -> "No rejected stage is waiting for user clarification."
+        TaskAllowedAction.Completed -> "Task is not completed."
+    }
 
 fun TaskState.next(): TaskState? =
     TaskState.entries.getOrNull(ordinal + 1)

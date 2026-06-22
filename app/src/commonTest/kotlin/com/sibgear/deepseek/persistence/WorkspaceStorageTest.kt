@@ -4,6 +4,7 @@ import com.sibgear.deepseek.chat.domain.model.TaskContext
 import com.sibgear.deepseek.chat.domain.model.TaskExpectedAction
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
 import com.sibgear.deepseek.chat.domain.model.TaskStageRejection
+import com.sibgear.deepseek.chat.domain.model.TaskStageResultStatus
 import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
@@ -62,6 +63,29 @@ class WorkspaceStorageTest {
     }
 
     @Test
+    fun savesAndRestoresTabSystemPrompt() {
+        val baseDir = tempBaseDir()
+        val storage = WorkspaceStorage(baseDir)
+
+        storage.save(
+            tabs = listOf(WorkspaceTabSnapshot(number = 1, systemPrompt = "system")),
+            activeTabNumber = 1,
+            nextTabNumber = 2,
+            selectedStorageType = ChatStorageType.Json,
+        )
+
+        assertEquals(
+            WorkspaceSnapshot(
+                tabs = listOf(WorkspaceTabSnapshot(number = 1, systemPrompt = "system")),
+                activeTabNumber = 1,
+                nextTabNumber = 2,
+                selectedStorageType = ChatStorageType.Json,
+            ),
+            WorkspaceStorage(baseDir).load(),
+        )
+    }
+
+    @Test
     fun legacyWorkspaceWithoutStorageTypeRestoresJsonStorage() {
         val baseDir = tempBaseDir()
         baseDir.mkdirs()
@@ -112,8 +136,8 @@ class WorkspaceStorageTest {
                     startUserPrompt = "planning input",
                     input = "planning input",
                     output = "planning output",
+                    resultStatus = TaskStageResultStatus.Completed,
                     isReached = true,
-                    isReadyForTransition = true,
                 ),
             ),
             pendingTransition = TaskTransitionProposal(

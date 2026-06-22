@@ -97,7 +97,9 @@ class OpenRouterChatRepository(
 
     private suspend fun sendLinearMessage(request: AiRequestData): AgentResponse {
         val preparedMemory = prepareMemory(request)
-        historyInteractor.add(request.toOpenRouterUserHistoryMessage(memory = preparedMemory.metadata))
+        if (request.persistUserMessage) {
+            historyInteractor.add(request.toOpenRouterUserHistoryMessage(memory = preparedMemory.metadata))
+        }
         val startedAt = TimeSource.Monotonic.markNow()
         var retryCount = 0
 
@@ -113,7 +115,7 @@ class OpenRouterChatRepository(
                 ).apiMessages,
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
-                servicePrompt = null,
+                servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
             ) { retryCount = it }
             val messagesWithAssistant = historyInteractor.add(
                 request.toOpenRouterAssistantHistoryMessage(
@@ -124,6 +126,7 @@ class OpenRouterChatRepository(
                 ),
             )
             val updatedStickyFacts = if (!completion.isError &&
+                request.persistUserMessage &&
                 request.contextManagementSettings.mode == ContextManagementMode.StickyFacts
             ) {
                 updateStickyFacts(request, messagesWithAssistant, stickyFacts)
@@ -170,12 +173,14 @@ class OpenRouterChatRepository(
             fallbackActiveBranchId = historyBeforeUser.lastOrNull { it.branchId != null }?.branchId,
         )
         historyInteractor.replaceBranches(branchSelection.branches.toHistoryBranches())
-        historyInteractor.add(
-            request.toOpenRouterUserHistoryMessage(
-                branchId = branchSelection.activeBranchId,
-                memory = preparedMemory.metadata,
-            ),
-        )
+        if (request.persistUserMessage) {
+            historyInteractor.add(
+                request.toOpenRouterUserHistoryMessage(
+                    branchId = branchSelection.activeBranchId,
+                    memory = preparedMemory.metadata,
+                ),
+            )
+        }
 
         return try {
             val historyMessages = historyInteractor.getMessages()
@@ -189,7 +194,7 @@ class OpenRouterChatRepository(
                 ).apiMessages,
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
-                servicePrompt = null,
+                servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
             ) { retryCount = it }
             val messagesWithAssistant = historyInteractor.add(
                 request.toOpenRouterAssistantHistoryMessage(
@@ -555,7 +560,7 @@ class OpenRouterChatRepository(
             emptyList()
         }
 
-        val candidates = runCatching {
+        val candidates = if (request.persistUserMessage) runCatching {
             val classificationRequest = contextPlanner.memoryClassificationRequest(request.prompt)
             sendCompletionWithRetry(
                 request = request,
@@ -572,6 +577,8 @@ class OpenRouterChatRepository(
                 throw exception
             }
             errors += formatMemoryError(exception)
+            emptyList()
+        } else {
             emptyList()
         }
 

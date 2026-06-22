@@ -29,6 +29,7 @@ data class AiChatAppViewState(
     val isStorageSwitchEnabled: Boolean
         get() = tabs.none { tab ->
             tab.viewModel.state.isLoading ||
+                tab.taskSession?.isOrchestratorFsmFlowRunning == true ||
                 tab.taskSession?.stageAgents.orEmpty().any { it.viewModel.state.isLoading }
         }
 

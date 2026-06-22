@@ -86,7 +86,9 @@ class DeepSeekChatRepository(
 
     private suspend fun sendLinearMessage(request: AiRequestData): AgentResponse {
         val preparedMemory = prepareMemory(request)
-        historyInteractor.add(request.toDeepSeekUserHistoryMessage(memory = preparedMemory.metadata))
+        if (request.persistUserMessage) {
+            historyInteractor.add(request.toDeepSeekUserHistoryMessage(memory = preparedMemory.metadata))
+        }
         val startedAt = TimeSource.Monotonic.markNow()
 
         return try {
@@ -101,6 +103,7 @@ class DeepSeekChatRepository(
                 ).apiMessages,
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
+                servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
             )
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
@@ -110,6 +113,7 @@ class DeepSeekChatRepository(
                 )
             )
             val updatedStickyFacts = if (!completion.isError &&
+                request.persistUserMessage &&
                 request.contextManagementSettings.mode == ContextManagementMode.StickyFacts
             ) {
                 updateStickyFacts(request, messagesWithAssistant, stickyFacts)
@@ -155,12 +159,14 @@ class DeepSeekChatRepository(
             fallbackActiveBranchId = historyBeforeUser.lastOrNull { it.branchId != null }?.branchId,
         )
         historyInteractor.replaceBranches(branchSelection.branches.toHistoryBranches())
-        historyInteractor.add(
-            request.toDeepSeekUserHistoryMessage(
-                branchId = branchSelection.activeBranchId,
-                memory = preparedMemory.metadata,
-            ),
-        )
+        if (request.persistUserMessage) {
+            historyInteractor.add(
+                request.toDeepSeekUserHistoryMessage(
+                    branchId = branchSelection.activeBranchId,
+                    memory = preparedMemory.metadata,
+                ),
+            )
+        }
 
         return try {
             val historyMessages = historyInteractor.getMessages()
@@ -174,6 +180,7 @@ class DeepSeekChatRepository(
                 ).apiMessages,
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
+                servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
             )
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
@@ -468,7 +475,7 @@ class DeepSeekChatRepository(
             emptyList()
         }
 
-        val candidates = runCatching {
+        val candidates = if (request.persistUserMessage) runCatching {
             val classificationRequest = contextPlanner.memoryClassificationRequest(request.prompt)
             sendCompletion(
                 request = request,
@@ -484,6 +491,8 @@ class DeepSeekChatRepository(
                 throw exception
             }
             errors += formatMemoryError(exception)
+            emptyList()
+        } else {
             emptyList()
         }
 

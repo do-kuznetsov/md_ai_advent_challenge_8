@@ -162,12 +162,14 @@ fun App() {
             tabNumber: Int,
             storageType: ChatStorageType,
             initialMessages: List<HistoryMessage>,
+            initialSystemPrompt: String = "",
             taskSession: TaskSessionSnapshot? = null,
         ): ChatTab {
             val chatViewModel = createChatViewModel(
                 tabNumber = tabNumber,
                 storageType = storageType,
                 initialMessages = initialMessages,
+                initialSystemPrompt = initialSystemPrompt,
             )
             chatViewModel.loadModels()
             return ChatTab(
@@ -204,11 +206,12 @@ fun App() {
 
         AiChatAppViewModel(
             coroutineScope = scope,
-            createChatViewModel = { tabNumber, storageType ->
+            createChatViewModel = { tabNumber, storageType, systemPrompt ->
                 createChatViewModel(
                     tabNumber = tabNumber,
                     storageType = storageType,
                     initialMessages = initialHistoryByTab[tabNumber],
+                    initialSystemPrompt = systemPrompt,
                 )
             },
             createTaskStageChatViewModel = { chatId, storageType, systemPrompt, initialPrompt ->
@@ -251,6 +254,9 @@ fun App() {
                 val taskSnapshotsByTab = currentTabs.mapNotNull { tab ->
                     tab.taskSession?.toSnapshot()?.let { snapshot -> tab.number to snapshot }
                 }.toMap()
+                val systemPromptsByTab = currentTabs.associate { tab ->
+                    tab.number to tab.viewModel.state.systemPrompt
+                }
 
                 val currentNumbers = currentTabs.map { it.number }
                 val mergedNumbers = mergeTabNumbers(
@@ -265,6 +271,7 @@ fun App() {
                         tabNumber = tabNumber,
                         storageType = storageType,
                         initialMessages = messages,
+                        initialSystemPrompt = systemPromptsByTab[tabNumber].orEmpty(),
                         taskSession = taskSnapshotsByTab[tabNumber],
                     )
                 }
@@ -286,13 +293,22 @@ fun App() {
             initialTaskSessionsByTab = initialWorkspace.tabs.mapNotNull { tab ->
                 tab.taskSession?.let { taskSession -> tab.number to taskSession }
             }.toMap(),
+            initialSystemPromptsByTab = initialWorkspace.tabs.associate { tab ->
+                tab.number to tab.systemPrompt
+            },
             initialActiveTabNumber = initialWorkspace.activeTabNumber,
             initialNextTabNumber = initialWorkspace.nextTabNumber,
             initialStorageType = initialStorageType,
             storageDirectoryLabel = workspaceStorage.storageDirectoryLabel(),
             onWorkspaceChanged = { tabs, activeTabNumber, nextTabNumber, storageType ->
                 workspaceStorage.save(
-                    tabs = tabs.map { WorkspaceTabSnapshot(number = it.number, taskSession = it.taskSession) },
+                    tabs = tabs.map {
+                        WorkspaceTabSnapshot(
+                            number = it.number,
+                            systemPrompt = it.systemPrompt,
+                            taskSession = it.taskSession,
+                        )
+                    },
                     activeTabNumber = activeTabNumber,
                     nextTabNumber = nextTabNumber,
                     selectedStorageType = storageType,
