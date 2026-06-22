@@ -20,9 +20,15 @@ class OloloMcpServerTest {
     @Test
     fun listsAndCallsOloloTool() = runBlocking {
         val port = 31337
+        val logs = mutableListOf<String>()
         val engine = embeddedServer(ServerCIO, host = "127.0.0.1", port = port) {
             mcpStreamableHttp(path = "/mcp") {
-                createOloloServer()
+                logMcpConnectionRequest(
+                    context = this,
+                    log = logs::add,
+                    timestampProvider = { "2026-06-22T00:00:00Z" },
+                )
+                createOloloServer(logs::add)
             }
         }.start(wait = false)
 
@@ -51,6 +57,20 @@ class OloloMcpServerTest {
                 val result = client.callTool(name = "ololo", arguments = emptyMap())
                 val textContent = assertIs<TextContent>(result.content.single())
                 assertEquals("Hello OLOLO user!", textContent.text)
+
+                assertEquals(
+                    true,
+                    logs.any {
+                        it.contains("MCP client connection request:") &&
+                            it.contains("timestamp=2026-06-22T00:00:00Z") &&
+                            it.contains("method=POST") &&
+                            it.contains("path=/mcp")
+                    },
+                )
+                assertEquals(
+                    true,
+                    logs.any { it.startsWith("MCP client connected: activeSessions=") },
+                )
             }
         } finally {
             engine.stop()
