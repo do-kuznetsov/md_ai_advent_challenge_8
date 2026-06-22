@@ -181,6 +181,58 @@ class AiChatAppViewModelTaskModeTest {
     }
 
     @Test
+    fun missingStageResultProtocolTriggersSyntheticRepairPrompt() = runTest {
+        var sawRepairPrompt = false
+        val viewModel = createViewModel(this) { request ->
+            when {
+                request.systemPrompt.contains("Stage result protocol") &&
+                    request.prompt.contains("internal protocol repair request") -> {
+                    sawRepairPrompt = true
+                    completedStageResult("repaired planning output")
+                }
+
+                request.systemPrompt.contains("Stage result protocol") -> "Plain planning output without protocol block."
+                else -> "result: ${request.prompt.take(80)}"
+            }
+        }
+
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        val taskSession = assertNotNull(viewModel.state.activeTab?.taskSession)
+        val planningAgent = taskSession.stageAgents.first { it.session.state == TaskState.Planning }
+        assertEquals(true, sawRepairPrompt)
+        assertEquals(TaskStageResultStatus.Completed, planningAgent.session.resultStatus)
+        assertEquals("repaired planning output", planningAgent.session.output)
+        assertEquals(true, planningAgent.session.isReadyForTransition)
+    }
+
+    @Test
+    fun invalidStageResultProtocolAfterRepairBecomesBlockedResult() = runTest {
+        val viewModel = createViewModel(this) { request ->
+            if (request.systemPrompt.contains("Stage result protocol")) {
+                "Still no valid protocol block."
+            } else {
+                "result: ${request.prompt.take(80)}"
+            }
+        }
+
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        val taskSession = assertNotNull(viewModel.state.activeTab?.taskSession)
+        val planningAgent = taskSession.stageAgents.first { it.session.state == TaskState.Planning }
+        assertEquals(TaskStageResultStatus.Blocked, planningAgent.session.resultStatus)
+        assertTrue(planningAgent.session.output.orEmpty().contains("did not return a valid [TASK_STAGE_RESULT] block"))
+        assertTrue(planningAgent.session.resultReason.contains("required stage result protocol"))
+        assertEquals(true, planningAgent.session.isReadyForTransition)
+    }
+
+    @Test
     fun blockedStageResultAcceptedGoesToOrchestratorAnalysisWithoutForwardTransition() = runTest {
         var rejectionAnalysisPrompt = ""
         val viewModel = createViewModel(this) { request ->
@@ -239,6 +291,34 @@ class AiChatAppViewModelTaskModeTest {
     }
 
     @Test
+    fun executionStagePromptRequiresActingWithinAcceptedPlanWithoutPreferenceQuestions() = runTest {
+        val executionSystemPrompts = mutableListOf<String>()
+        val viewModel = createViewModel(this) { request ->
+            if (request.systemPrompt.contains("isolated execution agent")) {
+                executionSystemPrompts += request.systemPrompt
+            }
+            if (request.systemPrompt.contains("Stage result protocol")) {
+                completedStageResult("result: ${request.prompt.take(80)}")
+            } else {
+                "result: ${request.prompt.take(80)}"
+            }
+        }
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement CLI Hello world")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        viewModel.onEvent(AiChatAppEvent.TaskTransitionAccepted)
+        advanceUntilIdle()
+
+        val executionPrompt = assertNotNull(executionSystemPrompts.firstOrNull())
+        assertTrue(executionPrompt.contains("Do not ask the user to choose how to implement the accepted plan"))
+        assertTrue(executionPrompt.contains("Resolve implementation choices yourself within the plan"))
+        assertTrue(executionPrompt.contains("Use needs_user_input only for hard blockers"))
+        assertTrue(executionPrompt.contains("Do not change, cancel, replace, reorder, skip, or apply Task State Machine stages or transitions"))
+    }
+
+    @Test
     fun orchestratorPromptAfterStartStaysInOrchestratorChat() = runTest {
         val viewModel = createViewModel(this)
         viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
@@ -279,6 +359,42 @@ class AiChatAppViewModelTaskModeTest {
     }
 
     @Test
+    fun everyStageAgentPromptContainsStageBoundaryRules() = runTest {
+        val stageSystemPrompts = mutableMapOf<TaskState, String>()
+        val viewModel = createViewModel(this) { request ->
+            TaskState.entries.firstOrNull { stage ->
+                request.systemPrompt.contains("assigned only to the ${stage.title} stage")
+            }?.let { stage ->
+                stageSystemPrompts[stage] = request.systemPrompt
+            }
+            if (request.systemPrompt.contains("Stage result protocol")) {
+                completedStageResult("result: ${request.prompt.take(80)}")
+            } else {
+                "result: ${request.prompt.take(80)}"
+            }
+        }
+        viewModel.onEvent(AiChatAppEvent.TaskModeToggled)
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.PromptChanged("Implement FSM")))
+        viewModel.onEvent(AiChatAppEvent.ActiveChatEvent(ChatEvent.SendClicked))
+        advanceUntilIdle()
+
+        repeat(TaskState.entries.size - 1) {
+            viewModel.onEvent(AiChatAppEvent.TaskTransitionAccepted)
+            advanceUntilIdle()
+        }
+
+        TaskState.entries.forEach { stage ->
+            val prompt = assertNotNull(stageSystemPrompts[stage])
+            assertTrue(prompt.contains("Stage boundary rules:"))
+            assertTrue(prompt.contains("Stay strictly within this stage"))
+            assertTrue(prompt.contains("Do not perform deliverables for previous, next, or future stages"))
+            assertTrue(prompt.contains("controlled only by the orchestrator and code-owned FSM"))
+            assertTrue(prompt.contains("[TASK_STAGE_RESULT]"))
+            assertTrue(!prompt.contains("[TASK_ORCHESTRATOR_COMMAND]"))
+        }
+    }
+
+    @Test
     fun orchestratorPromptInTaskModeReceivesRuntimeBriefing() = runTest {
         val requestSystemPrompts = mutableListOf<String>()
         val viewModel = createViewModel(this) { request ->
@@ -302,6 +418,8 @@ class AiChatAppViewModelTaskModeTest {
                     it.contains("Structured command protocol:") &&
                     it.contains("delegate_current_stage") &&
                     it.contains("Never perform the deliverable") &&
+                    it.contains("Do not draft plans, implementation steps, code, validation reports, or final reports yourself") &&
+                    it.contains("return delegate_current_stage instead of doing that work") &&
                     it.contains("Do not say that you accepted, rejected, returned, moved")
             },
         )
@@ -331,7 +449,9 @@ class AiChatAppViewModelTaskModeTest {
                 request.systemPrompt.contains("isolated planning agent") &&
                     request.prompt.contains("Delegated planning input") -> completedStageResult("delegated planning output")
 
-                request.systemPrompt.contains("isolated planning agent") -> "Still gathering planning context."
+                request.systemPrompt.contains("isolated planning agent") -> inProgressStageResult(
+                    reason = "Still gathering planning context.",
+                )
                 else -> "result: ${request.prompt.take(80)}"
             }
         }
@@ -937,6 +1057,16 @@ private fun completedStageResult(output: String): String =
     output: $output
     question:
     reason:
+    [/TASK_STAGE_RESULT]
+    """.trimIndent()
+
+private fun inProgressStageResult(reason: String): String =
+    """
+    [TASK_STAGE_RESULT]
+    status: in_progress
+    output:
+    question:
+    reason: $reason
     [/TASK_STAGE_RESULT]
     """.trimIndent()
 

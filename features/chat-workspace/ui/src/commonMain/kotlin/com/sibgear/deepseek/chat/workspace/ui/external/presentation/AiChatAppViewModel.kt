@@ -1411,12 +1411,28 @@ class AiChatAppViewModel(
         tabNumber: Int,
         stage: TaskState,
         assistantOutput: String,
+        repairAttempt: Int = 0,
         onCompleted: (() -> Unit)? = null,
     ) {
         val tab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
         val taskSession = tab.taskSession ?: return
         val context = taskSession.context ?: return
-        val result = parseTaskStageResult(assistantOutput)
+        val parsed = parseTaskStageResultDetailed(assistantOutput)
+        if (!parsed.isValidProtocolBlock && repairAttempt < MaxTaskStageResultProtocolRepairAttempts) {
+            sendTaskStageResultProtocolRepairPrompt(
+                tabNumber = tabNumber,
+                stage = stage,
+                previousOutput = assistantOutput,
+                repairAttempt = repairAttempt + 1,
+                onCompleted = onCompleted,
+            )
+            return
+        }
+        val result = if (parsed.isValidProtocolBlock) {
+            parsed.result
+        } else {
+            buildInvalidTaskStageResultProtocolResult(assistantOutput)
+        }
         val finalOutput = result.finalOutput()
         val updatedAgents = taskSession.stageAgents.map { agent ->
             if (agent.session.state == stage) {
@@ -1450,6 +1466,30 @@ class AiChatAppViewModel(
             )
         }
         onCompleted?.invoke()
+    }
+
+    private fun sendTaskStageResultProtocolRepairPrompt(
+        tabNumber: Int,
+        stage: TaskState,
+        previousOutput: String,
+        repairAttempt: Int,
+        onCompleted: (() -> Unit)?,
+    ) {
+        val activeTab = state.tabs.firstOrNull { it.number == tabNumber } ?: return
+        val taskSession = activeTab.taskSession ?: return
+        val agent = taskSession.stageAgents.firstOrNull { it.session.state == stage } ?: return
+        agent.viewModel.syncRequestSettingsFrom(activeTab.viewModel.state)
+        agent.viewModel.sendSyntheticPrompt(
+            prompt = buildTaskStageResultProtocolRepairPrompt(stage, previousOutput),
+        ) { stageState ->
+            handleTaskStageResponse(
+                tabNumber = tabNumber,
+                stage = stage,
+                assistantOutput = stageState.lastAssistantOutput(),
+                repairAttempt = repairAttempt,
+                onCompleted = onCompleted,
+            )
+        }
     }
 
     private fun appendTaskStateEvent(
@@ -1733,6 +1773,9 @@ private fun buildStageSystemPrompt(stage: TaskState): String =
         TaskState.Execution -> """
             You are the isolated execution agent for a coding assistant task.
             Work only from the accepted planning input. Describe concrete implementation work, decisions, changed behavior, and any blockers.
+            Do not ask the user to choose how to implement the accepted plan. Resolve implementation choices yourself within the plan, project context, and reasonable defaults.
+            If the accepted plan contains alternatives or ambiguity, choose the primary, first, or most plan-consistent option and record that decision in your output.
+            Use needs_user_input only for hard blockers that cannot be resolved from the accepted plan or project context, not for implementation preferences.
             Do not validate the result as final; validation is handled by another stage.
         """.trimIndent()
 
@@ -1747,7 +1790,23 @@ private fun buildStageSystemPrompt(stage: TaskState): String =
             Summarize the accepted plan, execution result, validation result, and final outcome.
             Do not start new work. Produce the final done-stage response.
         """.trimIndent()
-    }.withStageResultProtocol()
+    }
+        .withStageBoundaryRules(stage)
+        .withStageResultProtocol()
+
+private fun String.withStageBoundaryRules(stage: TaskState): String =
+    buildString {
+        appendLine(this@withStageBoundaryRules)
+        appendLine()
+        appendLine("Stage boundary rules:")
+        appendLine("You are assigned only to the ${stage.title} stage. Stay strictly within this stage.")
+        appendLine("Do not perform deliverables for previous, next, or future stages.")
+        appendLine("Do not change, cancel, replace, reorder, skip, or apply Task State Machine stages or transitions.")
+        appendLine("Do not claim that you moved, returned, skipped, cancelled, replaced, or changed the FSM state.")
+        appendLine("If the user asks to change the lifecycle, explain that stage ordering and transitions are controlled only by the orchestrator and code-owned FSM.")
+        appendLine("Your only way to report stage progress is the ${TaskStageResultStart} block below.")
+        appendLine("If a lifecycle request makes this stage impossible to continue, report blocked for this stage instead of changing the lifecycle yourself.")
+    }.trimEnd()
 
 private fun String.withStageResultProtocol(): String =
     buildString {
@@ -1882,6 +1941,27 @@ private fun buildRejectedStageAdditionalInput(
         appendLine(rejection.rejectedOutput)
     }
 
+private fun buildTaskStageResultProtocolRepairPrompt(
+    stage: TaskState,
+    previousOutput: String,
+): String =
+    buildString {
+        appendLine("This is an internal protocol repair request from the application, not a user message.")
+        appendLine("Your previous ${stage.title} stage response did not include a valid ${TaskStageResultStart} block.")
+        appendLine("Do not do new work and do not ask new questions unless the previous response already required it.")
+        appendLine("Classify your previous response strictly within the ${stage.title} stage and return exactly one valid block.")
+        appendLine()
+        appendLine(TaskStageResultStart)
+        appendLine("status: in_progress|needs_user_input|completed|blocked")
+        appendLine("output: final result only for completed/blocked")
+        appendLine("question: user question only for needs_user_input")
+        appendLine("reason: short reason or blocker")
+        appendLine(TaskStageResultEnd)
+        appendLine()
+        appendLine("Previous response:")
+        append(previousOutput.excerpt(2000))
+    }
+
 private fun buildTaskOrchestratorRuntimePrompt(
     taskSession: TaskModeSession,
     allowCommands: Boolean = true,
@@ -1974,6 +2054,9 @@ private fun buildTaskOrchestratorRuntimePrompt(
         appendLine("- If you want the code to perform an FSM action, say that you are requesting the code action and return the structured command.")
         appendLine("- Ordinary questions, facts, explanations, and discussion must be discuss_only and must not change the FSM.")
         appendLine("- Never perform the deliverable of the current or future stage yourself; delegate stage work with a structured command.")
+        appendLine("- Do not draft plans, implementation steps, code, validation reports, or final reports yourself while FSM mode is active.")
+        appendLine("- If the user asks to create, modify, refine, execute, validate, or finalize current-stage work and DelegateCurrentStage is allowed, return delegate_current_stage instead of doing that work.")
+        appendLine("- Use discuss_only only for meta questions, status explanations, and clarifications that do not produce or modify a stage artifact.")
         appendLine("- Delegation is valid only for the current FSM stage and only when DelegateCurrentStage is allowed above.")
         appendLine("- Current stage output is not available to you until the user explicitly clicks accept or reject.")
         appendLine("- Forward movement is allowed only after the user accepts the current stage result.")
@@ -2274,34 +2357,73 @@ private val TaskOrchestratorCommand.reason: String
         is TaskOrchestratorCommand.AskUser -> reason
     }
 
+private data class ParsedTaskStageResult(
+    val result: TaskStageResult,
+    val isValidProtocolBlock: Boolean,
+)
+
 private fun parseTaskStageResult(output: String): TaskStageResult {
+    return parseTaskStageResultDetailed(output).result
+}
+
+private fun parseTaskStageResultDetailed(output: String): ParsedTaskStageResult {
     val block = output
         .substringAfter(TaskStageResultStart, missingDelimiterValue = "")
         .substringBefore(TaskStageResultEnd, missingDelimiterValue = "")
         .takeIf { it.isNotBlank() }
-        ?: return TaskStageResult(status = TaskStageResultStatus.InProgress)
+        ?: return ParsedTaskStageResult(
+            result = TaskStageResult(status = TaskStageResultStatus.InProgress),
+            isValidProtocolBlock = false,
+        )
     val fields = block.toStructuredFields(StageResultFieldNames)
     val status = fields["status"]?.trim()?.lowercase()
         ?.toTaskStageResultStatusOrNull()
-        ?: return TaskStageResult(status = TaskStageResultStatus.InProgress)
+        ?: return ParsedTaskStageResult(
+            result = TaskStageResult(status = TaskStageResultStatus.InProgress),
+            isValidProtocolBlock = false,
+        )
     val result = TaskStageResult(
         status = status,
         output = fields["output"].orEmpty().trim(),
         question = fields["question"].orEmpty().trim(),
         reason = fields["reason"].orEmpty().trim(),
     )
-    return when (status) {
+    val validatedResult = when (status) {
         TaskStageResultStatus.Completed ->
             result.takeIf { it.output.isNotBlank() }
-                ?: TaskStageResult(status = TaskStageResultStatus.InProgress)
+                ?: return ParsedTaskStageResult(
+                    result = TaskStageResult(status = TaskStageResultStatus.InProgress),
+                    isValidProtocolBlock = false,
+                )
         TaskStageResultStatus.Blocked ->
             result.copy(output = result.output.ifBlank { result.reason })
                 .takeIf { it.output.isNotBlank() }
-                ?: TaskStageResult(status = TaskStageResultStatus.InProgress)
+                ?: return ParsedTaskStageResult(
+                    result = TaskStageResult(status = TaskStageResultStatus.InProgress),
+                    isValidProtocolBlock = false,
+                )
         TaskStageResultStatus.NeedsUserInput,
         TaskStageResultStatus.InProgress -> result
     }
+    return ParsedTaskStageResult(
+        result = validatedResult,
+        isValidProtocolBlock = true,
+    )
 }
+
+private fun buildInvalidTaskStageResultProtocolResult(previousOutput: String): TaskStageResult =
+    TaskStageResult(
+        status = TaskStageResultStatus.Blocked,
+        output = buildString {
+            appendLine("Stage agent did not return a valid ${TaskStageResultStart} block after protocol repair.")
+            previousOutput.takeIf { it.isNotBlank() }?.let { output ->
+                appendLine()
+                appendLine("Last stage response:")
+                append(output.excerpt(2000))
+            }
+        }.trimEnd(),
+        reason = "Stage agent did not follow the required stage result protocol.",
+    )
 
 private fun TaskStageResult.finalOutput(): String? =
     when (status) {
@@ -2495,6 +2617,7 @@ private const val TaskStageChatIdMultiplier = 10
 private const val MaxExtractedPlanItems = 12
 private const val MaxFallbackPlanChars = 600
 private const val MaxRuntimeBriefingExcerptChars = 800
+private const val MaxTaskStageResultProtocolRepairAttempts = 1
 private const val TaskStageResultStart = "[TASK_STAGE_RESULT]"
 private const val TaskStageResultEnd = "[/TASK_STAGE_RESULT]"
 private const val TaskOrchestratorCommandStart = "[TASK_ORCHESTRATOR_COMMAND]"
