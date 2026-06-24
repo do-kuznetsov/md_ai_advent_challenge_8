@@ -6,6 +6,8 @@ import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.mcpStreamableHttp
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotification
+import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotificationParams
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import java.io.File
 
@@ -17,11 +19,16 @@ private const val McpPath = "/mcp"
 fun main(args: Array<String>) {
     val log: (String) -> Unit = ::println
     val port = args.firstOrNull()?.toIntOrNull() ?: DefaultPort
+    val databaseFile = args.getOrNull(1)?.takeIf { it != ":memory:" }?.let(::File)
+        ?: defaultDatabaseFile()
     val database = args.getOrNull(1)?.let(::visitorLogRepositoryFromArgument)
-        ?: JdbcVisitorLogRepository.file(defaultDatabaseFile())
+        ?: JdbcVisitorLogRepository.file(databaseFile)
+    val visitReportRepository = args.getOrNull(1)?.let(::visitReportRepositoryFromArgument)
+        ?: JdbcVisitReportRepository.file(databaseFile)
     val weatherClient = OpenMeteoWeatherClient()
     val server = createVisitorLogServer(
         visitorLogRepository = database,
+        visitReportRepository = visitReportRepository,
         weatherClient = weatherClient,
         log = log,
     )
@@ -38,11 +45,16 @@ fun main(args: Array<String>) {
 
 internal fun createVisitorLogServer(
     visitorLogRepository: VisitorLogRepository = JdbcVisitorLogRepository.file(defaultDatabaseFile()),
+    visitReportRepository: VisitReportRepository = JdbcVisitReportRepository.file(defaultDatabaseFile()),
     weatherClient: WeatherClient = OpenMeteoWeatherClient(),
+    visitReportSchedulerFactory: (
+        (suspend (sessionId: String, resourceUri: String) -> Unit) -> VisitReportScheduler
+    )? = null,
     log: (String) -> Unit = ::println,
 ): Server {
     val connectionLogger = McpConnectionLogger(log)
-    val server = Server(
+    lateinit var server: Server
+    server = Server(
         serverInfo = Implementation(
             name = "visitor-log-server",
             version = "1.0.0",
@@ -50,9 +62,27 @@ internal fun createVisitorLogServer(
         options = ServerOptions(
             capabilities = ServerCapabilities(
                 tools = ServerCapabilities.Tools(listChanged = false),
+                resources = ServerCapabilities.Resources(
+                    listChanged = false,
+                    subscribe = true,
+                ),
             ),
         ),
     )
+    val notifyResourceUpdated: suspend (String, String) -> Unit = { sessionId, resourceUri ->
+        server.sendResourceUpdated(
+            sessionId = sessionId,
+            notification = ResourceUpdatedNotification(
+                ResourceUpdatedNotificationParams(uri = resourceUri),
+            ),
+        )
+    }
+    val scheduler = visitReportSchedulerFactory?.invoke(notifyResourceUpdated)
+        ?: VisitReportScheduler(
+            visitLogRepository = visitorLogRepository,
+            reportRepository = visitReportRepository,
+            notifyResourceUpdated = notifyResourceUpdated,
+        )
 
     return server.apply {
         onConnect {
@@ -60,11 +90,15 @@ internal fun createVisitorLogServer(
         }
         onClose {
             connectionLogger.onClose()
+            scheduler.close()
         }
         registerVisitorLogTool(
             visitorLogRepository = visitorLogRepository,
             weatherClient = weatherClient,
         )
+        registerScheduleVisitReportTool(scheduler)
+        registerVisitReportResource(visitReportRepository)
+        scheduler.start()
     }
 }
 
@@ -73,6 +107,13 @@ private fun visitorLogRepositoryFromArgument(argument: String): VisitorLogReposi
         JdbcVisitorLogRepository.inMemory()
     } else {
         JdbcVisitorLogRepository.file(File(argument))
+    }
+
+private fun visitReportRepositoryFromArgument(argument: String): VisitReportRepository =
+    if (argument == ":memory:") {
+        JdbcVisitReportRepository.inMemory()
+    } else {
+        JdbcVisitReportRepository.file(File(argument))
     }
 
 internal fun defaultDatabaseFile(): File {

@@ -19,6 +19,7 @@ internal data class VisitorLogEntry(
 
 internal interface VisitorLogRepository {
     fun addAndGetRecent(entry: VisitorLogEntry, limit: Int): List<VisitorLogEntry>
+    fun findBetween(createdAtFromInclusive: String, createdAtToInclusive: String): List<VisitorLogEntry>
 }
 
 internal class JdbcVisitorLogRepository private constructor(
@@ -85,6 +86,31 @@ internal class JdbcVisitorLogRepository private constructor(
                             while (resultSet.next()) {
                                 add(resultSet.toVisitorLogEntry())
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+    override fun findBetween(
+        createdAtFromInclusive: String,
+        createdAtToInclusive: String,
+    ): List<VisitorLogEntry> =
+        synchronized(connection) {
+            connection.prepareStatement(
+                """
+                SELECT user_name, local_time, city, client_name, client_version, created_at
+                FROM visitor_log
+                WHERE created_at >= ? AND created_at <= ?
+                ORDER BY id ASC
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, createdAtFromInclusive)
+                statement.setString(2, createdAtToInclusive)
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(resultSet.toVisitorLogEntry())
                         }
                     }
                 }

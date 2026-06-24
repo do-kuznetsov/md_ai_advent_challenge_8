@@ -9,20 +9,31 @@ import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
 import io.modelcontextprotocol.kotlin.sdk.server.mcpStreamableHttp
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.Method
+import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequestParams
+import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotification
+import io.modelcontextprotocol.kotlin.sdk.types.SubscribeRequest
+import io.modelcontextprotocol.kotlin.sdk.types.SubscribeRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 class VisitorLogMcpServerTest {
 
     @Test
     fun listsAndCallsVisitorLogTool() = runBlocking {
-        withTestMcpClient { client, logs ->
+        withTestMcpClient { client, logs, _, _ ->
             val tools = client.listTools().tools
-            assertEquals(listOf("visitor_log"), tools.map { it.name })
+            assertEquals(listOf("visitor_log", "schedule_visit_report"), tools.map { it.name })
 
             val result = client.callTool(
                 name = "visitor_log",
@@ -56,7 +67,7 @@ class VisitorLogMcpServerTest {
 
     @Test
     fun returnsLatestVisitsNewestFirst() = runBlocking {
-        withTestMcpClient { client, _ ->
+        withTestMcpClient { client, _, _, _ ->
             client.callTool(
                 name = "visitor_log",
                 arguments = mapOf(
@@ -90,7 +101,7 @@ class VisitorLogMcpServerTest {
 
     @Test
     fun limitZeroStoresVisitAndReturnsEmptyText() = runBlocking {
-        withTestMcpClient { client, _ ->
+        withTestMcpClient { client, _, _, _ ->
             val emptyResult = client.callTool(
                 name = "visitor_log",
                 arguments = mapOf(
@@ -126,7 +137,7 @@ class VisitorLogMcpServerTest {
 
     @Test
     fun returnsUnavailableWeatherWhenWeatherClientFails() = runBlocking {
-        withTestMcpClient(weatherResult = WeatherResult.Unavailable) { client, _ ->
+        withTestMcpClient(weatherResult = WeatherResult.Unavailable) { client, _, _, _ ->
             val result = client.callTool(
                 name = "visitor_log",
                 arguments = mapOf(
@@ -147,13 +158,219 @@ class VisitorLogMcpServerTest {
         }
     }
 
+    @Test
+    fun schedulesVisitReportAndReturnsPendingResource() = runBlocking {
+        withTestMcpClient { client, _, _, _ ->
+            val result = client.callTool(
+                name = "schedule_visit_report",
+                arguments = mapOf("minutes" to 1),
+            )
+            val text = assertIs<TextContent>(result.content.single()).text
+            assertTrue(text.contains("Отчет запланирован."))
+            val resourceUri = text.lineWithPrefix("resourceUri:")
+
+            val resourceText = client.readTextResource(resourceUri)
+            assertEquals("Отчет ${resourceUri.substringAfterLast('/')} еще готовится.", resourceText)
+        }
+    }
+
+    @Test
+    fun completedVisitReportContainsVisitsFromScheduledInterval() = runBlocking {
+        withTestMcpClient { client, _, scheduler, _ ->
+            client.callTool(
+                name = "visitor_log",
+                arguments = mapOf(
+                    "userName" to "Before",
+                    "localTime" to "2026-06-24 19:50",
+                    "city" to "Tomsk",
+                    "limit" to 0,
+                ),
+            )
+
+            val scheduleResult = client.callTool(
+                name = "schedule_visit_report",
+                arguments = mapOf("minutes" to 1),
+            )
+            val scheduleText = assertIs<TextContent>(scheduleResult.content.single()).text
+            val reportId = scheduleText.lineWithPrefix("reportId:").toLong()
+            val resourceUri = scheduleText.lineWithPrefix("resourceUri:")
+
+            client.callTool(
+                name = "visitor_log",
+                arguments = mapOf(
+                    "userName" to "During",
+                    "localTime" to "2026-06-24 20:00",
+                    "city" to "Novosibirsk",
+                    "limit" to 0,
+                ),
+            )
+
+            scheduler.runReportNow(reportId)
+
+            assertEquals(
+                listOf(
+                    "За прошедшие 1 минут подключались:",
+                    "During из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-test-client/1.0.0",
+                ),
+                client.readTextResource(resourceUri).lines(),
+            )
+        }
+    }
+
+    @Test
+    fun completedVisitReportShowsEmptyMessageWhenNoVisitsHappened() = runBlocking {
+        withTestMcpClient { client, _, scheduler, _ ->
+            val scheduleResult = client.callTool(
+                name = "schedule_visit_report",
+                arguments = mapOf("minutes" to 1),
+            )
+            val scheduleText = assertIs<TextContent>(scheduleResult.content.single()).text
+            val reportId = scheduleText.lineWithPrefix("reportId:").toLong()
+            val resourceUri = scheduleText.lineWithPrefix("resourceUri:")
+
+            scheduler.runReportNow(reportId)
+
+            assertEquals(
+                listOf(
+                    "За прошедшие 1 минут подключались:",
+                    "Нет посещений.",
+                ),
+                client.readTextResource(resourceUri).lines(),
+            )
+        }
+    }
+
+    @Test
+    fun sendsResourceUpdatedNotificationWhenReportIsReady() = runBlocking {
+        withTestMcpClient(delayProvider = {}) { client, _, _, _ ->
+            val updatedResource = CompletableDeferred<String>()
+            client.setNotificationHandler<ResourceUpdatedNotification>(
+                Method.Defined.NotificationsResourcesUpdated,
+            ) { notification ->
+                updatedResource.complete(notification.params.uri)
+                CompletableDeferred(Unit).apply { complete(Unit) }
+            }
+
+            val scheduleResult = client.callTool(
+                name = "schedule_visit_report",
+                arguments = mapOf("minutes" to 1),
+            )
+            val scheduleText = assertIs<TextContent>(scheduleResult.content.single()).text
+            val resourceUri = scheduleText.lineWithPrefix("resourceUri:")
+            client.subscribeResource(SubscribeRequest(SubscribeRequestParams(resourceUri)))
+
+            assertEquals(resourceUri, withTimeout(5_000) { updatedResource.await() })
+            assertEquals(
+                listOf(
+                    "За прошедшие 1 минут подключались:",
+                    "Нет посещений.",
+                ),
+                client.readTextResource(resourceUri).lines(),
+            )
+        }
+    }
+
+    @Test
+    fun deletedReportResourceReturnsNotFound() = runBlocking {
+        withTestMcpClient { client, _, _, reportRepository ->
+            val report = reportRepository.createPendingReport(
+                requestedAt = "2026-06-24T00:00:00Z",
+                dueAt = "2026-06-24T00:01:00Z",
+                minutes = 1,
+            )
+            reportRepository.completeReport(
+                id = report.id,
+                reportText = "expired",
+                updatedAt = "2026-06-24T00:01:00Z",
+            )
+            reportRepository.deleteExpiredFinishedReports("2026-06-24T01:01:01Z")
+
+            val error = runCatching {
+                client.readTextResource(report.resourceUri)
+            }.exceptionOrNull()
+
+            assertEquals("resource ${report.id} not found", error?.message)
+        }
+    }
+
+    @Test
+    fun completionCleansExpiredFinishedReports() = runBlocking {
+        withTestMcpClient(delayProvider = {}) { client, _, _, reportRepository ->
+            val expiredReport = reportRepository.createPendingReport(
+                requestedAt = "2000-01-01T00:00:00Z",
+                dueAt = "2000-01-01T00:01:00Z",
+                minutes = 1,
+            )
+            reportRepository.completeReport(
+                id = expiredReport.id,
+                reportText = "expired",
+                updatedAt = "2000-01-01T00:01:00Z",
+            )
+
+            client.callTool(
+                name = "schedule_visit_report",
+                arguments = mapOf("minutes" to 1),
+            )
+
+            withTimeout(5_000) {
+                while (reportRepository.findReport(expiredReport.id) != null) {
+                    delay(10)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun schedulerRestoresPendingReportsOnStart() = runBlocking {
+        val visitRepository = JdbcVisitorLogRepository.inMemory()
+        val reportRepository = JdbcVisitReportRepository.inMemory()
+        val pendingReport = reportRepository.createPendingReport(
+            requestedAt = "2000-01-01T00:00:00Z",
+            dueAt = "2000-01-01T00:01:00Z",
+            minutes = 1,
+        )
+        val scheduler = VisitReportScheduler(
+            visitLogRepository = visitRepository,
+            reportRepository = reportRepository,
+            notifyResourceUpdated = { _, _ -> },
+            delayProvider = {},
+        )
+
+        try {
+            scheduler.start()
+            val restoredReport = withTimeout(5_000) {
+                var report = reportRepository.findReport(pendingReport.id)
+                while (report?.status != VisitReportStatus.Completed) {
+                    delay(10)
+                    report = reportRepository.findReport(pendingReport.id)
+                }
+                report
+            }
+            assertEquals(VisitReportStatus.Completed, restoredReport?.status)
+            assertEquals(
+                listOf(
+                    "За прошедшие 1 минут подключались:",
+                    "Нет посещений.",
+                ),
+                restoredReport?.reportText?.lines(),
+            )
+        } finally {
+            scheduler.close()
+            visitRepository.close()
+            reportRepository.close()
+        }
+    }
+
     private suspend fun withTestMcpClient(
         weatherResult: WeatherResult = WeatherResult.Available(18.4),
-        block: suspend (Client, List<String>) -> Unit,
+        delayProvider: suspend (kotlin.time.Duration) -> Unit = { awaitCancellation() },
+        block: suspend (Client, List<String>, VisitReportScheduler, VisitReportRepository) -> Unit,
     ) {
         val port = 31337
         val logs = mutableListOf<String>()
         val repository = JdbcVisitorLogRepository.inMemory()
+        val reportRepository = JdbcVisitReportRepository.inMemory()
+        var scheduler: VisitReportScheduler? = null
         val engine = embeddedServer(ServerCIO, host = "127.0.0.1", port = port) {
             mcpStreamableHttp(path = "/mcp") {
                 logMcpConnectionRequest(
@@ -163,7 +380,18 @@ class VisitorLogMcpServerTest {
                 )
                 createVisitorLogServer(
                     visitorLogRepository = repository,
+                    visitReportRepository = reportRepository,
                     weatherClient = FakeWeatherClient(weatherResult),
+                    visitReportSchedulerFactory = { notify ->
+                        VisitReportScheduler(
+                            visitLogRepository = repository,
+                            reportRepository = reportRepository,
+                            notifyResourceUpdated = notify,
+                            delayProvider = delayProvider,
+                        ).also {
+                            scheduler = it
+                        }
+                    },
                     log = logs::add,
                 )
             }
@@ -187,11 +415,13 @@ class VisitorLogMcpServerTest {
                 )
 
                 client.connect(transport)
-                block(client, logs)
+                block(client, logs, checkNotNull(scheduler), reportRepository)
             }
         } finally {
             engine.stop()
+            scheduler?.close()
             repository.close()
+            reportRepository.close()
         }
     }
 
@@ -201,3 +431,19 @@ class VisitorLogMcpServerTest {
         override suspend fun getTemperature(city: String): WeatherResult = result
     }
 }
+
+private fun String.lineWithPrefix(prefix: String): String =
+    lineSequence()
+        .first { it.startsWith(prefix) }
+        .substringAfter(prefix)
+        .trim()
+
+private suspend fun Client.readTextResource(resourceUri: String): String =
+    readResource(
+        ReadResourceRequest(ReadResourceRequestParams(resourceUri)),
+    ).contents.joinToString("\n") { content ->
+        when (content) {
+            is TextResourceContents -> content.text
+            else -> content.toString()
+        }
+    }

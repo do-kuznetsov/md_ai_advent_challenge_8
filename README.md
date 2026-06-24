@@ -29,3 +29,22 @@ Novosibirsk
 Dmitry из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-cli-client/1.0.0
 Погода в Novosibirsk: 18.4 °C
 ```
+
+Пример ввода для отложенного отчета:
+```text
+schedule_visit_report
+1
+```
+
+Клиент подпишется на resource отчета, дождется MCP `resources/updated`, прочитает готовый отчет и выведет его:
+```text
+Отчет запланирован.
+reportId: 1
+resourceUri: visitor-report://1
+будет готов примерно: 2026-06-24T20:01:00Z
+Ожидание готового отчета...
+За прошедшие 1 минут подключались:
+Dmitry из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-cli-client/1.0.0
+```
+
+Готовые отложенные отчеты хранятся в SQLite 1 час после завершения. После очистки чтение `visitor-report://<id>` вернет ошибку `resource <id> not found`.

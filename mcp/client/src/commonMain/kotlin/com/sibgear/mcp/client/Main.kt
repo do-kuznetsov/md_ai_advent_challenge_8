@@ -7,12 +7,24 @@ import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.Method
+import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequestParams
+import io.modelcontextprotocol.kotlin.sdk.types.ResourceUpdatedNotification
+import io.modelcontextprotocol.kotlin.sdk.types.SubscribeRequest
+import io.modelcontextprotocol.kotlin.sdk.types.SubscribeRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+
+private const val ScheduleVisitReportToolName = "schedule_visit_report"
 
 fun main(args: Array<String>) = runBlocking {
     val url = args.firstOrNull()
@@ -35,6 +47,15 @@ fun main(args: Array<String>) = runBlocking {
             client = httpClient,
             url = url,
         )
+        val resourceUpdated = CompletableDeferred<String>()
+        client.setNotificationHandler<ResourceUpdatedNotification>(
+            Method.Defined.NotificationsResourcesUpdated,
+        ) { notification ->
+            if (!resourceUpdated.isCompleted) {
+                resourceUpdated.complete(notification.params.uri)
+            }
+            CompletableDeferred(Unit).apply { complete(Unit) }
+        }
 
         try {
             client.connect(transport)
@@ -49,6 +70,20 @@ fun main(args: Array<String>) = runBlocking {
             )
 
             printToolResult(result)
+            if (selectedTool.name == ScheduleVisitReportToolName) {
+                val resourceUri = result.textContent()
+                    ?.lineSequence()
+                    ?.firstOrNull { it.startsWith("resourceUri:") }
+                    ?.substringAfter("resourceUri:")
+                    ?.trim()
+                if (resourceUri != null) {
+                    waitAndPrintScheduledReport(
+                        client = client,
+                        resourceUri = resourceUri,
+                        resourceUpdated = resourceUpdated,
+                    )
+                }
+            }
         } catch (error: Throwable) {
             println("Ошибка: ${error.message ?: error::class.simpleName}")
         }
@@ -150,6 +185,39 @@ private fun printUsage() {
     println("Использование:")
     println("./gradlew -q :mcp:client:jvmRun --args='http://127.0.0.1:3000/mcp'")
 }
+
+private suspend fun waitAndPrintScheduledReport(
+    client: Client,
+    resourceUri: String,
+    resourceUpdated: CompletableDeferred<String>,
+) {
+    client.subscribeResource(SubscribeRequest(SubscribeRequestParams(resourceUri)))
+    println("Ожидание готового отчета...")
+
+    while (true) {
+        val updatedUri = withTimeoutOrNull(5_000) {
+            resourceUpdated.await()
+        }
+        if (updatedUri == null || updatedUri == resourceUri) {
+            val text = client.readResource(
+                ReadResourceRequest(ReadResourceRequestParams(resourceUri)),
+            ).contents.joinToString("\n") { content ->
+                when (content) {
+                    is TextResourceContents -> content.text
+                    else -> content.toString()
+                }
+            }
+            if (!text.contains("еще готовится")) {
+                println(text)
+                return
+            }
+        }
+        delay(5_000)
+    }
+}
+
+private fun CallToolResult.textContent(): String? =
+    content.filterIsInstance<TextContent>().firstOrNull()?.text
 
 private fun JsonObject.stringValue(key: String): String? =
     get(key)?.jsonPrimitive?.contentOrNull
