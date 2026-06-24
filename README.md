@@ -8,9 +8,23 @@
 ./gradlew :mcp:server:jvmRun
 ```
 
-В другом терминале запустить CLI MCP-клиент:
+В другом терминале запустить CLI MCP-клиент, передав URL сервера:
 ```bash
-./gradlew :mcp:client:jvmRun
+./gradlew -q :mcp:client:jvmRun --args='http://127.0.0.1:3000/mcp'
 ```
 
-По умолчанию сервер слушает `http://127.0.0.1:3000/mcp`, клиент подключается туда же и выводит список доступных tools. В выводе клиента должен появиться `visitor_log`.
+Клиент выведет список доступных tools, попросит ввести название tool, затем последовательно запросит аргументы по схеме выбранного tool.
+
+Пример ввода для `visitor_log`:
+```text
+visitor_log
+Dmitry
+2026-06-24 20:00
+Novosibirsk
+5
+```
+
+Пример ответа:
+```text
+Dmitry из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-cli-client/1.0.0
+```
