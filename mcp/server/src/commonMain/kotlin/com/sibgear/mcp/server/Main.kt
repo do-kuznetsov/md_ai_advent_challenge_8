@@ -1,36 +1,32 @@
 package com.sibgear.mcp.server
 
-import io.ktor.http.HttpHeaders
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.plugins.origin
-import io.ktor.server.request.header
-import io.ktor.server.request.httpMethod
-import io.ktor.server.request.path
-import io.ktor.server.routing.RoutingContext
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.mcpStreamableHttp
-import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
-import io.modelcontextprotocol.kotlin.sdk.types.TextContent
-import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
-import kotlinx.serialization.json.buildJsonObject
-import kotlin.time.Clock
-import kotlin.time.ExperimentalTime
+import java.io.File
 
 private const val DefaultHost = "127.0.0.1"
 private const val DefaultPort = 3000
+private const val DefaultDatabaseName = "visitor-log.db"
 private const val McpPath = "/mcp"
-private const val McpSessionIdHeader = "Mcp-Session-Id"
 
 fun main(args: Array<String>) {
     val log: (String) -> Unit = ::println
     val port = args.firstOrNull()?.toIntOrNull() ?: DefaultPort
-    val server = createOloloServer(log)
+    val database = args.getOrNull(1)?.let(::visitorLogRepositoryFromArgument)
+        ?: JdbcVisitorLogRepository.file(defaultDatabaseFile())
+    val weatherClient = OpenMeteoWeatherClient()
+    val server = createVisitorLogServer(
+        visitorLogRepository = database,
+        weatherClient = weatherClient,
+        log = log,
+    )
 
-    log("Starting OLOLO MCP server at http://$DefaultHost:$port$McpPath")
+    log("Starting Visitor Log MCP server at http://$DefaultHost:$port$McpPath")
 
     embeddedServer(CIO, host = DefaultHost, port = port) {
         mcpStreamableHttp(path = McpPath) {
@@ -40,12 +36,15 @@ fun main(args: Array<String>) {
     }.start(wait = true)
 }
 
-internal fun createOloloServer(log: (String) -> Unit = ::println): Server {
+internal fun createVisitorLogServer(
+    visitorLogRepository: VisitorLogRepository = JdbcVisitorLogRepository.file(defaultDatabaseFile()),
+    weatherClient: WeatherClient = OpenMeteoWeatherClient(),
+    log: (String) -> Unit = ::println,
+): Server {
     val connectionLogger = McpConnectionLogger(log)
-
-    return Server(
+    val server = Server(
         serverInfo = Implementation(
-            name = "ololo-server",
+            name = "visitor-log-server",
             version = "1.0.0",
         ),
         options = ServerOptions(
@@ -53,68 +52,33 @@ internal fun createOloloServer(log: (String) -> Unit = ::println): Server {
                 tools = ServerCapabilities.Tools(listChanged = false),
             ),
         ),
-    ).apply {
+    )
+
+    return server.apply {
         onConnect {
             connectionLogger.onConnect()
         }
         onClose {
             connectionLogger.onClose()
         }
-        addTool(
-            name = "ololo",
-            description = "Returns a friendly OLOLO greeting.",
-            inputSchema = ToolSchema(
-                properties = buildJsonObject { },
-                required = emptyList(),
-            ),
-        ) {
-            CallToolResult(
-                content = listOf(TextContent(text = "Hello OLOLO user!")),
-            )
-        }
+        registerVisitorLogTool(
+            visitorLogRepository = visitorLogRepository,
+            weatherClient = weatherClient,
+        )
     }
 }
 
-private class McpConnectionLogger(
-    private val log: (String) -> Unit,
-) {
-    private var isConnected = false
-
-    fun onConnect() {
-        if (isConnected) return
-
-        isConnected = true
-        log("MCP client connected: activeSessions=1")
+private fun visitorLogRepositoryFromArgument(argument: String): VisitorLogRepository =
+    if (argument == ":memory:") {
+        JdbcVisitorLogRepository.inMemory()
+    } else {
+        JdbcVisitorLogRepository.file(File(argument))
     }
 
-    fun onClose() {
-        if (!isConnected) return
-
-        isConnected = false
-        log("MCP client disconnected: activeSessions=0")
-    }
-}
-
-internal fun logMcpConnectionRequest(
-    context: RoutingContext,
-    log: (String) -> Unit = ::println,
-    timestampProvider: () -> String = ::currentTimestamp,
-) {
-    val request = context.call.request
-    val remoteHost = request.origin.remoteHost
-    val userAgent = request.header(HttpHeaders.UserAgent) ?: "unknown"
-    val mcpSessionId = request.header(McpSessionIdHeader) ?: "none"
-
-    log(
-        "MCP client connection request: " +
-            "timestamp=${timestampProvider()} " +
-            "remote=$remoteHost " +
-            "method=${request.httpMethod.value} " +
-            "path=${request.path()} " +
-            "userAgent=$userAgent " +
-            "mcpSessionId=$mcpSessionId",
+internal fun defaultDatabaseFile(): File {
+    val location = File(
+        VisitorLogRepository::class.java.protectionDomain.codeSource.location.toURI(),
     )
+    val directory = if (location.isFile) location.parentFile else location
+    return File(directory, DefaultDatabaseName)
 }
-
-@OptIn(ExperimentalTime::class)
-private fun currentTimestamp(): String = Clock.System.now().toString()

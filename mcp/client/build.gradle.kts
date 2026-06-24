@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+import org.gradle.api.tasks.JavaExec
+
 group = "com.sibgear.mcp.client"
 
 kotlin {
@@ -18,10 +20,16 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.ktor.client.cio)
             implementation(libs.mcp.kotlin.client)
+            runtimeOnly(libs.slf4j.nop)
         }
 
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
     }
+}
+
+tasks.withType<JavaExec>().configureEach {
+    standardInput = System.`in`
+    jvmArgs("-Dkotlin-logging.logStartupMessage=false")
 }
