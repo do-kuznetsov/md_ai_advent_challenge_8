@@ -13,7 +13,7 @@ private const val DefaultMcpUrl = "http://127.0.0.1:3000/mcp"
 fun main(args: Array<String>) = runBlocking {
     val url = args.firstOrNull() ?: DefaultMcpUrl
 
-    println("Starting OLOLO MCP client")
+    println("Starting Visitor Log MCP client")
     println("Target MCP URL: $url")
 
     HttpClient(CIO) {
@@ -22,7 +22,7 @@ fun main(args: Array<String>) = runBlocking {
         println("Initializing MCP client")
         val client = Client(
             clientInfo = Implementation(
-                name = "ololo-cli-client",
+                name = "visitor-log-cli-client",
                 version = "1.0.0",
             ),
         )

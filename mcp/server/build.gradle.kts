@@ -18,6 +18,7 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.ktor.server.cio)
             implementation(libs.mcp.kotlin.server)
+            implementation(libs.sqldelight.sqlite.driver)
         }
 
         commonTest.dependencies {
