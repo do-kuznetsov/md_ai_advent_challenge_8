@@ -19,7 +19,12 @@ fun main(args: Array<String>) {
     val port = args.firstOrNull()?.toIntOrNull() ?: DefaultPort
     val database = args.getOrNull(1)?.let(::visitorLogRepositoryFromArgument)
         ?: JdbcVisitorLogRepository.file(defaultDatabaseFile())
-    val server = createVisitorLogServer(database, log)
+    val weatherClient = OpenMeteoWeatherClient()
+    val server = createVisitorLogServer(
+        visitorLogRepository = database,
+        weatherClient = weatherClient,
+        log = log,
+    )
 
     log("Starting Visitor Log MCP server at http://$DefaultHost:$port$McpPath")
 
@@ -33,6 +38,7 @@ fun main(args: Array<String>) {
 
 internal fun createVisitorLogServer(
     visitorLogRepository: VisitorLogRepository = JdbcVisitorLogRepository.file(defaultDatabaseFile()),
+    weatherClient: WeatherClient = OpenMeteoWeatherClient(),
     log: (String) -> Unit = ::println,
 ): Server {
     val connectionLogger = McpConnectionLogger(log)
@@ -55,7 +61,10 @@ internal fun createVisitorLogServer(
         onClose {
             connectionLogger.onClose()
         }
-        registerVisitorLogTool(visitorLogRepository)
+        registerVisitorLogTool(
+            visitorLogRepository = visitorLogRepository,
+            weatherClient = weatherClient,
+        )
     }
 }
 

@@ -22,7 +22,10 @@ internal data class VisitorLogInput(
     val limit: Int,
 )
 
-internal fun Server.registerVisitorLogTool(visitorLogRepository: VisitorLogRepository) {
+internal fun Server.registerVisitorLogTool(
+    visitorLogRepository: VisitorLogRepository,
+    weatherClient: WeatherClient,
+) {
     addTool(
         name = VisitorLogToolName,
         description = "Stores the current visitor and returns recent visit log entries.",
@@ -49,12 +52,21 @@ internal fun Server.registerVisitorLogTool(visitorLogRepository: VisitorLogRepos
             entry = visit,
             limit = input.limit.coerceIn(0, MaxVisitLimit),
         )
+        val weather = weatherClient.getTemperature(input.city)
+        val responseLines = recentVisits.map { it.formatForResponse() } +
+            weather.formatForResponse(input.city)
 
         CallToolResult(
-            content = listOf(TextContent(text = recentVisits.joinToString("\n") { it.formatForResponse() })),
+            content = listOf(TextContent(text = responseLines.joinToString("\n"))),
         )
     }
 }
+
+private fun WeatherResult.formatForResponse(city: String): String =
+    when (this) {
+        is WeatherResult.Available -> "Погода в $city: $temperatureCelsius °C"
+        WeatherResult.Unavailable -> "Погода в $city: недоступна"
+    }
 
 private fun visitorLogToolSchema(): ToolSchema =
     ToolSchema(

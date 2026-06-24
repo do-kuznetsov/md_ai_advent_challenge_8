@@ -27,4 +27,5 @@ Novosibirsk
 Пример ответа:
 ```text
 Dmitry из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-cli-client/1.0.0
+Погода в Novosibirsk: 18.4 °C
 ```

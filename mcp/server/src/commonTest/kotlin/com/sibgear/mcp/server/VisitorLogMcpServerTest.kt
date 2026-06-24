@@ -35,8 +35,11 @@ class VisitorLogMcpServerTest {
             )
             val textContent = assertIs<TextContent>(result.content.single())
             assertEquals(
-                "Dmitry из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-test-client/1.0.0",
-                textContent.text,
+                listOf(
+                    "Dmitry из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-test-client/1.0.0",
+                    "Погода в Novosibirsk: 18.4 °C",
+                ),
+                textContent.text.lines(),
             )
 
             assertTrue(
@@ -78,6 +81,7 @@ class VisitorLogMcpServerTest {
                 listOf(
                     "Boris из Omsk заходил в 2026-06-24 20:30 через visitor-log-test-client/1.0.0",
                     "Anna из Tomsk заходил в 2026-06-24 19:00 через visitor-log-test-client/1.0.0",
+                    "Погода в Omsk: 18.4 °C",
                 ),
                 textContent.text.lines(),
             )
@@ -97,7 +101,7 @@ class VisitorLogMcpServerTest {
                 ),
             )
             val emptyTextContent = assertIs<TextContent>(emptyResult.content.single())
-            assertEquals("", emptyTextContent.text)
+            assertEquals("Погода в Barnaul: 18.4 °C", emptyTextContent.text)
 
             val latestResult = client.callTool(
                 name = "visitor_log",
@@ -113,13 +117,38 @@ class VisitorLogMcpServerTest {
                 listOf(
                     "Fedor из Kemerovo заходил в 2026-06-24 21:05 через visitor-log-test-client/1.0.0",
                     "Elena из Barnaul заходил в 2026-06-24 21:00 через visitor-log-test-client/1.0.0",
+                    "Погода в Kemerovo: 18.4 °C",
                 ),
                 latestTextContent.text.lines(),
             )
         }
     }
 
+    @Test
+    fun returnsUnavailableWeatherWhenWeatherClientFails() = runBlocking {
+        withTestMcpClient(weatherResult = WeatherResult.Unavailable) { client, _ ->
+            val result = client.callTool(
+                name = "visitor_log",
+                arguments = mapOf(
+                    "userName" to "Maria",
+                    "localTime" to "2026-06-24 22:00",
+                    "city" to "Unknown City",
+                    "limit" to 1,
+                ),
+            )
+            val textContent = assertIs<TextContent>(result.content.single())
+            assertEquals(
+                listOf(
+                    "Maria из Unknown City заходил в 2026-06-24 22:00 через visitor-log-test-client/1.0.0",
+                    "Погода в Unknown City: недоступна",
+                ),
+                textContent.text.lines(),
+            )
+        }
+    }
+
     private suspend fun withTestMcpClient(
+        weatherResult: WeatherResult = WeatherResult.Available(18.4),
         block: suspend (Client, List<String>) -> Unit,
     ) {
         val port = 31337
@@ -134,6 +163,7 @@ class VisitorLogMcpServerTest {
                 )
                 createVisitorLogServer(
                     visitorLogRepository = repository,
+                    weatherClient = FakeWeatherClient(weatherResult),
                     log = logs::add,
                 )
             }
@@ -163,5 +193,11 @@ class VisitorLogMcpServerTest {
             engine.stop()
             repository.close()
         }
+    }
+
+    private class FakeWeatherClient(
+        private val result: WeatherResult,
+    ) : WeatherClient {
+        override suspend fun getTemperature(city: String): WeatherResult = result
     }
 }
