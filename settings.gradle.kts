@@ -29,6 +29,7 @@ include(
     ":features:chat-history:data:json-file",
     ":features:chat-history:data:sqldelight",
     ":features:chat-workspace:ui",
+    ":features:settings:ui",
     ":mcp:server",
     ":mcp:client",
 )

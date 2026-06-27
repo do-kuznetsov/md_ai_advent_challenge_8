@@ -1,4 +1,4 @@
-package com.sibgear.deepseek.chat.workspace.ui.internal.view
+package com.sibgear.deepseek.settings.ui.internal.view
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

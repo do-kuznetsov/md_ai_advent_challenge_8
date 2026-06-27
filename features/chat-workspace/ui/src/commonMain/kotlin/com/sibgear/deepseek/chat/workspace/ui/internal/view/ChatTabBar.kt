@@ -16,8 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -48,8 +47,7 @@ internal fun ChatTabBar(
     onTabAdded: () -> Unit,
     onStorageMenuExpandedChanged: (Boolean) -> Unit,
     onStorageSelected: (ChatStorageType) -> Unit,
-    onProfileClicked: () -> Unit,
-    onInvariantsClicked: () -> Unit,
+    onSettingsClicked: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -83,8 +81,7 @@ internal fun ChatTabBar(
             isStorageSwitchEnabled = isStorageSwitchEnabled,
             onStorageMenuExpandedChanged = onStorageMenuExpandedChanged,
             onStorageSelected = onStorageSelected,
-            onProfileClicked = onProfileClicked,
-            onInvariantsClicked = onInvariantsClicked,
+            onSettingsClicked = onSettingsClicked,
         )
     }
 }
@@ -162,8 +159,7 @@ private fun StorageSelector(
     isStorageSwitchEnabled: Boolean,
     onStorageMenuExpandedChanged: (Boolean) -> Unit,
     onStorageSelected: (ChatStorageType) -> Unit,
-    onProfileClicked: () -> Unit,
-    onInvariantsClicked: () -> Unit,
+    onSettingsClicked: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -200,28 +196,14 @@ private fun StorageSelector(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
-                onClick = onProfileClicked,
+                onClick = onSettingsClicked,
                 modifier = Modifier
                     .size(36.dp)
                     .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             ) {
                 Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "user profile",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-
-            IconButton(
-                onClick = onInvariantsClicked,
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = "project invariants",
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "settings",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
