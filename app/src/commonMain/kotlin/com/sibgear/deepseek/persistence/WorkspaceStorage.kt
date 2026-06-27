@@ -476,6 +476,15 @@ private fun String.toTaskStageResultStatus(): TaskStageResultStatus =
     TaskStageResultStatus.entries.firstOrNull { it.name == this } ?: TaskStageResultStatus.InProgress
 
 internal fun defaultStorageBaseDir(): File {
+    return storageBaseDirNearExecutable(
+        runtimeLocation = defaultRuntimeLocation(),
+    )
+}
+
+internal fun defaultClientFilesDir(): File =
+    clientFilesDirNearExecutable(defaultRuntimeLocation())
+
+private fun defaultRuntimeLocation(): File {
     val resourcesDir = System.getProperty("compose.application.resources.dir")
         ?.takeIf { it.isNotBlank() }
         ?.let(::File)
@@ -490,13 +499,14 @@ internal fun defaultStorageBaseDir(): File {
     }.getOrNull()
     val fallbackDir = File(System.getProperty("user.dir", "."))
 
-    return storageBaseDirNearExecutable(
-        runtimeLocation = resourcesDir ?: codeSourceDir ?: fallbackDir,
-    )
+    return resourcesDir ?: codeSourceDir ?: fallbackDir
 }
 
 internal fun storageBaseDirNearExecutable(runtimeLocation: File): File =
     File(runtimeLocation.executableDirectory(), StorageDirectoryName)
+
+internal fun clientFilesDirNearExecutable(runtimeLocation: File): File =
+    File(runtimeLocation.executableDirectory(), ClientFilesDirectoryName)
 
 private fun File.executableDirectory(): File {
     val normalized = absoluteFile
@@ -513,3 +523,4 @@ private fun File.executableDirectory(): File {
 }
 
 private const val StorageDirectoryName = "ai-clients-data"
+private const val ClientFilesDirectoryName = "files"

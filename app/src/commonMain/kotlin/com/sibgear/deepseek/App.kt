@@ -17,6 +17,7 @@ import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterC
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterModelsRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.service.OpenRouterAssistantProfileService
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
+import com.sibgear.deepseek.chat.domain.model.CompositeAiToolProvider
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
 import com.sibgear.deepseek.chat.domain.model.TaskState
@@ -45,9 +46,11 @@ import com.sibgear.deepseek.mapper.toHistoryMessages
 import com.sibgear.deepseek.mapper.toStickyFacts
 import com.sibgear.deepseek.persistence.WorkspaceStorage
 import com.sibgear.deepseek.persistence.WorkspaceTabSnapshot
+import com.sibgear.deepseek.persistence.defaultClientFilesDir
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import com.sibgear.deepseek.settings.ui.external.presentation.SettingsViewModel
 import com.sibgear.deepseek.settings.ui.external.view.SettingsDialogs
+import com.sibgear.deepseek.tools.LocalFileAiToolProvider
 import com.sibgear.mcp.client.McpAiToolProvider
 import com.sibgear.mcp.client.McpServerConnection
 import kotlinx.coroutines.Dispatchers
@@ -110,8 +113,19 @@ fun App() {
             },
         )
     }
+    val localFileToolProvider = remember {
+        LocalFileAiToolProvider(filesDir = defaultClientFilesDir())
+    }
+    val toolProvider = remember(localFileToolProvider, mcpToolProvider) {
+        CompositeAiToolProvider(
+            listOf(
+                localFileToolProvider,
+                mcpToolProvider,
+            ),
+        )
+    }
 
-    val viewModel = remember(scope, workspaceStorage, mcpToolProvider) {
+    val viewModel = remember(scope, workspaceStorage, toolProvider) {
         fun createChatViewModel(
             tabNumber: Int,
             storageType: ChatStorageType,
@@ -178,7 +192,7 @@ fun App() {
                 initialSystemPrompt = initialSystemPrompt,
                 initialPrompt = initialPrompt,
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
-                toolProvider = mcpToolProvider,
+                toolProvider = toolProvider,
                 persistMessage = { message ->
                     historyInteractor.add(listOf(message).toHistoryMessages().single()).toChatMessages()
                 },

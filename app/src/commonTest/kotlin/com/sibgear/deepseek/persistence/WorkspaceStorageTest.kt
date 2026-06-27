@@ -272,6 +272,16 @@ class WorkspaceStorageTest {
     }
 
     @Test
+    fun clientFilesDirIsPlacedNearJarRuntimeLocation() {
+        val runtimeLocation = File("/opt/AI Clients/app.jar")
+
+        assertEquals(
+            File("/opt/AI Clients/files"),
+            clientFilesDirNearExecutable(runtimeLocation),
+        )
+    }
+
+    @Test
     fun storageBaseDirIsPlacedNearMacAppBundle() {
         val runtimeLocation = File("/Applications/AI Clients.app/Contents/Resources")
 
