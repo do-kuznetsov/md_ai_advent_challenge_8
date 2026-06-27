@@ -32,5 +32,6 @@ include(
     ":features:settings:ui",
     ":mcp:server:visitors",
     ":mcp:server:weather",
+    ":mcp:server:worldtime",
     ":mcp:client",
 )
