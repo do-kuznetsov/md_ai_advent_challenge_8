@@ -9,20 +9,6 @@ sealed interface AiChatAppEvent {
     data class TabClosed(val number: Int) : AiChatAppEvent
     data class StorageMenuExpandedChanged(val isExpanded: Boolean) : AiChatAppEvent
     data class StorageSelected(val storageType: ChatStorageType) : AiChatAppEvent
-    data object ProfileDialogOpened : AiChatAppEvent
-    data object ProfileDialogClosed : AiChatAppEvent
-    data class ProfileDraftChanged(val text: String) : AiChatAppEvent
-    data object ProfileSaved : AiChatAppEvent
-    data object ProfileInterviewStarted : AiChatAppEvent
-    data class ProfileInterviewAnswerChanged(val text: String) : AiChatAppEvent
-    data object ProfileInterviewAnswerSubmitted : AiChatAppEvent
-    data object InvariantsDialogOpened : AiChatAppEvent
-    data object InvariantsDialogClosed : AiChatAppEvent
-    data class InvariantsDraftChanged(val text: String) : AiChatAppEvent
-    data object InvariantsSaved : AiChatAppEvent
-    data class InvariantsChatInputChanged(val text: String) : AiChatAppEvent
-    data object InvariantsChatMessageSent : AiChatAppEvent
-    data object InvariantsApplied : AiChatAppEvent
     data object TaskModeToggled : AiChatAppEvent
     data class TaskStageSelected(val stage: TaskState) : AiChatAppEvent
     data object TaskTransitionAccepted : AiChatAppEvent

@@ -9,6 +9,8 @@ import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
+import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
+import com.sibgear.deepseek.settings.ui.external.model.sanitizedMcpServers
 import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -18,6 +20,7 @@ internal class WorkspaceStorage(
     val baseDir: File,
 ) {
     private val workspaceFile = File(baseDir, "chats.json")
+    private val mcpServersFile = File(baseDir, "mcp-servers.json")
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -68,6 +71,27 @@ internal class WorkspaceStorage(
         )
     }
 
+    fun loadMcpServers(): List<McpServerUiModel> {
+        if (!mcpServersFile.exists()) {
+            return emptyList()
+        }
+
+        return runCatching {
+            mcpServersFile.readText()
+                .let { json.decodeFromString<McpServersFileDto>(it) }
+                .servers
+                .mapNotNull { it.toDomain() }
+                .sanitizedMcpServers()
+        }.getOrElse {
+            preserveCorruptMcpServers()
+            emptyList()
+        }
+    }
+
+    fun saveMcpServers(servers: List<McpServerUiModel>) {
+        writeMcpServers(servers.sanitizedMcpServers())
+    }
+
     fun jsonHistoryFile(): File =
         File(baseDir, "chat-history.json")
 
@@ -111,9 +135,38 @@ internal class WorkspaceStorage(
         }
     }
 
+    private fun writeMcpServers(servers: List<McpServerUiModel>) {
+        if (!baseDir.exists()) {
+            baseDir.mkdirs()
+        }
+
+        val tempFile = File(baseDir, "${mcpServersFile.name}.tmp")
+        tempFile.writeText(
+            json.encodeToString(
+                McpServersFileDto(
+                    servers = servers.map { it.toDto() },
+                ),
+            ),
+        )
+        if (mcpServersFile.exists() && !mcpServersFile.delete()) {
+            tempFile.delete()
+            error("Cannot replace MCP servers file: ${mcpServersFile.absolutePath}")
+        }
+        if (!tempFile.renameTo(mcpServersFile)) {
+            tempFile.copyTo(mcpServersFile, overwrite = true)
+            tempFile.delete()
+        }
+    }
+
     private fun preserveCorruptWorkspace() {
         runCatching {
             workspaceFile.copyTo(File(baseDir, "${workspaceFile.name}.corrupt"), overwrite = true)
+        }
+    }
+
+    private fun preserveCorruptMcpServers() {
+        runCatching {
+            mcpServersFile.copyTo(File(baseDir, "${mcpServersFile.name}.corrupt"), overwrite = true)
         }
     }
 
@@ -196,6 +249,20 @@ private data class WorkspaceTabDto(
 )
 
 @Serializable
+private data class McpServersFileDto(
+    val version: Int = McpServersFileVersion,
+    val servers: List<McpServerDto> = emptyList(),
+)
+
+@Serializable
+private data class McpServerDto(
+    val id: Int = 0,
+    val name: String = "",
+    val url: String = "",
+    val enabled: Boolean = true,
+)
+
+@Serializable
 private data class TaskSessionSnapshotDto(
     val isModeEnabled: Boolean = false,
     val context: TaskContextDto? = null,
@@ -252,8 +319,25 @@ private data class TaskStageRejectionDto(
 )
 
 private const val WorkspaceFileVersion = 1
+private const val McpServersFileVersion = 1
 private const val JsonStorageValue = "json"
 private const val DatabaseStorageValue = "db"
+
+private fun McpServerUiModel.toDto(): McpServerDto =
+    McpServerDto(
+        id = id,
+        name = name,
+        url = url,
+        enabled = isEnabled,
+    )
+
+private fun McpServerDto.toDomain(): McpServerUiModel? =
+    McpServerUiModel(
+        id = id,
+        name = name,
+        url = url,
+        isEnabled = enabled,
+    ).takeIf { it.id > 0 && it.name.isNotBlank() && it.url.isNotBlank() }
 
 private fun TaskSessionSnapshot.toDto(): TaskSessionSnapshotDto =
     TaskSessionSnapshotDto(
@@ -392,6 +476,15 @@ private fun String.toTaskStageResultStatus(): TaskStageResultStatus =
     TaskStageResultStatus.entries.firstOrNull { it.name == this } ?: TaskStageResultStatus.InProgress
 
 internal fun defaultStorageBaseDir(): File {
+    return storageBaseDirNearExecutable(
+        runtimeLocation = defaultRuntimeLocation(),
+    )
+}
+
+internal fun defaultClientFilesDir(): File =
+    clientFilesDirNearExecutable(defaultRuntimeLocation())
+
+private fun defaultRuntimeLocation(): File {
     val resourcesDir = System.getProperty("compose.application.resources.dir")
         ?.takeIf { it.isNotBlank() }
         ?.let(::File)
@@ -406,13 +499,14 @@ internal fun defaultStorageBaseDir(): File {
     }.getOrNull()
     val fallbackDir = File(System.getProperty("user.dir", "."))
 
-    return storageBaseDirNearExecutable(
-        runtimeLocation = resourcesDir ?: codeSourceDir ?: fallbackDir,
-    )
+    return resourcesDir ?: codeSourceDir ?: fallbackDir
 }
 
 internal fun storageBaseDirNearExecutable(runtimeLocation: File): File =
     File(runtimeLocation.executableDirectory(), StorageDirectoryName)
+
+internal fun clientFilesDirNearExecutable(runtimeLocation: File): File =
+    File(runtimeLocation.executableDirectory(), ClientFilesDirectoryName)
 
 private fun File.executableDirectory(): File {
     val normalized = absoluteFile
@@ -429,3 +523,4 @@ private fun File.executableDirectory(): File {
 }
 
 private const val StorageDirectoryName = "ai-clients-data"
+private const val ClientFilesDirectoryName = "files"

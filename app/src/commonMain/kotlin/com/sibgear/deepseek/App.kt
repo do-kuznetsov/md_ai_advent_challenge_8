@@ -17,6 +17,7 @@ import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterC
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterModelsRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.service.OpenRouterAssistantProfileService
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
+import com.sibgear.deepseek.chat.domain.model.CompositeAiToolProvider
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
 import com.sibgear.deepseek.chat.domain.model.TaskState
@@ -45,6 +46,13 @@ import com.sibgear.deepseek.mapper.toHistoryMessages
 import com.sibgear.deepseek.mapper.toStickyFacts
 import com.sibgear.deepseek.persistence.WorkspaceStorage
 import com.sibgear.deepseek.persistence.WorkspaceTabSnapshot
+import com.sibgear.deepseek.persistence.defaultClientFilesDir
+import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
+import com.sibgear.deepseek.settings.ui.external.presentation.SettingsViewModel
+import com.sibgear.deepseek.settings.ui.external.view.SettingsDialogs
+import com.sibgear.deepseek.tools.LocalFileAiToolProvider
+import com.sibgear.mcp.client.McpAiToolProvider
+import com.sibgear.mcp.client.McpServerConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
@@ -73,19 +81,51 @@ fun App() {
     val initialTitlesByTab = remember(initialHistoryByTab) {
         initialHistoryByTab.mapValues { (_, messages) -> messages.toTabTitle() }
     }
-
-    val viewModel = remember(scope, workspaceStorage) {
-        val deepSeekAssistantService = DeepSeekAssistantProfileService(apiKey = BuildConfig.DEEPSEEK_API_KEY)
-        val openRouterAssistantService = OpenRouterAssistantProfileService(apiKey = BuildConfig.OPENROUTER_AI_KEY)
-        val profileServices: Map<String, AssistantProfileService> = mapOf(
+    val deepSeekAssistantService = remember {
+        DeepSeekAssistantProfileService(apiKey = BuildConfig.DEEPSEEK_API_KEY)
+    }
+    val openRouterAssistantService = remember {
+        OpenRouterAssistantProfileService(apiKey = BuildConfig.OPENROUTER_AI_KEY)
+    }
+    val profileServices = remember(deepSeekAssistantService, openRouterAssistantService) {
+        mapOf<String, AssistantProfileService>(
             AiProvider.DeepSeek.name to deepSeekAssistantService,
             AiProvider.OpenRouter.name to openRouterAssistantService,
         )
-        val invariantServices: Map<String, AssistantInvariantService> = mapOf(
+    }
+    val invariantServices = remember(deepSeekAssistantService, openRouterAssistantService) {
+        mapOf<String, AssistantInvariantService>(
             AiProvider.DeepSeek.name to deepSeekAssistantService,
             AiProvider.OpenRouter.name to openRouterAssistantService,
         )
+    }
+    val mcpToolProvider = remember(workspaceStorage) {
+        McpAiToolProvider(
+            loadServers = {
+                workspaceStorage.loadMcpServers().map { server ->
+                    McpServerConnection(
+                        id = server.id,
+                        name = server.name,
+                        url = server.url,
+                        isEnabled = server.isEnabled,
+                    )
+                }
+            },
+        )
+    }
+    val localFileToolProvider = remember {
+        LocalFileAiToolProvider(filesDir = defaultClientFilesDir())
+    }
+    val toolProvider = remember(localFileToolProvider, mcpToolProvider) {
+        CompositeAiToolProvider(
+            listOf(
+                localFileToolProvider,
+                mcpToolProvider,
+            ),
+        )
+    }
 
+    val viewModel = remember(scope, workspaceStorage, toolProvider) {
         fun createChatViewModel(
             tabNumber: Int,
             storageType: ChatStorageType,
@@ -152,6 +192,7 @@ fun App() {
                 initialSystemPrompt = initialSystemPrompt,
                 initialPrompt = initialPrompt,
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
+                toolProvider = toolProvider,
                 persistMessage = { message ->
                     historyInteractor.add(listOf(message).toHistoryMessages().single()).toChatMessages()
                 },
@@ -205,7 +246,6 @@ fun App() {
         }
 
         AiChatAppViewModel(
-            coroutineScope = scope,
             createChatViewModel = { tabNumber, storageType, systemPrompt ->
                 createChatViewModel(
                     tabNumber = tabNumber,
@@ -321,13 +361,24 @@ fun App() {
                     taskStageStorage.deleteChat(tabNumber.toTaskStageChatId(stage))
                 }
             },
-            loadProfileAction = { storageType ->
-                workspaceStorage.createMemoryRepository(storageType).getProfile().text
+        )
+    }
+    val settingsViewModel = remember(scope, workspaceStorage, viewModel, profileServices, invariantServices) {
+        SettingsViewModel(
+            coroutineScope = scope,
+            loadProfile = {
+                workspaceStorage.createMemoryRepository(viewModel.state.selectedStorageType).getProfile().text
             },
-            saveProfileAction = { storageType, text ->
-                workspaceStorage.createMemoryRepository(storageType).saveProfile(UserProfile(text = text)).text
+            saveProfile = { text ->
+                workspaceStorage
+                    .createMemoryRepository(viewModel.state.selectedStorageType)
+                    .saveProfile(UserProfile(text = text))
+                    .text
             },
-            updateProfileFromInterviewAction = { providerName, modelId, currentProfile, answers ->
+            updateProfileFromInterview = { currentProfile, answers ->
+                val activeChatViewModel = viewModel.state.activeTab?.viewModel
+                val providerName = activeChatViewModel?.selectedModelProviderName.orEmpty()
+                val modelId = activeChatViewModel?.selectedModelId.orEmpty()
                 val profileService = profileServices[providerName]
                     ?: error("Неизвестный провайдер профиля: $providerName")
                 profileService.updateProfile(
@@ -336,13 +387,18 @@ fun App() {
                     modelId = modelId.takeIf { it.isNotBlank() } ?: error("Не выбрана модель для интервью."),
                 ).text
             },
-            loadInvariantsAction = { storageType ->
-                workspaceStorage.createMemoryRepository(storageType).getInvariants()
+            loadInvariants = {
+                workspaceStorage.createMemoryRepository(viewModel.state.selectedStorageType).getInvariants()
             },
-            saveInvariantsAction = { storageType, invariants ->
-                workspaceStorage.createMemoryRepository(storageType).replaceInvariants(invariants)
+            saveInvariants = { invariants ->
+                workspaceStorage
+                    .createMemoryRepository(viewModel.state.selectedStorageType)
+                    .replaceInvariants(invariants)
             },
-            updateInvariantsFromChatAction = { providerName, modelId, currentInvariants, chatMessages ->
+            updateInvariantsFromChat = { currentInvariants, chatMessages ->
+                val activeChatViewModel = viewModel.state.activeTab?.viewModel
+                val providerName = activeChatViewModel?.selectedModelProviderName.orEmpty()
+                val modelId = activeChatViewModel?.selectedModelId.orEmpty()
                 val invariantService = invariantServices[providerName]
                     ?: error("Неизвестный провайдер инвариантов: $providerName")
                 invariantService.updateInvariants(
@@ -351,12 +407,21 @@ fun App() {
                     modelId = modelId.takeIf { it.isNotBlank() } ?: error("Не выбрана модель для сбора инвариантов."),
                 )
             },
+            initialMcpServers = workspaceStorage.loadMcpServers(),
+            onMcpServersChanged = { servers ->
+                workspaceStorage.saveMcpServers(servers)
+            },
         )
     }
 
     AiChatAppScreen(
         state = viewModel.state,
         onEvent = viewModel::onEvent,
+        onSettingsClicked = { settingsViewModel.onEvent(SettingsEvent.SettingsDialogOpened) },
+    )
+    SettingsDialogs(
+        state = settingsViewModel.state,
+        onEvent = settingsViewModel::onEvent,
     )
 }
 

@@ -46,13 +46,12 @@ import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskChatFocus
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
 import com.sibgear.deepseek.chat.workspace.ui.internal.view.ChatTabBar
-import com.sibgear.deepseek.chat.workspace.ui.internal.view.ProjectInvariantsDialog
-import com.sibgear.deepseek.chat.workspace.ui.internal.view.UserProfileDialog
 
 @Composable
 fun AiChatAppScreen(
     state: AiChatAppViewState,
     onEvent: (AiChatAppEvent) -> Unit,
+    onSettingsClicked: () -> Unit,
 ) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -81,8 +80,7 @@ fun AiChatAppScreen(
                             onEvent(AiChatAppEvent.StorageMenuExpandedChanged(it))
                         },
                         onStorageSelected = { onEvent(AiChatAppEvent.StorageSelected(it)) },
-                        onProfileClicked = { onEvent(AiChatAppEvent.ProfileDialogOpened) },
-                        onInvariantsClicked = { onEvent(AiChatAppEvent.InvariantsDialogOpened) },
+                        onSettingsClicked = onSettingsClicked,
                         modifier = Modifier
                             .fillMaxHeight()
                             .width(tabsWidth)
@@ -124,40 +122,6 @@ fun AiChatAppScreen(
                 }
             }
 
-            if (state.isProfileDialogOpen) {
-                UserProfileDialog(
-                    profileDraft = state.profileDraft,
-                    isActionEnabled = state.isProfileActionEnabled,
-                    isInterviewActive = state.isProfileInterviewActive,
-                    interviewQuestionIndex = state.profileInterviewQuestionIndex,
-                    interviewAnswerInput = state.profileInterviewAnswerInput,
-                    isInterviewLoading = state.isProfileInterviewLoading,
-                    error = state.profileError,
-                    onDismissRequest = { onEvent(AiChatAppEvent.ProfileDialogClosed) },
-                    onProfileChanged = { onEvent(AiChatAppEvent.ProfileDraftChanged(it)) },
-                    onSaveClicked = { onEvent(AiChatAppEvent.ProfileSaved) },
-                    onInterviewClicked = { onEvent(AiChatAppEvent.ProfileInterviewStarted) },
-                    onInterviewAnswerChanged = { onEvent(AiChatAppEvent.ProfileInterviewAnswerChanged(it)) },
-                    onInterviewAnswerSubmitted = { onEvent(AiChatAppEvent.ProfileInterviewAnswerSubmitted) },
-                )
-            }
-
-            if (state.isInvariantsDialogOpen) {
-                ProjectInvariantsDialog(
-                    invariantsDraft = state.invariantsDraft,
-                    isActionEnabled = state.isInvariantsActionEnabled,
-                    chatMessages = state.invariantsChatMessages,
-                    chatInput = state.invariantsChatInput,
-                    isApplying = state.isInvariantsApplying,
-                    error = state.invariantsError,
-                    onDismissRequest = { onEvent(AiChatAppEvent.InvariantsDialogClosed) },
-                    onInvariantsChanged = { onEvent(AiChatAppEvent.InvariantsDraftChanged(it)) },
-                    onSaveClicked = { onEvent(AiChatAppEvent.InvariantsSaved) },
-                    onApplyClicked = { onEvent(AiChatAppEvent.InvariantsApplied) },
-                    onChatInputChanged = { onEvent(AiChatAppEvent.InvariantsChatInputChanged(it)) },
-                    onChatMessageSent = { onEvent(AiChatAppEvent.InvariantsChatMessageSent) },
-                )
-            }
         }
     }
 }

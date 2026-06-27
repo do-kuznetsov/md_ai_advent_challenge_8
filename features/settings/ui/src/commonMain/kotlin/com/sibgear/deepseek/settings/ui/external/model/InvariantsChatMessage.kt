@@ -1,4 +1,4 @@
-package com.sibgear.deepseek.chat.workspace.ui.external.model
+package com.sibgear.deepseek.settings.ui.external.model
 
 data class InvariantsChatMessage(
     val role: InvariantsChatRole,

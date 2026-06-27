@@ -26,6 +26,8 @@ kotlin {
             implementation(project(":features:chat-history:data:sqldelight"))
             implementation(project(":features:chat-history:domain"))
             implementation(project(":features:chat-workspace:ui"))
+            implementation(project(":features:settings:ui"))
+            implementation(project(":mcp:client"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

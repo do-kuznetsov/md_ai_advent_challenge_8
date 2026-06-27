@@ -12,6 +12,7 @@ import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
 import com.sibgear.deepseek.chat.domain.model.AiModel
+import com.sibgear.deepseek.chat.domain.model.AiToolProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.StickyFact
@@ -35,6 +36,7 @@ class ChatViewModel(
     initialSystemPrompt: String = "",
     initialPrompt: String = "",
     isSystemPromptReadOnly: Boolean = false,
+    private val toolProvider: AiToolProvider? = null,
     private val persistMessage: (suspend (ChatMessage) -> List<ChatMessage>)? = null,
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
@@ -372,6 +374,7 @@ class ChatViewModel(
                     ?: DefaultContextManagementMessages,
             ),
             persistUserMessage = persistUserMessage,
+            toolProvider = toolProvider,
         )
 
     private suspend fun sendRequestAndUpdateState(

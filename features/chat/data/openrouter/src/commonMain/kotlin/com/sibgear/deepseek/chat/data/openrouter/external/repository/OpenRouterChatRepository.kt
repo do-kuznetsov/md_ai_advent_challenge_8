@@ -23,6 +23,9 @@ import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toMemoryCandida
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toMemoryUpdates
 import com.sibgear.deepseek.chat.data.openrouter.internal.mapper.toStickyFacts
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiErrorResponse
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiChatMessage
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterAssistantMessage
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterChatCompletionResponse
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterCompletionResult
 import com.sibgear.deepseek.chat.data.openrouter.internal.repository.OpenRouterMaxRetries
 import com.sibgear.deepseek.chat.data.openrouter.internal.repository.OpenRouterRetryDelayMillis
@@ -34,6 +37,8 @@ import com.sibgear.deepseek.chat.data.openrouter.internal.repository.isTimeoutEr
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolInvocation
+import com.sibgear.deepseek.chat.domain.model.AiToolSession
 import com.sibgear.deepseek.chat.domain.model.BranchSelection
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ChatInvariant
@@ -63,6 +68,7 @@ import io.ktor.utils.io.readLine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlin.time.TimeSource
 
 class OpenRouterChatRepository(
@@ -116,6 +122,7 @@ class OpenRouterChatRepository(
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
                 servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
+                allowTools = true,
             ) { retryCount = it }
             val messagesWithAssistant = historyInteractor.add(
                 request.toOpenRouterAssistantHistoryMessage(
@@ -195,6 +202,7 @@ class OpenRouterChatRepository(
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
                 servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
+                allowTools = true,
             ) { retryCount = it }
             val messagesWithAssistant = historyInteractor.add(
                 request.toOpenRouterAssistantHistoryMessage(
@@ -375,19 +383,34 @@ class OpenRouterChatRepository(
         includeSystemPrompt: Boolean,
         servicePrompt: String?,
         effectiveSystemPrompt: String? = null,
+        allowTools: Boolean = false,
         onRetryCountChanged: (Int) -> Unit,
     ): OpenRouterCompletionResult {
         var retryCount = 0
 
         while (true) {
             try {
-                val completion = sendStreamingCompletion(
-                    request = request,
-                    contextMessages = contextMessages,
-                    includeSystemPrompt = includeSystemPrompt,
-                    servicePrompt = servicePrompt,
-                    effectiveSystemPrompt = effectiveSystemPrompt,
-                )
+                val toolProvider = request.toolProvider.takeIf { allowTools }
+                val completion = if (toolProvider != null) {
+                    toolProvider.withSession { session ->
+                        sendNonStreamingCompletionWithTools(
+                            request = request,
+                            contextMessages = contextMessages,
+                            includeSystemPrompt = includeSystemPrompt,
+                            servicePrompt = servicePrompt,
+                            effectiveSystemPrompt = effectiveSystemPrompt,
+                            toolSession = session,
+                        )
+                    }
+                } else {
+                    sendStreamingCompletion(
+                        request = request,
+                        contextMessages = contextMessages,
+                        includeSystemPrompt = includeSystemPrompt,
+                        servicePrompt = servicePrompt,
+                        effectiveSystemPrompt = effectiveSystemPrompt,
+                    )
+                }
                 if (completion.isRetryable && retryCount < OpenRouterMaxRetries) {
                     retryCount += 1
                     onRetryCountChanged(retryCount)
@@ -458,6 +481,156 @@ class OpenRouterChatRepository(
                 ),
             )
         }
+    }
+
+    private suspend fun sendNonStreamingCompletionWithTools(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        toolSession: AiToolSession,
+    ): OpenRouterCompletionResult {
+        val catalog = toolSession.catalog
+        if (catalog.tools.isEmpty()) {
+            return sendNonStreamingCompletion(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                toolWarnings = catalog.warnings,
+            )
+        }
+
+        var extraMessages = emptyList<OpenRouterApiChatMessage>()
+        repeat(MaxToolCallRounds) {
+            val result = sendNonStreamingCompletionRaw(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                tools = catalog.tools,
+                toolWarnings = catalog.warnings,
+                extraMessages = extraMessages,
+            )
+            result.errorResult?.let { return it }
+
+            val message = result.message
+            val toolCalls = message?.toolCalls.orEmpty()
+            if (toolCalls.isEmpty()) {
+                val content = message?.content?.takeIf { it.isNotBlank() }
+                    ?: "OpenRouter вернул пустой ответ."
+                return OpenRouterCompletionResult(
+                    content = content,
+                    usage = result.usage,
+                )
+            }
+
+            extraMessages = extraMessages + OpenRouterApiChatMessage(
+                role = "assistant",
+                content = message?.content,
+                toolCalls = toolCalls,
+            ) + toolCalls.map { toolCall ->
+                val toolResult = toolSession.callTool(
+                    AiToolInvocation(
+                        name = toolCall.function.name,
+                        arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                    ),
+                )
+                OpenRouterApiChatMessage(
+                    role = "tool",
+                    content = toolResult.content,
+                    toolCallId = toolCall.id,
+                )
+            }
+        }
+
+        return OpenRouterCompletionResult(
+            content = "Ошибка MCP tools: достигнут лимит вызовов tools за один запрос.",
+            isError = true,
+        )
+    }
+
+    private suspend fun sendNonStreamingCompletion(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        toolWarnings: List<String> = emptyList(),
+    ): OpenRouterCompletionResult {
+        val result = sendNonStreamingCompletionRaw(
+            request = request,
+            contextMessages = contextMessages,
+            includeSystemPrompt = includeSystemPrompt,
+            servicePrompt = servicePrompt,
+            effectiveSystemPrompt = effectiveSystemPrompt,
+            toolWarnings = toolWarnings,
+        )
+        result.errorResult?.let { return it }
+
+        val content = result.message?.content?.takeIf { it.isNotBlank() }
+            ?: "OpenRouter вернул пустой ответ."
+        return OpenRouterCompletionResult(
+            content = content,
+            usage = result.usage,
+        )
+    }
+
+    private suspend fun sendNonStreamingCompletionRaw(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        tools: List<com.sibgear.deepseek.chat.domain.model.AiToolDefinition> = emptyList(),
+        toolWarnings: List<String> = emptyList(),
+        extraMessages: List<OpenRouterApiChatMessage> = emptyList(),
+    ): OpenRouterRawCompletionResult {
+        val response = client.post(ChatCompletionsUrl) {
+            bearerAuth(apiKey)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            timeout {
+                connectTimeoutMillis = ConnectTimeoutMillis
+                socketTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+                requestTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+            }
+            setBody(
+                request.toOpenRouterChatCompletionRequest(
+                    contextMessages = contextMessages,
+                    includeSystemPrompt = includeSystemPrompt,
+                    servicePrompt = servicePrompt,
+                    effectiveSystemPrompt = effectiveSystemPrompt,
+                    stream = false,
+                    tools = tools,
+                    toolWarnings = toolWarnings,
+                    extraMessages = extraMessages,
+                ),
+            )
+        }
+
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            return OpenRouterRawCompletionResult(
+                errorResult = OpenRouterCompletionResult(
+                    content = formatApiError(
+                        statusCode = response.status.value,
+                        statusDescription = response.status.description,
+                        body = body,
+                    ),
+                    isRetryable = response.status.isOpenRouterRetryableStatus(),
+                    isError = true,
+                ),
+            )
+        }
+
+        val completion = json.decodeFromString<OpenRouterChatCompletionResponse>(body)
+        return OpenRouterRawCompletionResult(
+            message = completion.choices.firstOrNull()?.message,
+            usage = completion.usage,
+        )
     }
 
     private suspend fun sendStreamingCompletion(
@@ -689,6 +862,12 @@ private data class PreparedMemory(
     val metadata: HistoryMessageMemoryMetadata?,
 )
 
+private data class OpenRouterRawCompletionResult(
+    val message: OpenRouterAssistantMessage? = null,
+    val usage: com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterResponseUsage? = null,
+    val errorResult: OpenRouterCompletionResult? = null,
+)
+
 private fun AssistantInvariant.toChatInvariant(): ChatInvariant =
     ChatInvariant(
         category = category.storageValue,
@@ -711,6 +890,17 @@ private val InvariantCategory.storageValue: String
 private fun formatMemoryError(exception: Throwable): String =
     "memory: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
 
+private fun String.toJsonObjectOrEmpty(): JsonObject =
+    runCatching {
+        ToolArgumentsJson.parseToJsonElement(this) as? JsonObject
+    }.getOrNull() ?: JsonObject(emptyMap())
+
+private val ToolArgumentsJson = Json {
+    ignoreUnknownKeys = true
+    explicitNulls = false
+}
+
+private const val MaxToolCallRounds = 4
 private const val ChatCompletionsUrl = "https://openrouter.ai/api/v1/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L
 private const val DefaultRequestTimeoutMillis = 180_000L

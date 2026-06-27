@@ -30,27 +30,37 @@ import kotlinx.coroutines.withTimeout
 class VisitorLogMcpServerTest {
 
     @Test
-    fun listsAndCallsVisitorLogTool() = runBlocking {
+    fun listsAndCallsVisitTools() = runBlocking {
         withTestMcpClient { client, logs, _, _ ->
             val tools = client.listTools().tools
-            assertEquals(listOf("visitor_log", "schedule_visit_report"), tools.map { it.name })
+            assertEquals(
+                listOf("add_visit", "get_weather", "get_reports", "schedule_visit_report"),
+                tools.map { it.name },
+            )
 
             val result = client.callTool(
-                name = "visitor_log",
+                name = "add_visit",
                 arguments = mapOf(
                     "userName" to "Dmitry",
                     "localTime" to "2026-06-24 20:00",
                     "city" to "Novosibirsk",
-                    "limit" to 1,
                 ),
             )
-            val textContent = assertIs<TextContent>(result.content.single())
+            assertEquals(emptyList(), result.content)
+
+            val reportsResult = client.callTool(
+                name = "get_reports",
+                arguments = mapOf("limit" to 1),
+            )
+            val reportsTextContent = assertIs<TextContent>(reportsResult.content.single())
             assertEquals(
-                listOf(
+                reportLines(
+                    1,
+                    1,
+                    0,
                     "Dmitry из Novosibirsk заходил в 2026-06-24 20:00 через visitor-log-test-client/1.0.0",
-                    "Погода в Novosibirsk: 18.4 °C",
                 ),
-                textContent.text.lines(),
+                reportsTextContent.text.lines(),
             )
 
             assertTrue(
@@ -69,30 +79,34 @@ class VisitorLogMcpServerTest {
     fun returnsLatestVisitsNewestFirst() = runBlocking {
         withTestMcpClient { client, _, _, _ ->
             client.callTool(
-                name = "visitor_log",
+                name = "add_visit",
                 arguments = mapOf(
                     "userName" to "Anna",
                     "localTime" to "2026-06-24 19:00",
                     "city" to "Tomsk",
-                    "limit" to 1,
                 ),
             )
-            val result = client.callTool(
-                name = "visitor_log",
+            client.callTool(
+                name = "add_visit",
                 arguments = mapOf(
                     "userName" to "Boris",
                     "localTime" to "2026-06-24 20:30",
                     "city" to "Omsk",
-                    "limit" to 2,
                 ),
+            )
+            val result = client.callTool(
+                name = "get_reports",
+                arguments = mapOf("limit" to 2),
             )
             val textContent = assertIs<TextContent>(result.content.single())
 
             assertEquals(
-                listOf(
+                reportLines(
+                    2,
+                    2,
+                    0,
                     "Boris из Omsk заходил в 2026-06-24 20:30 через visitor-log-test-client/1.0.0",
                     "Anna из Tomsk заходил в 2026-06-24 19:00 через visitor-log-test-client/1.0.0",
-                    "Погода в Omsk: 18.4 °C",
                 ),
                 textContent.text.lines(),
             )
@@ -100,35 +114,46 @@ class VisitorLogMcpServerTest {
     }
 
     @Test
-    fun limitZeroStoresVisitAndReturnsEmptyText() = runBlocking {
+    fun getReportsWithZeroLimitReturnsEmptyText() = runBlocking {
         withTestMcpClient { client, _, _, _ ->
-            val emptyResult = client.callTool(
-                name = "visitor_log",
+            client.callTool(
+                name = "add_visit",
                 arguments = mapOf(
                     "userName" to "Elena",
                     "localTime" to "2026-06-24 21:00",
                     "city" to "Barnaul",
-                    "limit" to 0,
                 ),
             )
+            val emptyResult = client.callTool(
+                name = "get_reports",
+                arguments = mapOf("limit" to 0),
+            )
             val emptyTextContent = assertIs<TextContent>(emptyResult.content.single())
-            assertEquals("Погода в Barnaul: 18.4 °C", emptyTextContent.text)
+            assertEquals(
+                reportLines(1, 0, 0),
+                emptyTextContent.text.lines(),
+            )
 
-            val latestResult = client.callTool(
-                name = "visitor_log",
+            client.callTool(
+                name = "add_visit",
                 arguments = mapOf(
                     "userName" to "Fedor",
                     "localTime" to "2026-06-24 21:05",
                     "city" to "Kemerovo",
-                    "limit" to 2,
                 ),
+            )
+            val latestResult = client.callTool(
+                name = "get_reports",
+                arguments = mapOf("limit" to 2),
             )
             val latestTextContent = assertIs<TextContent>(latestResult.content.single())
             assertEquals(
-                listOf(
+                reportLines(
+                    2,
+                    2,
+                    0,
                     "Fedor из Kemerovo заходил в 2026-06-24 21:05 через visitor-log-test-client/1.0.0",
                     "Elena из Barnaul заходил в 2026-06-24 21:00 через visitor-log-test-client/1.0.0",
-                    "Погода в Kemerovo: 18.4 °C",
                 ),
                 latestTextContent.text.lines(),
             )
@@ -136,25 +161,61 @@ class VisitorLogMcpServerTest {
     }
 
     @Test
-    fun returnsUnavailableWeatherWhenWeatherClientFails() = runBlocking {
-        withTestMcpClient(weatherResult = WeatherResult.Unavailable) { client, _, _, _ ->
+    fun getReportsSupportsPaginationOffset() = runBlocking {
+        withTestMcpClient { client, _, _, _ ->
+            listOf("Anna", "Boris", "Clara").forEachIndexed { index, name ->
+                client.callTool(
+                    name = "add_visit",
+                    arguments = mapOf(
+                        "userName" to name,
+                        "localTime" to "2026-06-24 20:0$index",
+                        "city" to "Tomsk",
+                    ),
+                )
+            }
+
             val result = client.callTool(
-                name = "visitor_log",
+                name = "get_reports",
                 arguments = mapOf(
-                    "userName" to "Maria",
-                    "localTime" to "2026-06-24 22:00",
-                    "city" to "Unknown City",
                     "limit" to 1,
+                    "offset" to 1,
                 ),
             )
             val textContent = assertIs<TextContent>(result.content.single())
+
             assertEquals(
-                listOf(
-                    "Maria из Unknown City заходил в 2026-06-24 22:00 через visitor-log-test-client/1.0.0",
-                    "Погода в Unknown City: недоступна",
+                reportLines(
+                    3,
+                    1,
+                    1,
+                    "Boris из Tomsk заходил в 2026-06-24 20:01 через visitor-log-test-client/1.0.0",
                 ),
                 textContent.text.lines(),
             )
+        }
+    }
+
+    @Test
+    fun returnsCurrentWeather() = runBlocking {
+        withTestMcpClient { client, _, _, _ ->
+            val result = client.callTool(
+                name = "get_weather",
+                arguments = mapOf("city" to "Novosibirsk"),
+            )
+            val textContent = assertIs<TextContent>(result.content.single())
+            assertEquals("Погода в Novosibirsk: 18.4 °C", textContent.text)
+        }
+    }
+
+    @Test
+    fun returnsUnavailableWeatherWhenWeatherClientFails() = runBlocking {
+        withTestMcpClient(weatherResult = WeatherResult.Unavailable) { client, _, _, _ ->
+            val result = client.callTool(
+                name = "get_weather",
+                arguments = mapOf("city" to "Unknown City"),
+            )
+            val textContent = assertIs<TextContent>(result.content.single())
+            assertEquals("Погода в Unknown City: недоступна", textContent.text)
         }
     }
 
@@ -178,12 +239,11 @@ class VisitorLogMcpServerTest {
     fun completedVisitReportContainsVisitsFromScheduledInterval() = runBlocking {
         withTestMcpClient { client, _, scheduler, _ ->
             client.callTool(
-                name = "visitor_log",
+                name = "add_visit",
                 arguments = mapOf(
                     "userName" to "Before",
                     "localTime" to "2026-06-24 19:50",
                     "city" to "Tomsk",
-                    "limit" to 0,
                 ),
             )
 
@@ -196,12 +256,11 @@ class VisitorLogMcpServerTest {
             val resourceUri = scheduleText.lineWithPrefix("resourceUri:")
 
             client.callTool(
-                name = "visitor_log",
+                name = "add_visit",
                 arguments = mapOf(
                     "userName" to "During",
                     "localTime" to "2026-06-24 20:00",
                     "city" to "Novosibirsk",
-                    "limit" to 0,
                 ),
             )
 
@@ -447,3 +506,17 @@ private suspend fun Client.readTextResource(resourceUri: String): String =
             else -> content.toString()
         }
     }
+
+private fun reportLines(
+    total: Int,
+    limit: Int,
+    offset: Int,
+    vararg records: String,
+): List<String> =
+    listOf(
+        "total: $total",
+        "limit: $limit",
+        "offset: $offset",
+        "returned: ${records.size}",
+        "records:",
+    ) + records.map { "- $it" }

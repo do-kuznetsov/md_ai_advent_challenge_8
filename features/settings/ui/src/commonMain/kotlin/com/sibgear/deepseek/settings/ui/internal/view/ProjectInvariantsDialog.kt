@@ -1,4 +1,4 @@
-package com.sibgear.deepseek.chat.workspace.ui.internal.view
+package com.sibgear.deepseek.settings.ui.internal.view
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -26,8 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.sibgear.deepseek.chat.workspace.ui.external.model.InvariantsChatMessage
-import com.sibgear.deepseek.chat.workspace.ui.external.model.InvariantsChatRole
+import com.sibgear.deepseek.settings.ui.external.model.InvariantsChatMessage
+import com.sibgear.deepseek.settings.ui.external.model.InvariantsChatRole
 
 @Composable
 internal fun ProjectInvariantsDialog(

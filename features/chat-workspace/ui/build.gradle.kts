@@ -11,7 +11,6 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(project(":features:assistant-memory:domain"))
             implementation(project(":features:chat:domain"))
             implementation(project(":features:chat:ui"))
             implementation(compose.runtime)
@@ -21,7 +20,6 @@ kotlin {
         }
 
         commonTest.dependencies {
-            implementation(project(":features:assistant-memory:domain"))
             implementation(project(":features:chat:domain"))
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)

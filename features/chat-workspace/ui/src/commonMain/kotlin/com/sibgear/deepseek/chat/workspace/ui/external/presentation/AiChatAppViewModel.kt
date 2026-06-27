@@ -3,10 +3,6 @@ package com.sibgear.deepseek.chat.workspace.ui.external.presentation
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
-import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
-import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionMessage
-import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRole
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
@@ -34,19 +30,13 @@ import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppViewState
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTabSnapshot
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatTab
-import com.sibgear.deepseek.chat.workspace.ui.external.model.InvariantsChatMessage
-import com.sibgear.deepseek.chat.workspace.ui.external.model.InvariantsChatRole
 import com.sibgear.deepseek.chat.workspace.ui.external.model.StorageSwitchResult
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskChatFocus
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskModeSession
 import com.sibgear.deepseek.chat.workspace.ui.external.model.TaskStageAgent
 import com.sibgear.deepseek.chat.workspace.ui.external.model.defaultTaskChatFocus
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 
 class AiChatAppViewModel(
-    private val coroutineScope: CoroutineScope,
     private val createChatViewModel: (
         tabNumber: Int,
         storageType: ChatStorageType,
@@ -80,25 +70,6 @@ class AiChatAppViewModel(
         storageType: ChatStorageType,
     ) -> Unit = { _, _, _, _ -> },
     private val onTabClosed: (tabNumber: Int, storageType: ChatStorageType) -> Unit = { _, _ -> },
-    private val loadProfileAction: suspend (storageType: ChatStorageType) -> String = { "" },
-    private val saveProfileAction: suspend (storageType: ChatStorageType, text: String) -> String = { _, text -> text },
-    private val updateProfileFromInterviewAction: suspend (
-        providerName: String,
-        modelId: String,
-        currentProfile: String,
-        answers: List<String>,
-    ) -> String = { _, _, currentProfile, _ -> currentProfile },
-    private val loadInvariantsAction: suspend (storageType: ChatStorageType) -> List<AssistantInvariant> = { emptyList() },
-    private val saveInvariantsAction: suspend (
-        storageType: ChatStorageType,
-        invariants: List<AssistantInvariant>,
-    ) -> List<AssistantInvariant> = { _, invariants -> invariants },
-    private val updateInvariantsFromChatAction: suspend (
-        providerName: String,
-        modelId: String,
-        currentInvariants: List<AssistantInvariant>,
-        chatMessages: List<InvariantCollectionMessage>,
-    ) -> List<AssistantInvariant> = { _, _, currentInvariants, _ -> currentInvariants },
 ) {
     private val taskMachine = TaskStateMachine()
     private val initialNumbers = initialTabNumbers
@@ -136,28 +107,6 @@ class AiChatAppViewModel(
                 state = state.copy(isStorageMenuExpanded = event.isExpanded)
             }
             is AiChatAppEvent.StorageSelected -> selectStorage(event.storageType)
-            AiChatAppEvent.ProfileDialogOpened -> openProfileDialog()
-            AiChatAppEvent.ProfileDialogClosed -> closeProfileDialog()
-            is AiChatAppEvent.ProfileDraftChanged -> {
-                state = state.copy(profileDraft = event.text, profileError = null)
-            }
-            AiChatAppEvent.ProfileSaved -> saveProfile()
-            AiChatAppEvent.ProfileInterviewStarted -> startProfileInterview()
-            is AiChatAppEvent.ProfileInterviewAnswerChanged -> {
-                state = state.copy(profileInterviewAnswerInput = event.text, profileError = null)
-            }
-            AiChatAppEvent.ProfileInterviewAnswerSubmitted -> submitProfileInterviewAnswer()
-            AiChatAppEvent.InvariantsDialogOpened -> openInvariantsDialog()
-            AiChatAppEvent.InvariantsDialogClosed -> closeInvariantsDialog()
-            is AiChatAppEvent.InvariantsDraftChanged -> {
-                state = state.copy(invariantsDraft = event.text, invariantsError = null)
-            }
-            AiChatAppEvent.InvariantsSaved -> saveInvariants()
-            is AiChatAppEvent.InvariantsChatInputChanged -> {
-                state = state.copy(invariantsChatInput = event.text, invariantsError = null)
-            }
-            AiChatAppEvent.InvariantsChatMessageSent -> sendInvariantsChatMessage()
-            AiChatAppEvent.InvariantsApplied -> applyInvariantsChat()
             AiChatAppEvent.TaskModeToggled -> toggleTaskMode()
             is AiChatAppEvent.TaskStageSelected -> selectTaskStage(event.stage)
             AiChatAppEvent.TaskTransitionAccepted -> {
@@ -254,261 +203,6 @@ class AiChatAppViewModel(
             activeTabNumber = tab.number,
         )
         notifyWorkspaceChanged()
-    }
-
-    private fun openProfileDialog() {
-        val storageType = state.selectedStorageType
-        state = state.copy(
-            isProfileDialogOpen = true,
-            profileDraft = EmptyProfileTemplate,
-            profileError = null,
-            isProfileInterviewActive = false,
-            isProfileInterviewLoading = false,
-            isProfileSaving = false,
-        )
-        coroutineScope.launch {
-            runCatching { loadProfileAction(storageType) }
-                .onSuccess { profileText ->
-                    state = state.copy(
-                        profileDraft = profileText.ifBlank { EmptyProfileTemplate },
-                        profileError = null,
-                    )
-                }
-                .onFailure { exception ->
-                    if (exception is CancellationException) {
-                        throw exception
-                    }
-                    state = state.copy(profileError = formatProfileError(exception))
-                }
-        }
-    }
-
-    private fun closeProfileDialog() {
-        state = state.copy(
-            isProfileDialogOpen = false,
-            isProfileInterviewActive = false,
-            isProfileInterviewLoading = false,
-            isProfileSaving = false,
-            profileError = null,
-        )
-    }
-
-    private fun saveProfile() {
-        if (!state.isProfileActionEnabled) {
-            return
-        }
-        val storageType = state.selectedStorageType
-        val text = state.profileDraft
-        state = state.copy(isProfileSaving = true, profileError = null)
-        coroutineScope.launch {
-            runCatching { saveProfileAction(storageType, text) }
-                .onSuccess { savedText ->
-                    state = state.copy(
-                        profileDraft = savedText.ifBlank { EmptyProfileTemplate },
-                        isProfileSaving = false,
-                        isProfileDialogOpen = false,
-                    )
-                }
-                .onFailure { exception ->
-                    if (exception is CancellationException) {
-                        throw exception
-                    }
-                    state = state.copy(
-                        isProfileSaving = false,
-                        profileError = formatProfileError(exception),
-                    )
-                }
-        }
-    }
-
-    private fun startProfileInterview() {
-        if (!state.isProfileActionEnabled) {
-            return
-        }
-        state = state.copy(
-            isProfileInterviewActive = true,
-            profileInterviewQuestionIndex = 0,
-            profileInterviewAnswers = emptyList(),
-            profileInterviewAnswerInput = "",
-            profileError = null,
-        )
-    }
-
-    private fun submitProfileInterviewAnswer() {
-        if (!state.isProfileActionEnabled || !state.isProfileInterviewActive) {
-            return
-        }
-
-        val answer = state.profileInterviewAnswerInput.trim()
-        val answers = state.profileInterviewAnswers + answer
-        val nextIndex = state.profileInterviewQuestionIndex + 1
-        if (nextIndex < ProfileInterviewQuestionsCount) {
-            state = state.copy(
-                profileInterviewAnswers = answers,
-                profileInterviewQuestionIndex = nextIndex,
-                profileInterviewAnswerInput = "",
-                profileError = null,
-            )
-            return
-        }
-
-        val activeViewModel = state.activeTab?.viewModel
-        val providerName = activeViewModel?.selectedModelProviderName.orEmpty()
-        val modelId = activeViewModel?.selectedModelId.orEmpty()
-        val currentProfile = state.profileDraft
-        state = state.copy(
-            isProfileInterviewLoading = true,
-            profileInterviewAnswers = answers,
-            profileInterviewAnswerInput = "",
-            profileError = null,
-        )
-        coroutineScope.launch {
-            runCatching {
-                updateProfileFromInterviewAction(
-                    providerName,
-                    modelId,
-                    currentProfile,
-                    answers,
-                )
-            }.onSuccess { updatedProfile ->
-                state = state.copy(
-                    profileDraft = updatedProfile.ifBlank { EmptyProfileTemplate },
-                    isProfileInterviewActive = false,
-                    isProfileInterviewLoading = false,
-                )
-            }.onFailure { exception ->
-                if (exception is CancellationException) {
-                    throw exception
-                }
-                state = state.copy(
-                    isProfileInterviewActive = false,
-                    isProfileInterviewLoading = false,
-                    profileError = formatProfileError(exception),
-                )
-            }
-        }
-    }
-
-    private fun openInvariantsDialog() {
-        val storageType = state.selectedStorageType
-        state = state.copy(
-            isInvariantsDialogOpen = true,
-            invariantsDraft = EmptyInvariantsTemplate,
-            invariantsError = null,
-            isInvariantsSaving = false,
-            isInvariantsApplying = false,
-            invariantsChatMessages = state.invariantsChatMessages.ifEmpty { initialInvariantsChatMessages() },
-            invariantsChatInput = "",
-        )
-        coroutineScope.launch {
-            runCatching { loadInvariantsAction(storageType) }
-                .onSuccess { invariants ->
-                    state = state.copy(
-                        invariantsDraft = invariants.toDraftText().ifBlank { EmptyInvariantsTemplate },
-                        invariantsError = null,
-                    )
-                }
-                .onFailure { exception ->
-                    if (exception is CancellationException) {
-                        throw exception
-                    }
-                    state = state.copy(invariantsError = formatProfileError(exception))
-                }
-        }
-    }
-
-    private fun closeInvariantsDialog() {
-        state = state.copy(
-            isInvariantsDialogOpen = false,
-            isInvariantsSaving = false,
-            isInvariantsApplying = false,
-            invariantsChatMessages = emptyList(),
-            invariantsChatInput = "",
-            invariantsError = null,
-        )
-    }
-
-    private fun saveInvariants() {
-        if (!state.isInvariantsActionEnabled) {
-            return
-        }
-        val storageType = state.selectedStorageType
-        val invariants = state.invariantsDraft.toInvariants()
-        state = state.copy(isInvariantsSaving = true, invariantsError = null)
-        coroutineScope.launch {
-            runCatching { saveInvariantsAction(storageType, invariants) }
-                .onSuccess { savedInvariants ->
-                    state = state.copy(
-                        invariantsDraft = savedInvariants.toDraftText().ifBlank { EmptyInvariantsTemplate },
-                        isInvariantsSaving = false,
-                        isInvariantsDialogOpen = false,
-                    )
-                }
-                .onFailure { exception ->
-                    if (exception is CancellationException) {
-                        throw exception
-                    }
-                    state = state.copy(
-                        isInvariantsSaving = false,
-                        invariantsError = formatProfileError(exception),
-                    )
-                }
-        }
-    }
-
-    private fun sendInvariantsChatMessage() {
-        if (!state.isInvariantsActionEnabled) {
-            return
-        }
-        val text = state.invariantsChatInput.trim()
-        if (text.isEmpty()) {
-            return
-        }
-
-        state = state.copy(
-            invariantsChatMessages = state.invariantsChatMessages.ifEmpty { initialInvariantsChatMessages() } +
-                InvariantsChatMessage(role = InvariantsChatRole.User, text = text),
-            invariantsChatInput = "",
-            invariantsError = null,
-        )
-    }
-
-    private fun applyInvariantsChat() {
-        if (!state.isInvariantsActionEnabled) {
-            return
-        }
-        val activeViewModel = state.activeTab?.viewModel
-        val providerName = activeViewModel?.selectedModelProviderName.orEmpty()
-        val modelId = activeViewModel?.selectedModelId.orEmpty()
-        val currentInvariants = state.invariantsDraft.toInvariants()
-        val chatMessages = state.invariantsChatMessages.ifEmpty { initialInvariantsChatMessages() }
-        state = state.copy(
-            isInvariantsApplying = true,
-            invariantsError = null,
-        )
-        coroutineScope.launch {
-            runCatching {
-                updateInvariantsFromChatAction(
-                    providerName,
-                    modelId,
-                    currentInvariants,
-                    chatMessages.toCollectionMessages(),
-                )
-            }.onSuccess { updatedInvariants ->
-                state = state.copy(
-                    invariantsDraft = updatedInvariants.toDraftText().ifBlank { EmptyInvariantsTemplate },
-                    isInvariantsApplying = false,
-                )
-            }.onFailure { exception ->
-                if (exception is CancellationException) {
-                    throw exception
-                }
-                state = state.copy(
-                    isInvariantsApplying = false,
-                    invariantsError = formatProfileError(exception),
-                )
-            }
-        }
     }
 
     private fun closeTab(number: Int) {
@@ -1623,138 +1317,8 @@ class AiChatAppViewModel(
 
     private companion object {
         const val MaxTitleWords = 5
-        const val ProfileInterviewQuestionsCount = 5
-        val EmptyProfileTemplate = """
-            Язык и обращение:
-            Детальность ответов:
-            Стиль общения:
-            Роль и проект:
-            Технические рамки:
-        """.trimIndent()
-        val EmptyInvariantsTemplate = """
-            # Формат строки:
-            # category | enabled | statement | rationale
-            # categories: architecture, technical_decision, stack_constraint, business_rule, process, security, other
-        """.trimIndent()
     }
 }
-
-private fun formatProfileError(exception: Throwable): String =
-    exception.message ?: exception::class.simpleName ?: "unknown"
-
-private fun initialInvariantsChatMessages(): List<InvariantsChatMessage> =
-    listOf(
-        InvariantsChatMessage(
-            role = InvariantsChatRole.Assistant,
-            text = InvariantsCollectionQuestions.joinToString(separator = "\n") { question -> "- $question" },
-        ),
-    )
-
-private fun List<InvariantsChatMessage>.toCollectionMessages(): List<InvariantCollectionMessage> =
-    map { message ->
-        InvariantCollectionMessage(
-            role = when (message.role) {
-                InvariantsChatRole.Assistant -> InvariantCollectionRole.Assistant
-                InvariantsChatRole.User -> InvariantCollectionRole.User
-            },
-            text = message.text,
-        )
-    }
-
-private fun List<AssistantInvariant>.toDraftText(): String =
-    joinToString(separator = "\n") { invariant ->
-        listOf(
-            invariant.category.storageValue,
-            invariant.enabled.toString(),
-            invariant.statement,
-            invariant.rationale,
-        ).joinToString(separator = " | ")
-    }
-
-private fun String.toInvariants(): List<AssistantInvariant> =
-    lineSequence()
-        .map { it.trim() }
-        .filter { line -> line.isNotEmpty() && !line.startsWith("#") }
-        .mapIndexedNotNull { index, line ->
-            val parts = line.split("|").map { it.trim() }
-            val category = parts.firstOrNull()?.toInvariantCategory()
-            val parsed = when {
-                category != null && parts.size >= 3 -> ParsedInvariantLine(
-                    category = category,
-                    enabled = parts[1].toEnabledFlag(),
-                    statement = parts[2],
-                    rationale = parts.drop(3).joinToString(separator = " | "),
-                )
-                category != null && parts.size >= 2 -> ParsedInvariantLine(
-                    category = category,
-                    enabled = true,
-                    statement = parts[1],
-                    rationale = parts.drop(2).joinToString(separator = " | "),
-                )
-                else -> ParsedInvariantLine(
-                    category = InvariantCategory.Other,
-                    enabled = true,
-                    statement = line,
-                    rationale = "",
-                )
-            }
-            parsed.statement
-                .takeIf { it.isNotBlank() }
-                ?.let { statement ->
-                    AssistantInvariant(
-                        id = "invariant-${index + 1}",
-                        category = parsed.category,
-                        statement = statement,
-                        rationale = parsed.rationale,
-                        enabled = parsed.enabled,
-                    )
-                }
-        }
-        .toList()
-
-private data class ParsedInvariantLine(
-    val category: InvariantCategory,
-    val enabled: Boolean,
-    val statement: String,
-    val rationale: String,
-)
-
-private fun String.toEnabledFlag(): Boolean =
-    when (lowercase()) {
-        "false", "0", "disabled", "off", "no", "нет", "выключен", "выключено" -> false
-        else -> true
-    }
-
-private val InvariantCategory.storageValue: String
-    get() = when (this) {
-        InvariantCategory.Architecture -> "architecture"
-        InvariantCategory.TechnicalDecision -> "technical_decision"
-        InvariantCategory.StackConstraint -> "stack_constraint"
-        InvariantCategory.BusinessRule -> "business_rule"
-        InvariantCategory.Process -> "process"
-        InvariantCategory.Security -> "security"
-        InvariantCategory.Other -> "other"
-    }
-
-private fun String.toInvariantCategory(): InvariantCategory? =
-    when (this) {
-        "architecture" -> InvariantCategory.Architecture
-        "technical_decision" -> InvariantCategory.TechnicalDecision
-        "stack_constraint" -> InvariantCategory.StackConstraint
-        "business_rule" -> InvariantCategory.BusinessRule
-        "process" -> InvariantCategory.Process
-        "security" -> InvariantCategory.Security
-        "other" -> InvariantCategory.Other
-        else -> null
-    }
-
-private val InvariantsCollectionQuestions = listOf(
-    "Какая архитектура обязательна для этого проекта и какие архитектурные подходы нельзя предлагать?",
-    "Какие технические решения уже приняты и должны сохраняться?",
-    "Какие ограничения стека, платформ, зависимостей, кодстайла, тестов и процесса обязательны?",
-    "Какие бизнес-правила, безопасность и продуктовые ограничения нельзя нарушать?",
-    "Какие решения ассистенту прямо запрещено предлагать даже как альтернативу?",
-)
 
 private fun taskStageChatId(
     tabNumber: Int,

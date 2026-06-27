@@ -6,10 +6,13 @@ import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiChatMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatCompletionRequest
+import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatTool
+import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatToolFunction
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekResponseUsage
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekThinking
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.deepSeekCost
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolDefinition
 import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
@@ -43,8 +46,13 @@ internal fun AiRequestData.toDeepSeekChatCompletionRequest(
     includeSystemPrompt: Boolean = true,
     servicePrompt: String? = null,
     effectiveSystemPrompt: String? = null,
+    tools: List<AiToolDefinition> = emptyList(),
+    toolWarnings: List<String> = emptyList(),
+    extraMessages: List<DeepSeekApiChatMessage> = emptyList(),
 ): DeepSeekChatCompletionRequest {
-    val trimmedSystemPrompt = (effectiveSystemPrompt ?: systemPrompt).trim()
+    val trimmedSystemPrompt = (effectiveSystemPrompt ?: systemPrompt)
+        .withToolWarnings(toolWarnings)
+        .trim()
     return DeepSeekChatCompletionRequest(
         model = model.id,
         messages = buildList {
@@ -59,13 +67,43 @@ internal fun AiRequestData.toDeepSeekChatCompletionRequest(
             servicePrompt?.let { prompt ->
                 add(DeepSeekApiChatMessage(role = "user", content = prompt))
             }
+
+            addAll(extraMessages)
         },
         stream = false,
         thinking = DeepSeekThinking(type = "disabled"),
         temperature = apiSettings.deepSeekTemperature(),
         maxTokens = apiSettings.deepSeekMaxTokens(),
         stop = apiSettings.deepSeekStop(),
+        tools = tools.takeIf { it.isNotEmpty() }?.map { tool ->
+            DeepSeekChatTool(
+                type = "function",
+                function = DeepSeekChatToolFunction(
+                    name = tool.name,
+                    description = tool.description,
+                    parameters = tool.parameters,
+                ),
+            )
+        },
+        toolChoice = "auto".takeIf { tools.isNotEmpty() },
     )
+}
+
+private fun String.withToolWarnings(warnings: List<String>): String {
+    if (warnings.isEmpty()) {
+        return this
+    }
+    return buildString {
+        append(this@withToolWarnings)
+        if (isNotBlank()) {
+            appendLine()
+            appendLine()
+        }
+        appendLine("[MCP_WARNINGS]")
+        warnings.forEach { warning ->
+            appendLine("- $warning")
+        }
+    }
 }
 
 internal fun AiRequestData.toDeepSeekAssistantHistoryMessage(
