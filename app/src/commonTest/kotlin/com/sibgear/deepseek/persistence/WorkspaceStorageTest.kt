@@ -9,6 +9,7 @@ import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
+import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
@@ -182,6 +183,59 @@ class WorkspaceStorageTest {
             ),
             WorkspaceStorage(baseDir).load(),
         )
+    }
+
+    @Test
+    fun savesAndRestoresMcpServers() {
+        val baseDir = tempBaseDir()
+        val storage = WorkspaceStorage(baseDir)
+
+        storage.saveMcpServers(
+            listOf(
+                McpServerUiModel(
+                    id = 1,
+                    name = "ai_challenge",
+                    url = "http://127.0.0.1:3000/mcp",
+                    isEnabled = false,
+                ),
+                McpServerUiModel(
+                    id = 2,
+                    name = "node_repl",
+                    url = "https://mcp.example.com/mcp",
+                    isEnabled = true,
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                McpServerUiModel(
+                    id = 1,
+                    name = "ai_challenge",
+                    url = "http://127.0.0.1:3000/mcp",
+                    isEnabled = false,
+                ),
+                McpServerUiModel(
+                    id = 2,
+                    name = "node_repl",
+                    url = "https://mcp.example.com/mcp",
+                    isEnabled = true,
+                ),
+            ),
+            WorkspaceStorage(baseDir).loadMcpServers(),
+        )
+    }
+
+    @Test
+    fun corruptMcpServersStorageReturnsEmptyListAndKeepsCorruptCopy() {
+        val baseDir = tempBaseDir()
+        baseDir.mkdirs()
+        File(baseDir, "mcp-servers.json").writeText("{not-json")
+
+        val servers = WorkspaceStorage(baseDir).loadMcpServers()
+
+        assertEquals(emptyList(), servers)
+        assertTrue(File(baseDir, "mcp-servers.json.corrupt").exists())
     }
 
     @Test

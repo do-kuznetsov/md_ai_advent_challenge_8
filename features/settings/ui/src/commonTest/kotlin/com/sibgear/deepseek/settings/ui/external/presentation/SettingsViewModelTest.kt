@@ -3,6 +3,7 @@ package com.sibgear.deepseek.settings.ui.external.presentation
 import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
 import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
 import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRole
+import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -273,6 +274,31 @@ class SettingsViewModelTest {
         assertEquals(false, viewModel.state.mcpServers.single().isEnabled)
         assertEquals("ai_challenge", viewModel.state.mcpServers.single().name)
         assertEquals("http://127.0.0.1:3000/mcp", viewModel.state.mcpServers.single().url)
+    }
+
+    @Test
+    fun mcpServersRestoreFromInitialListAndNotifyOnChanges() = runTest {
+        val savedSnapshots = mutableListOf<List<McpServerUiModel>>()
+        val viewModel = SettingsViewModel(
+            coroutineScope = this,
+            initialMcpServers = listOf(
+                McpServerUiModel(
+                    id = 7,
+                    name = "restored",
+                    url = "http://127.0.0.1:3000/mcp",
+                    isEnabled = false,
+                ),
+            ),
+            onMcpServersChanged = { savedSnapshots += it },
+        )
+
+        assertEquals(7, viewModel.state.mcpServers.single().id)
+        assertEquals(false, viewModel.state.mcpServers.single().isEnabled)
+
+        viewModel.onEvent(SettingsEvent.McpServerEnabledChanged(7, true))
+
+        assertEquals(true, viewModel.state.mcpServers.single().isEnabled)
+        assertEquals(listOf(viewModel.state.mcpServers), savedSnapshots)
     }
 
     private fun SettingsViewModel.addMcpServerForTest(

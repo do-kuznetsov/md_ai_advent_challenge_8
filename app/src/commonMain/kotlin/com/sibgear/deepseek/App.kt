@@ -376,6 +376,10 @@ fun App() {
                     modelId = modelId.takeIf { it.isNotBlank() } ?: error("Не выбрана модель для сбора инвариантов."),
                 )
             },
+            initialMcpServers = workspaceStorage.loadMcpServers(),
+            onMcpServersChanged = { servers ->
+                workspaceStorage.saveMcpServers(servers)
+            },
         )
     }
 

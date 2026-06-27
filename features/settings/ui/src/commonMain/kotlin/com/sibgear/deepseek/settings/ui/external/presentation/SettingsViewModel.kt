@@ -13,6 +13,7 @@ import com.sibgear.deepseek.settings.ui.external.model.McpServerDraft
 import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import com.sibgear.deepseek.settings.ui.external.model.SettingsViewState
+import com.sibgear.deepseek.settings.ui.external.model.sanitizedMcpServers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -33,10 +34,12 @@ class SettingsViewModel(
         currentInvariants: List<AssistantInvariant>,
         chatMessages: List<InvariantCollectionMessage>,
     ) -> List<AssistantInvariant> = { currentInvariants, _ -> currentInvariants },
+    initialMcpServers: List<McpServerUiModel> = emptyList(),
+    private val onMcpServersChanged: (List<McpServerUiModel>) -> Unit = {},
 ) {
-    private var nextMcpServerId = 1
+    private var nextMcpServerId = (initialMcpServers.maxOfOrNull { it.id } ?: 0) + 1
 
-    var state by mutableStateOf(SettingsViewState())
+    var state by mutableStateOf(SettingsViewState(mcpServers = initialMcpServers.sanitizedMcpServers()))
         private set
 
     fun onEvent(event: SettingsEvent) {
@@ -376,20 +379,22 @@ class SettingsViewModel(
         }
 
         if (draft.id == null) {
-            state = state.copy(
-                mcpServers = state.mcpServers + McpServerUiModel(
+            updateMcpServers(
+                state.mcpServers + McpServerUiModel(
                     id = nextMcpServerId++,
                     name = draft.name.trim(),
                     url = draft.url.trim(),
                     isEnabled = true,
                 ),
+            )
+            state = state.copy(
                 isMcpServersDialogOpen = true,
                 isMcpServerFormDialogOpen = false,
                 mcpServerDraft = McpServerDraft(),
             )
         } else {
-            state = state.copy(
-                mcpServers = state.mcpServers.map { server ->
+            updateMcpServers(
+                state.mcpServers.map { server ->
                     if (server.id == draft.id) {
                         server.copy(
                             name = draft.name.trim(),
@@ -399,6 +404,8 @@ class SettingsViewModel(
                         server
                     }
                 },
+            )
+            state = state.copy(
                 isMcpServersDialogOpen = true,
                 isMcpServerFormDialogOpen = false,
                 mcpServerDraft = McpServerDraft(),
@@ -408,8 +415,8 @@ class SettingsViewModel(
 
     private fun uninstallMcpServer() {
         val id = state.mcpServerDraft.id ?: return
+        updateMcpServers(state.mcpServers.filterNot { it.id == id })
         state = state.copy(
-            mcpServers = state.mcpServers.filterNot { it.id == id },
             isMcpServersDialogOpen = true,
             isMcpServerFormDialogOpen = false,
             mcpServerDraft = McpServerDraft(),
@@ -420,15 +427,17 @@ class SettingsViewModel(
         id: Int,
         isEnabled: Boolean,
     ) {
-        state = state.copy(
-            mcpServers = state.mcpServers.map { server ->
-                if (server.id == id) {
-                    server.copy(isEnabled = isEnabled)
-                } else {
-                    server
-                }
+        updateMcpServers(
+            state.mcpServers.map { server ->
+                if (server.id == id) server.copy(isEnabled = isEnabled) else server
             },
         )
+    }
+
+    private fun updateMcpServers(servers: List<McpServerUiModel>) {
+        val safeServers = servers.sanitizedMcpServers()
+        state = state.copy(mcpServers = safeServers)
+        onMcpServersChanged(safeServers)
     }
 
     private companion object {
