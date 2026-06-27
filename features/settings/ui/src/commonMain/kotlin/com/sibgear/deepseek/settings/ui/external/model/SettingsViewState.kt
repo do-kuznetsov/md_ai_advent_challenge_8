@@ -18,10 +18,17 @@ data class SettingsViewState(
     val invariantsChatInput: String = "",
     val isInvariantsApplying: Boolean = false,
     val invariantsError: String? = null,
+    val isMcpServersDialogOpen: Boolean = false,
+    val isMcpServerFormDialogOpen: Boolean = false,
+    val mcpServers: List<McpServerUiModel> = emptyList(),
+    val mcpServerDraft: McpServerDraft = McpServerDraft(),
 ) {
     val isProfileActionEnabled: Boolean
         get() = !isProfileSaving && !isProfileInterviewLoading
 
     val isInvariantsActionEnabled: Boolean
         get() = !isInvariantsSaving && !isInvariantsApplying
+
+    val isMcpServerSaveEnabled: Boolean
+        get() = mcpServerDraft.canSave
 }

@@ -169,4 +169,119 @@ class SettingsViewModelTest {
         assertEquals(0, saveCount)
         assertTrue(viewModel.state.invariantsDraft.contains("Never expose private customer data"))
     }
+
+    @Test
+    fun mcpServersSelectionClosesSettingsAndOpensServersDialog() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.onEvent(SettingsEvent.SettingsDialogOpened)
+        viewModel.onEvent(SettingsEvent.McpServersDialogOpened)
+
+        assertEquals(false, viewModel.state.isSettingsDialogOpen)
+        assertEquals(true, viewModel.state.isMcpServersDialogOpen)
+        assertEquals(emptyList(), viewModel.state.mcpServers)
+    }
+
+    @Test
+    fun mcpServerDraftChangesAndSaveAddsStreamableHttpServer() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.onEvent(SettingsEvent.McpServersDialogOpened)
+        viewModel.onEvent(SettingsEvent.McpServerAddClicked)
+        viewModel.onEvent(SettingsEvent.McpServerDraftNameChanged("ai_challenge"))
+        viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("http://127.0.0.1:3000/mcp"))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+
+        assertEquals(true, viewModel.state.isMcpServersDialogOpen)
+        assertEquals(false, viewModel.state.isMcpServerFormDialogOpen)
+        assertEquals(1, viewModel.state.mcpServers.size)
+        assertEquals("ai_challenge", viewModel.state.mcpServers.single().name)
+        assertEquals("http://127.0.0.1:3000/mcp", viewModel.state.mcpServers.single().url)
+        assertEquals(true, viewModel.state.mcpServers.single().isEnabled)
+    }
+
+    @Test
+    fun mcpServerSaveIgnoresBlankNameOrUrl() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.onEvent(SettingsEvent.McpServerAddClicked)
+        viewModel.onEvent(SettingsEvent.McpServerDraftNameChanged("ai_challenge"))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+        assertEquals(emptyList(), viewModel.state.mcpServers)
+        assertEquals(true, viewModel.state.isMcpServerFormDialogOpen)
+
+        viewModel.onEvent(SettingsEvent.McpServerDraftNameChanged(""))
+        viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("http://127.0.0.1:3000/mcp"))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+        assertEquals(emptyList(), viewModel.state.mcpServers)
+        assertEquals(true, viewModel.state.isMcpServerFormDialogOpen)
+    }
+
+    @Test
+    fun mcpServerEditOpensSelectedServerAndSaveUpdatesUrl() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.addMcpServerForTest(
+            name = "ai_challenge",
+            url = "http://127.0.0.1:3000/mcp",
+        )
+        val serverId = viewModel.state.mcpServers.single().id
+
+        viewModel.onEvent(SettingsEvent.McpServerEditClicked(serverId))
+        assertEquals(false, viewModel.state.isMcpServersDialogOpen)
+        assertEquals(true, viewModel.state.isMcpServerFormDialogOpen)
+        assertEquals("ai_challenge", viewModel.state.mcpServerDraft.name)
+
+        viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("https://mcp.example.com/mcp"))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+
+        assertEquals(true, viewModel.state.isMcpServersDialogOpen)
+        assertEquals(false, viewModel.state.isMcpServerFormDialogOpen)
+        assertEquals("https://mcp.example.com/mcp", viewModel.state.mcpServers.single().url)
+    }
+
+    @Test
+    fun mcpServerUninstallRemovesSelectedServer() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.addMcpServerForTest(
+            name = "ai_challenge",
+            url = "http://127.0.0.1:3000/mcp",
+        )
+        val serverId = viewModel.state.mcpServers.single().id
+
+        viewModel.onEvent(SettingsEvent.McpServerEditClicked(serverId))
+        viewModel.onEvent(SettingsEvent.McpServerUninstalled)
+
+        assertEquals(true, viewModel.state.isMcpServersDialogOpen)
+        assertEquals(false, viewModel.state.isMcpServerFormDialogOpen)
+        assertEquals(emptyList(), viewModel.state.mcpServers)
+    }
+
+    @Test
+    fun mcpServerEnabledToggleChangesOnlyLocalFlag() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.addMcpServerForTest(
+            name = "ai_challenge",
+            url = "http://127.0.0.1:3000/mcp",
+        )
+        val serverId = viewModel.state.mcpServers.single().id
+
+        viewModel.onEvent(SettingsEvent.McpServerEnabledChanged(serverId, false))
+
+        assertEquals(false, viewModel.state.mcpServers.single().isEnabled)
+        assertEquals("ai_challenge", viewModel.state.mcpServers.single().name)
+        assertEquals("http://127.0.0.1:3000/mcp", viewModel.state.mcpServers.single().url)
+    }
+
+    private fun SettingsViewModel.addMcpServerForTest(
+        name: String,
+        url: String,
+    ) {
+        onEvent(SettingsEvent.McpServerAddClicked)
+        onEvent(SettingsEvent.McpServerDraftNameChanged(name))
+        onEvent(SettingsEvent.McpServerDraftUrlChanged(url))
+        onEvent(SettingsEvent.McpServerSaved)
+    }
 }

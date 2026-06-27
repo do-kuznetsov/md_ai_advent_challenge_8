@@ -17,4 +17,14 @@ sealed interface SettingsEvent {
     data class InvariantsChatInputChanged(val text: String) : SettingsEvent
     data object InvariantsChatMessageSent : SettingsEvent
     data object InvariantsApplied : SettingsEvent
+    data object McpServersDialogOpened : SettingsEvent
+    data object McpServersDialogClosed : SettingsEvent
+    data object McpServerAddClicked : SettingsEvent
+    data class McpServerEditClicked(val id: Int) : SettingsEvent
+    data object McpServerFormClosed : SettingsEvent
+    data class McpServerDraftNameChanged(val text: String) : SettingsEvent
+    data class McpServerDraftUrlChanged(val text: String) : SettingsEvent
+    data object McpServerSaved : SettingsEvent
+    data object McpServerUninstalled : SettingsEvent
+    data class McpServerEnabledChanged(val id: Int, val isEnabled: Boolean) : SettingsEvent
 }

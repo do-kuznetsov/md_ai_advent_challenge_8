@@ -9,6 +9,8 @@ import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionMes
 import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRole
 import com.sibgear.deepseek.settings.ui.external.model.InvariantsChatMessage
 import com.sibgear.deepseek.settings.ui.external.model.InvariantsChatRole
+import com.sibgear.deepseek.settings.ui.external.model.McpServerDraft
+import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import com.sibgear.deepseek.settings.ui.external.model.SettingsViewState
 import kotlinx.coroutines.CancellationException
@@ -32,6 +34,8 @@ class SettingsViewModel(
         chatMessages: List<InvariantCollectionMessage>,
     ) -> List<AssistantInvariant> = { currentInvariants, _ -> currentInvariants },
 ) {
+    private var nextMcpServerId = 1
+
     var state by mutableStateOf(SettingsViewState())
         private set
 
@@ -65,6 +69,20 @@ class SettingsViewModel(
             }
             SettingsEvent.InvariantsChatMessageSent -> sendInvariantsChatMessage()
             SettingsEvent.InvariantsApplied -> applyInvariantsChat()
+            SettingsEvent.McpServersDialogOpened -> openMcpServersDialog()
+            SettingsEvent.McpServersDialogClosed -> closeMcpServersDialog()
+            SettingsEvent.McpServerAddClicked -> openMcpServerAddDialog()
+            is SettingsEvent.McpServerEditClicked -> openMcpServerEditDialog(event.id)
+            SettingsEvent.McpServerFormClosed -> closeMcpServerFormDialog()
+            is SettingsEvent.McpServerDraftNameChanged -> {
+                state = state.copy(mcpServerDraft = state.mcpServerDraft.copy(name = event.text))
+            }
+            is SettingsEvent.McpServerDraftUrlChanged -> {
+                state = state.copy(mcpServerDraft = state.mcpServerDraft.copy(url = event.text))
+            }
+            SettingsEvent.McpServerSaved -> saveMcpServer()
+            SettingsEvent.McpServerUninstalled -> uninstallMcpServer()
+            is SettingsEvent.McpServerEnabledChanged -> updateMcpServerEnabled(event.id, event.isEnabled)
         }
     }
 
@@ -303,6 +321,114 @@ class SettingsViewModel(
                 )
             }
         }
+    }
+
+    private fun openMcpServersDialog() {
+        state = state.copy(
+            isSettingsDialogOpen = false,
+            isMcpServersDialogOpen = true,
+            isMcpServerFormDialogOpen = false,
+            mcpServerDraft = McpServerDraft(),
+        )
+    }
+
+    private fun closeMcpServersDialog() {
+        state = state.copy(
+            isMcpServersDialogOpen = false,
+            isMcpServerFormDialogOpen = false,
+            mcpServerDraft = McpServerDraft(),
+        )
+    }
+
+    private fun openMcpServerAddDialog() {
+        state = state.copy(
+            isMcpServersDialogOpen = false,
+            isMcpServerFormDialogOpen = true,
+            mcpServerDraft = McpServerDraft(),
+        )
+    }
+
+    private fun openMcpServerEditDialog(id: Int) {
+        val server = state.mcpServers.firstOrNull { it.id == id } ?: return
+        state = state.copy(
+            isMcpServersDialogOpen = false,
+            isMcpServerFormDialogOpen = true,
+            mcpServerDraft = McpServerDraft(
+                id = server.id,
+                name = server.name,
+                url = server.url,
+            ),
+        )
+    }
+
+    private fun closeMcpServerFormDialog() {
+        state = state.copy(
+            isMcpServersDialogOpen = true,
+            isMcpServerFormDialogOpen = false,
+            mcpServerDraft = McpServerDraft(),
+        )
+    }
+
+    private fun saveMcpServer() {
+        val draft = state.mcpServerDraft
+        if (!draft.canSave) {
+            return
+        }
+
+        if (draft.id == null) {
+            state = state.copy(
+                mcpServers = state.mcpServers + McpServerUiModel(
+                    id = nextMcpServerId++,
+                    name = draft.name.trim(),
+                    url = draft.url.trim(),
+                    isEnabled = true,
+                ),
+                isMcpServersDialogOpen = true,
+                isMcpServerFormDialogOpen = false,
+                mcpServerDraft = McpServerDraft(),
+            )
+        } else {
+            state = state.copy(
+                mcpServers = state.mcpServers.map { server ->
+                    if (server.id == draft.id) {
+                        server.copy(
+                            name = draft.name.trim(),
+                            url = draft.url.trim(),
+                        )
+                    } else {
+                        server
+                    }
+                },
+                isMcpServersDialogOpen = true,
+                isMcpServerFormDialogOpen = false,
+                mcpServerDraft = McpServerDraft(),
+            )
+        }
+    }
+
+    private fun uninstallMcpServer() {
+        val id = state.mcpServerDraft.id ?: return
+        state = state.copy(
+            mcpServers = state.mcpServers.filterNot { it.id == id },
+            isMcpServersDialogOpen = true,
+            isMcpServerFormDialogOpen = false,
+            mcpServerDraft = McpServerDraft(),
+        )
+    }
+
+    private fun updateMcpServerEnabled(
+        id: Int,
+        isEnabled: Boolean,
+    ) {
+        state = state.copy(
+            mcpServers = state.mcpServers.map { server ->
+                if (server.id == id) {
+                    server.copy(isEnabled = isEnabled)
+                } else {
+                    server
+                }
+            },
+        )
     }
 
     private companion object {
