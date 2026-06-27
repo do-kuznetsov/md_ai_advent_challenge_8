@@ -92,7 +92,7 @@ internal fun createVisitorLogServer(
             connectionLogger.onClose()
             scheduler.close()
         }
-        registerVisitorLogTool(
+        registerVisitTools(
             visitorLogRepository = visitorLogRepository,
             weatherClient = weatherClient,
         )

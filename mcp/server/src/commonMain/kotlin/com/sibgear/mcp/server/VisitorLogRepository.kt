@@ -4,8 +4,10 @@ import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
+import java.sql.Statement
 
 internal data class VisitorLogEntry(
+    val id: Long? = null,
     val userName: String,
     val localTime: String,
     val city: String,
@@ -18,7 +20,9 @@ internal data class VisitorLogEntry(
 }
 
 internal interface VisitorLogRepository {
-    fun addAndGetRecent(entry: VisitorLogEntry, limit: Int): List<VisitorLogEntry>
+    fun add(entry: VisitorLogEntry): VisitorLogEntry
+    fun count(): Int
+    fun findRecent(limit: Int, offset: Int = 0): List<VisitorLogEntry>
     fun findBetween(createdAtFromInclusive: String, createdAtToInclusive: String): List<VisitorLogEntry>
 }
 
@@ -28,6 +32,7 @@ internal class JdbcVisitorLogRepository private constructor(
     private val connection: Connection = DriverManager.getConnection(jdbcUrl)
 
     init {
+        connection.autoCommit = true
         connection.createStatement().use { statement ->
             statement.executeUpdate(
                 """
@@ -45,7 +50,7 @@ internal class JdbcVisitorLogRepository private constructor(
         }
     }
 
-    override fun addAndGetRecent(entry: VisitorLogEntry, limit: Int): List<VisitorLogEntry> =
+    override fun add(entry: VisitorLogEntry): VisitorLogEntry =
         synchronized(connection) {
             connection.prepareStatement(
                 """
@@ -59,6 +64,7 @@ internal class JdbcVisitorLogRepository private constructor(
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
+                Statement.RETURN_GENERATED_KEYS,
             ).use { statement ->
                 statement.setString(1, entry.userName)
                 statement.setString(2, entry.localTime)
@@ -67,20 +73,38 @@ internal class JdbcVisitorLogRepository private constructor(
                 statement.setString(5, entry.clientVersion)
                 statement.setString(6, entry.createdAt)
                 statement.executeUpdate()
+                val id = statement.generatedKeys.use { keys ->
+                    if (keys.next()) keys.getLong(1) else null
+                }
+                entry.copy(id = id)
             }
+        }
 
+    override fun count(): Int =
+        synchronized(connection) {
+            connection.prepareStatement("SELECT COUNT(*) FROM visitor_log").use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    if (resultSet.next()) resultSet.getInt(1) else 0
+                }
+            }
+        }
+
+    override fun findRecent(limit: Int, offset: Int): List<VisitorLogEntry> =
+        synchronized(connection) {
             if (limit <= 0) {
                 emptyList()
             } else {
                 connection.prepareStatement(
                     """
-                    SELECT user_name, local_time, city, client_name, client_version, created_at
+                    SELECT id, user_name, local_time, city, client_name, client_version, created_at
                     FROM visitor_log
                     ORDER BY id DESC
                     LIMIT ?
+                    OFFSET ?
                     """.trimIndent(),
                 ).use { statement ->
                     statement.setInt(1, limit)
+                    statement.setInt(2, offset.coerceAtLeast(0))
                     statement.executeQuery().use { resultSet ->
                         buildList {
                             while (resultSet.next()) {
@@ -99,7 +123,7 @@ internal class JdbcVisitorLogRepository private constructor(
         synchronized(connection) {
             connection.prepareStatement(
                 """
-                SELECT user_name, local_time, city, client_name, client_version, created_at
+                SELECT id, user_name, local_time, city, client_name, client_version, created_at
                 FROM visitor_log
                 WHERE created_at >= ? AND created_at <= ?
                 ORDER BY id ASC
@@ -123,6 +147,7 @@ internal class JdbcVisitorLogRepository private constructor(
 
     private fun ResultSet.toVisitorLogEntry(): VisitorLogEntry =
         VisitorLogEntry(
+            id = getLong("id"),
             userName = getString("user_name"),
             localTime = getString("local_time"),
             city = getString("city"),

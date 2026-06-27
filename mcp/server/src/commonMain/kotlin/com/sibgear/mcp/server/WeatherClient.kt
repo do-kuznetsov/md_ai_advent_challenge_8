@@ -39,14 +39,26 @@ internal class OpenMeteoWeatherClient(
         }.getOrDefault(WeatherResult.Unavailable)
 
     private suspend fun findLocation(city: String): GeocodingLocation? {
-        val response = httpClient.get("https://geocoding-api.open-meteo.com/v1/search") {
-            parameter("name", city)
-            parameter("count", 1)
-            parameter("language", "en")
-            parameter("format", "json")
-        }.body<GeocodingResponse>()
+        val languages = if (city.any { it in CyrillicRange }) {
+            listOf("ru", "en")
+        } else {
+            listOf("en", "ru")
+        }
 
-        return response.results?.firstOrNull()
+        languages.forEach { language ->
+            val response = httpClient.get("https://geocoding-api.open-meteo.com/v1/search") {
+                parameter("name", city)
+                parameter("count", 1)
+                parameter("language", language)
+                parameter("format", "json")
+            }.body<GeocodingResponse>()
+
+            response.results?.firstOrNull()?.let { location ->
+                return location
+            }
+        }
+
+        return null
     }
 
     companion object {
@@ -62,6 +74,8 @@ internal class OpenMeteoWeatherClient(
             }
     }
 }
+
+private val CyrillicRange = '\u0400'..'\u04FF'
 
 @Serializable
 private data class GeocodingResponse(
