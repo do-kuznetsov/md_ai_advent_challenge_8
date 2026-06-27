@@ -16,6 +16,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":features:chat:domain"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.ktor.client.cio)
@@ -25,6 +26,7 @@ kotlin {
 
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

@@ -14,14 +14,22 @@ import com.sibgear.deepseek.assistant.memory.domain.model.MemoryLayer
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
 import com.sibgear.deepseek.assistant.memory.domain.model.UserProfile
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiChatMessage
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterChatCompletionResponse
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterToolCall
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterToolCallFunction
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
+import com.sibgear.deepseek.chat.domain.model.AiToolDefinition
 import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageKind
 import com.sibgear.deepseek.chat.history.domain.model.HistoryRole
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -144,9 +152,9 @@ class OpenRouterChatMapperTest {
         )
 
         assertEquals("system", apiRequest.messages.first().role)
-        assertEquals(true, apiRequest.messages.first().content.contains("[IMMUTABLE_WORKSPACE_INVARIANTS]"))
-        assertEquals(true, apiRequest.messages.first().content.contains("я подтверждаю"))
-        assertEquals(true, apiRequest.messages.first().content.contains("Do not add Ktor"))
+        assertEquals(true, apiRequest.messages.first().content.orEmpty().contains("[IMMUTABLE_WORKSPACE_INVARIANTS]"))
+        assertEquals(true, apiRequest.messages.first().content.orEmpty().contains("я подтверждаю"))
+        assertEquals(true, apiRequest.messages.first().content.orEmpty().contains("Do not add Ktor"))
     }
 
     @Test
@@ -171,6 +179,85 @@ class OpenRouterChatMapperTest {
 
         assertEquals(listOf("user"), apiRequest.messages.map { it.role })
         assertEquals("""{"schema":true}""", apiRequest.messages.single().content)
+    }
+
+    @Test
+    fun requestBodySerializesToolsAndTransientToolMessages() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "openrouter/test", provider = AiProvider.OpenRouter),
+            apiSettings = ApiSettings(),
+        )
+
+        val apiRequest = request.toOpenRouterChatCompletionRequest(
+            contextMessages = emptyList(),
+            stream = false,
+            tools = listOf(testToolDefinition()),
+            extraMessages = listOf(
+                OpenRouterApiChatMessage(
+                    role = "assistant",
+                    toolCalls = listOf(
+                        OpenRouterToolCall(
+                            id = "call_1",
+                            type = "function",
+                            function = OpenRouterToolCallFunction(
+                                name = "ai_challenge__lookup",
+                                arguments = """{"query":"visitor"}""",
+                            ),
+                        ),
+                    ),
+                ),
+                OpenRouterApiChatMessage(
+                    role = "tool",
+                    content = "tool result",
+                    toolCallId = "call_1",
+                ),
+            ),
+        )
+
+        assertEquals(false, apiRequest.stream)
+        assertEquals("auto", apiRequest.toolChoice)
+        assertEquals("ai_challenge__lookup", apiRequest.tools?.single()?.function?.name)
+        assertEquals("object", apiRequest.tools?.single()?.function?.parameters?.get("type")?.toString()?.trim('"'))
+        assertEquals("tool", apiRequest.messages.last().role)
+        assertEquals("call_1", apiRequest.messages.last().toolCallId)
+        assertEquals("tool result", apiRequest.messages.last().content)
+        val jsonBody = Json.encodeToString(apiRequest)
+        assertEquals(true, jsonBody.contains(""""tools":[{"type":"function""""))
+        assertEquals(true, jsonBody.contains(""""tool_calls":[{"id":"call_1","type":"function""""))
+    }
+
+    @Test
+    fun responseParsesAssistantToolCalls() {
+        val response = Json.decodeFromString<OpenRouterChatCompletionResponse>(
+            """
+                {
+                  "choices": [
+                    {
+                      "message": {
+                        "content": null,
+                        "tool_calls": [
+                          {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                              "name": "ai_challenge__lookup",
+                              "arguments": "{\"query\":\"visitor\"}"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val toolCall = response.choices.single().message?.toolCalls?.single()
+        assertEquals("call_1", toolCall?.id)
+        assertEquals("ai_challenge__lookup", toolCall?.function?.name)
+        assertEquals("""{"query":"visitor"}""", toolCall?.function?.arguments)
     }
 
     @Test
@@ -281,3 +368,21 @@ class OpenRouterChatMapperTest {
         )
     }
 }
+
+private fun testToolDefinition(): AiToolDefinition =
+    AiToolDefinition(
+        name = "ai_challenge__lookup",
+        description = "Lookup visitor",
+        parameters = JsonObject(
+            mapOf(
+                "type" to JsonPrimitive("object"),
+                "properties" to JsonObject(
+                    mapOf(
+                        "query" to JsonObject(
+                            mapOf("type" to JsonPrimitive("string")),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )

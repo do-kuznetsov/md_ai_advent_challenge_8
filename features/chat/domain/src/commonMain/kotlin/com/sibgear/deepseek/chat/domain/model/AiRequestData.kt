@@ -8,6 +8,7 @@ data class AiRequestData(
     val apiSettings: ApiSettings,
     val contextManagementSettings: ContextManagementSettings = ContextManagementSettings(),
     val persistUserMessage: Boolean = true,
+    val toolProvider: AiToolProvider? = null,
 )
 
 data class PromptAttachment(

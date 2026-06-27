@@ -23,11 +23,15 @@ import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toMemoryUpdates
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.toStickyFacts
 import com.sibgear.deepseek.chat.data.deepseek.internal.mapper.mergeStickyFacts
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiErrorResponse
+import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiChatMessage
+import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekAssistantMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatCompletionResponse
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekResponseUsage
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolInvocation
+import com.sibgear.deepseek.chat.domain.model.AiToolSession
 import com.sibgear.deepseek.chat.domain.model.BranchSelection
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ChatInvariant
@@ -52,6 +56,7 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlin.time.TimeSource
 
 class DeepSeekChatRepository(
@@ -104,6 +109,7 @@ class DeepSeekChatRepository(
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
                 servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
+                allowTools = true,
             )
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
@@ -181,6 +187,7 @@ class DeepSeekChatRepository(
                 includeSystemPrompt = true,
                 effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
                 servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
+                allowTools = true,
             )
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
@@ -401,7 +408,135 @@ class DeepSeekChatRepository(
         includeSystemPrompt: Boolean,
         servicePrompt: String? = null,
         effectiveSystemPrompt: String? = null,
+        allowTools: Boolean = false,
     ): DeepSeekCompletionResult {
+        val toolProvider = request.toolProvider.takeIf { allowTools }
+            ?: return sendSingleCompletion(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+            )
+
+        return toolProvider.withSession { session ->
+            sendCompletionWithTools(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                toolSession = session,
+            )
+        }
+    }
+
+    private suspend fun sendCompletionWithTools(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        toolSession: AiToolSession,
+    ): DeepSeekCompletionResult {
+        val catalog = toolSession.catalog
+        if (catalog.tools.isEmpty()) {
+            return sendSingleCompletion(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                toolWarnings = catalog.warnings,
+            )
+        }
+
+        var extraMessages = emptyList<DeepSeekApiChatMessage>()
+        repeat(MaxToolCallRounds) {
+            val result = sendSingleCompletionRaw(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                tools = catalog.tools,
+                toolWarnings = catalog.warnings,
+                extraMessages = extraMessages,
+            )
+            result.errorResult?.let { return it }
+
+            val message = result.message
+            val toolCalls = message?.toolCalls.orEmpty()
+            if (toolCalls.isEmpty()) {
+                val content = message?.content?.takeIf { it.isNotBlank() }
+                    ?: "DeepSeek вернул пустой ответ."
+                return DeepSeekCompletionResult(
+                    content = content,
+                    usage = result.usage,
+                )
+            }
+
+            extraMessages = extraMessages + DeepSeekApiChatMessage(
+                role = "assistant",
+                content = message?.content,
+                toolCalls = toolCalls,
+            ) + toolCalls.map { toolCall ->
+                val toolResult = toolSession.callTool(
+                    AiToolInvocation(
+                        name = toolCall.function.name,
+                        arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                    ),
+                )
+                DeepSeekApiChatMessage(
+                    role = "tool",
+                    content = toolResult.content,
+                    toolCallId = toolCall.id,
+                )
+            }
+        }
+
+        return DeepSeekCompletionResult(
+            content = "Ошибка MCP tools: достигнут лимит вызовов tools за один запрос.",
+            isError = true,
+        )
+    }
+
+    private suspend fun sendSingleCompletion(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String? = null,
+        effectiveSystemPrompt: String? = null,
+        toolWarnings: List<String> = emptyList(),
+    ): DeepSeekCompletionResult {
+        val result = sendSingleCompletionRaw(
+            request = request,
+            contextMessages = contextMessages,
+            includeSystemPrompt = includeSystemPrompt,
+            servicePrompt = servicePrompt,
+            effectiveSystemPrompt = effectiveSystemPrompt,
+            toolWarnings = toolWarnings,
+        )
+        result.errorResult?.let { return it }
+        val content = result.message?.content?.takeIf { it.isNotBlank() }
+            ?: "DeepSeek вернул пустой ответ."
+
+        return DeepSeekCompletionResult(
+            content = content,
+            usage = result.usage,
+        )
+    }
+
+    private suspend fun sendSingleCompletionRaw(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String? = null,
+        effectiveSystemPrompt: String? = null,
+        tools: List<com.sibgear.deepseek.chat.domain.model.AiToolDefinition> = emptyList(),
+        toolWarnings: List<String> = emptyList(),
+        extraMessages: List<DeepSeekApiChatMessage> = emptyList(),
+    ): DeepSeekRawCompletionResult {
         val response = client.post(ChatCompletionsUrl) {
             bearerAuth(apiKey)
             header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
@@ -411,28 +546,30 @@ class DeepSeekChatRepository(
                     includeSystemPrompt = includeSystemPrompt,
                     servicePrompt = servicePrompt,
                     effectiveSystemPrompt = effectiveSystemPrompt,
+                    tools = tools,
+                    toolWarnings = toolWarnings,
+                    extraMessages = extraMessages,
                 ),
             )
         }
 
         val body = response.bodyAsText()
         if (!response.status.isSuccess()) {
-            return DeepSeekCompletionResult(
-                content = formatApiError(
-                    statusCode = response.status.value,
-                    statusDescription = response.status.description,
-                    body = body,
+            return DeepSeekRawCompletionResult(
+                errorResult = DeepSeekCompletionResult(
+                    content = formatApiError(
+                        statusCode = response.status.value,
+                        statusDescription = response.status.description,
+                        body = body,
+                    ),
+                    isError = true,
                 ),
-                isError = true,
             )
         }
 
         val completion = json.decodeFromString<DeepSeekChatCompletionResponse>(body)
-        val content = completion.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
-            ?: "DeepSeek вернул пустой ответ."
-
-        return DeepSeekCompletionResult(
-            content = content,
+        return DeepSeekRawCompletionResult(
+            message = completion.choices.firstOrNull()?.message,
             usage = completion.usage,
         )
     }
@@ -594,6 +731,12 @@ private data class DeepSeekCompletionResult(
     val isError: Boolean = false,
 )
 
+private data class DeepSeekRawCompletionResult(
+    val message: DeepSeekAssistantMessage? = null,
+    val usage: DeepSeekResponseUsage? = null,
+    val errorResult: DeepSeekCompletionResult? = null,
+)
+
 private data class PreparedMemory(
     val effectiveSystemPrompt: String,
     val metadata: HistoryMessageMemoryMetadata?,
@@ -621,6 +764,17 @@ private val InvariantCategory.storageValue: String
 private fun formatMemoryError(exception: Throwable): String =
     "memory: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
 
+private fun String.toJsonObjectOrEmpty(): JsonObject =
+    runCatching {
+        ToolArgumentsJson.parseToJsonElement(this) as? JsonObject
+    }.getOrNull() ?: JsonObject(emptyMap())
+
+private val ToolArgumentsJson = Json {
+    ignoreUnknownKeys = true
+    explicitNulls = false
+}
+
+private const val MaxToolCallRounds = 4
 private const val ChatCompletionsUrl = "https://api.deepseek.com/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L
 private const val RequestTimeoutMillis = 180_000L

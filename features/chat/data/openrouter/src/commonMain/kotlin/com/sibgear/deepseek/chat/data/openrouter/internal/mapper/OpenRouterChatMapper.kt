@@ -6,8 +6,11 @@ import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdate
 import com.sibgear.deepseek.assistant.memory.domain.model.MemoryUpdateAction
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterApiChatMessage
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterChatCompletionRequest
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterChatTool
+import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterChatToolFunction
 import com.sibgear.deepseek.chat.data.openrouter.internal.model.OpenRouterResponseUsage
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolDefinition
 import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
@@ -41,8 +44,14 @@ internal fun AiRequestData.toOpenRouterChatCompletionRequest(
     includeSystemPrompt: Boolean = true,
     servicePrompt: String? = null,
     effectiveSystemPrompt: String? = null,
+    stream: Boolean = true,
+    tools: List<AiToolDefinition> = emptyList(),
+    toolWarnings: List<String> = emptyList(),
+    extraMessages: List<OpenRouterApiChatMessage> = emptyList(),
 ): OpenRouterChatCompletionRequest {
-    val trimmedSystemPrompt = (effectiveSystemPrompt ?: systemPrompt).trim()
+    val trimmedSystemPrompt = (effectiveSystemPrompt ?: systemPrompt)
+        .withToolWarnings(toolWarnings)
+        .trim()
     return OpenRouterChatCompletionRequest(
         model = model.id,
         messages = buildList {
@@ -57,12 +66,42 @@ internal fun AiRequestData.toOpenRouterChatCompletionRequest(
             servicePrompt?.let { prompt ->
                 add(OpenRouterApiChatMessage(role = "user", content = prompt))
             }
+
+            addAll(extraMessages)
         },
-        stream = true,
+        stream = stream,
         temperature = apiSettings.openRouterTemperature(),
         maxTokens = apiSettings.openRouterMaxTokens(),
         stop = apiSettings.openRouterStop(),
+        tools = tools.takeIf { it.isNotEmpty() }?.map { tool ->
+            OpenRouterChatTool(
+                type = "function",
+                function = OpenRouterChatToolFunction(
+                    name = tool.name,
+                    description = tool.description,
+                    parameters = tool.parameters,
+                ),
+            )
+        },
+        toolChoice = "auto".takeIf { tools.isNotEmpty() },
     )
+}
+
+private fun String.withToolWarnings(warnings: List<String>): String {
+    if (warnings.isEmpty()) {
+        return this
+    }
+    return buildString {
+        append(this@withToolWarnings)
+        if (isNotBlank()) {
+            appendLine()
+            appendLine()
+        }
+        appendLine("[MCP_WARNINGS]")
+        warnings.forEach { warning ->
+            appendLine("- $warning")
+        }
+    }
 }
 
 internal fun AiRequestData.toOpenRouterAssistantHistoryMessage(

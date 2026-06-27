@@ -48,6 +48,8 @@ import com.sibgear.deepseek.persistence.WorkspaceTabSnapshot
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import com.sibgear.deepseek.settings.ui.external.presentation.SettingsViewModel
 import com.sibgear.deepseek.settings.ui.external.view.SettingsDialogs
+import com.sibgear.mcp.client.McpAiToolProvider
+import com.sibgear.mcp.client.McpServerConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
@@ -94,8 +96,22 @@ fun App() {
             AiProvider.OpenRouter.name to openRouterAssistantService,
         )
     }
+    val mcpToolProvider = remember(workspaceStorage) {
+        McpAiToolProvider(
+            loadServers = {
+                workspaceStorage.loadMcpServers().map { server ->
+                    McpServerConnection(
+                        id = server.id,
+                        name = server.name,
+                        url = server.url,
+                        isEnabled = server.isEnabled,
+                    )
+                }
+            },
+        )
+    }
 
-    val viewModel = remember(scope, workspaceStorage) {
+    val viewModel = remember(scope, workspaceStorage, mcpToolProvider) {
         fun createChatViewModel(
             tabNumber: Int,
             storageType: ChatStorageType,
@@ -162,6 +178,7 @@ fun App() {
                 initialSystemPrompt = initialSystemPrompt,
                 initialPrompt = initialPrompt,
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
+                toolProvider = mcpToolProvider,
                 persistMessage = { message ->
                     historyInteractor.add(listOf(message).toHistoryMessages().single()).toChatMessages()
                 },
