@@ -51,6 +51,7 @@ import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import com.sibgear.deepseek.settings.ui.external.presentation.SettingsViewModel
 import com.sibgear.deepseek.settings.ui.external.view.SettingsDialogs
 import com.sibgear.deepseek.tools.LocalFileAiToolProvider
+import com.sibgear.deepseek.tools.LocalTimeAiToolProvider
 import com.sibgear.mcp.client.McpAiToolProvider
 import com.sibgear.mcp.client.McpServerConnection
 import kotlinx.coroutines.Dispatchers
@@ -116,10 +117,14 @@ fun App() {
     val localFileToolProvider = remember {
         LocalFileAiToolProvider(filesDir = defaultClientFilesDir())
     }
-    val toolProvider = remember(localFileToolProvider, mcpToolProvider) {
+    val localTimeToolProvider = remember {
+        LocalTimeAiToolProvider()
+    }
+    val toolProvider = remember(localFileToolProvider, localTimeToolProvider, mcpToolProvider) {
         CompositeAiToolProvider(
             listOf(
                 localFileToolProvider,
+                localTimeToolProvider,
                 mcpToolProvider,
             ),
         )
