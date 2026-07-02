@@ -34,4 +34,7 @@ include(
     ":mcp:server:weather",
     ":mcp:server:worldtime",
     ":mcp:client",
+    ":rag:domain",
+    ":rag:data",
+    ":rag:app",
 )
