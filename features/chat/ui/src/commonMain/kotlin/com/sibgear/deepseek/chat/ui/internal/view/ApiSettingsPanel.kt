@@ -168,6 +168,17 @@ private fun ModelSelector(
                 HorizontalDivider()
             }
 
+            state.magnitCopilotModels.forEach { model ->
+                DropdownMenuItem(
+                    text = { Text(model.displayName) },
+                    onClick = { onEvent(ChatEvent.ModelSelected(model)) },
+                )
+            }
+
+            if (state.magnitCopilotModels.isNotEmpty()) {
+                HorizontalDivider()
+            }
+
             state.deepSeekModels.forEach { model ->
                 DropdownMenuItem(
                     text = { Text(model.displayName) },

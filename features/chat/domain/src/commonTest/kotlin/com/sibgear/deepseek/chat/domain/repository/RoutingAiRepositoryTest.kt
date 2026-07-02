@@ -49,6 +49,28 @@ class RoutingAiRepositoryTest {
     }
 
     @Test
+    fun routesMagnitCopilotRequestToMagnitCopilotRepository() = runTest {
+        val deepSeekRepository = RecordingChatRepository()
+        val magnitCopilotRepository = RecordingChatRepository()
+        val openRouterRepository = RecordingChatRepository()
+        val routingRepository = RoutingAiRepository(
+            chatRepositories = mapOf(
+                AiProvider.DeepSeek to deepSeekRepository,
+                AiProvider.MagnitCopilot to magnitCopilotRepository,
+                AiProvider.OpenRouter to openRouterRepository,
+            ),
+            modelRepositories = emptyMap(),
+        )
+        val request = request(AiProvider.MagnitCopilot)
+
+        routingRepository.sendMessage(request)
+
+        assertEquals(null, deepSeekRepository.lastRequest)
+        assertEquals(request, magnitCopilotRepository.lastRequest)
+        assertEquals(null, openRouterRepository.lastRequest)
+    }
+
+    @Test
     fun loadsModelsThroughProviderModelsRepository() = runTest {
         val model = AiModel(id = "openrouter/test", provider = AiProvider.OpenRouter)
         val routingRepository = RoutingAiRepository(

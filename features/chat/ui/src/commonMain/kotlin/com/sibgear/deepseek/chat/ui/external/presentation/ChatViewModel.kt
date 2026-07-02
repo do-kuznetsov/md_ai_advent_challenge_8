@@ -173,7 +173,10 @@ class ChatViewModel(
 
     fun loadModels() {
         coroutineScope.launch {
-            state = state.copy(openRouterModelsStatus = "OpenRouter: загрузка моделей...")
+            state = state.copy(
+                magnitCopilotModelsStatus = "MCopilot: загрузка моделей...",
+                openRouterModelsStatus = "OpenRouter: загрузка моделей...",
+            )
 
             val deepSeekModels = runCatching {
                 interactor.loadModels(AiProvider.DeepSeek)
@@ -183,9 +186,31 @@ class ChatViewModel(
 
             state = state.copy(
                 deepSeekModels = deepSeekModels,
-                selectedModel = state.selectedModel.takeIf { selectedModel ->
-                    deepSeekModels.any { it.provider == selectedModel.provider && it.id == selectedModel.id }
-                } ?: deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel,
+                selectedModel = if (state.selectedModel.provider == AiProvider.DeepSeek) {
+                    state.selectedModel.takeIf { selectedModel ->
+                        deepSeekModels.any { it.provider == selectedModel.provider && it.id == selectedModel.id }
+                    } ?: deepSeekFallback(deepSeekModels)
+                } else {
+                    state.selectedModel
+                },
+            ).withContextPresentation()
+
+            val magnitCopilotModels = runCatching {
+                interactor.loadModels(AiProvider.MagnitCopilot)
+            }.getOrDefault(emptyList())
+            state = state.copy(
+                magnitCopilotModels = magnitCopilotModels,
+                selectedModel = if (state.selectedModel.provider == AiProvider.MagnitCopilot &&
+                    magnitCopilotModels.none { it.id == state.selectedModel.id }
+                ) {
+                    deepSeekFallback(state.deepSeekModels)
+                } else {
+                    state.selectedModel
+                },
+                magnitCopilotModelsStatus = when {
+                    magnitCopilotModels.isEmpty() -> "MCopilot: нет моделей"
+                    else -> "MCopilot: ${magnitCopilotModels.size} моделей"
+                },
             ).withContextPresentation()
 
             try {
@@ -197,8 +222,11 @@ class ChatViewModel(
                 allOpenRouterModels = emptyList()
                 state = state.copy(
                     openRouterModels = emptyList(),
-                    selectedModel = state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id }
-                        ?: ChatDefaults.DefaultModel,
+                    selectedModel = if (state.selectedModel.provider == AiProvider.OpenRouter) {
+                        deepSeekFallback(state.deepSeekModels)
+                    } else {
+                        state.selectedModel
+                    },
                     openRouterModelsStatus = "OpenRouter: ${exception.message ?: "ошибка загрузки моделей"}",
                 ).withContextPresentation()
             }
@@ -420,6 +448,9 @@ class ChatViewModel(
             openRouterModelsStatus = status,
         ).withContextPresentation()
     }
+
+    private fun deepSeekFallback(models: List<AiModel>): AiModel =
+        models.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel
 
     private fun ChatViewState.withContextPresentation(): ChatViewState =
         copy(

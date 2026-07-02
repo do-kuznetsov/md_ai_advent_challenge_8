@@ -20,9 +20,11 @@ data class ChatViewState(
     val attachmentError: String? = null,
     val selectedModel: AiModel = ChatDefaults.DefaultModel,
     val openRouterModels: List<AiModel> = emptyList(),
+    val magnitCopilotModels: List<AiModel> = emptyList(),
     val deepSeekModels: List<AiModel> = listOf(ChatDefaults.DefaultModel),
     val modelFilter: String = "free",
     val openRouterModelsStatus: String? = null,
+    val magnitCopilotModelsStatus: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val contextUsageLabel: String = buildContextUsageLabel(messages, selectedModel),
     val isLoading: Boolean = false,
@@ -47,7 +49,7 @@ data class ChatViewState(
     val maxTokensInput: String = ApiSettings().maxTokens.toString(),
 ) {
     val availableModels: List<AiModel>
-        get() = openRouterModels + deepSeekModels
+        get() = openRouterModels + magnitCopilotModels + deepSeekModels
 
     val isSendEnabled: Boolean
         get() = prompt.isNotBlank() && !isLoading

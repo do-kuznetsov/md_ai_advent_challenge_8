@@ -1,0 +1,918 @@
+package com.sibgear.deepseek.chat.data.magnit.external.repository
+
+import com.sibgear.deepseek.assistant.memory.domain.interactor.AssistantMemoryInteractor
+import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
+import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
+import com.sibgear.deepseek.chat.data.magnit.external.MagnitCopilotBaseUrl
+import com.sibgear.deepseek.chat.data.magnit.external.MagnitCopilotProviderLabel
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toChatMessages
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toChatMemoryItems
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toChatMemoryRetrievalPlan
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toContextMessages
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.mergeStickyFacts
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toBranchRoutingDecision
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toChatBranches
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toHistoryBranches
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toOpenRouterAssistantHistoryMessage
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toOpenRouterChatCompletionRequest
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toOpenRouterCompressionSummaryHistoryMessage
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toOpenRouterUserHistoryMessage
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toHistoryFacts
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toHistoryMemoryChanges
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toHistoryMemoryItems
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toHistoryMemoryLayers
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toMemoryCandidates
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toMemoryUpdates
+import com.sibgear.deepseek.chat.data.magnit.internal.mapper.toStickyFacts
+import com.sibgear.deepseek.chat.data.magnit.internal.http.magnitCopilotHttpClient
+import com.sibgear.deepseek.chat.data.magnit.internal.model.OpenRouterApiErrorResponse
+import com.sibgear.deepseek.chat.data.magnit.internal.model.OpenRouterApiChatMessage
+import com.sibgear.deepseek.chat.data.magnit.internal.model.OpenRouterAssistantMessage
+import com.sibgear.deepseek.chat.data.magnit.internal.model.OpenRouterChatCompletionResponse
+import com.sibgear.deepseek.chat.data.magnit.internal.model.OpenRouterCompletionResult
+import com.sibgear.deepseek.chat.data.magnit.internal.repository.OpenRouterMaxRetries
+import com.sibgear.deepseek.chat.data.magnit.internal.repository.OpenRouterRetryDelayMillis
+import com.sibgear.deepseek.chat.data.magnit.internal.repository.OpenRouterStreamAccumulator
+import com.sibgear.deepseek.chat.data.magnit.internal.repository.OpenRouterStreamResult
+import com.sibgear.deepseek.chat.data.magnit.internal.repository.isOpenRouterRetryableStatus
+import com.sibgear.deepseek.chat.data.magnit.internal.repository.isOpenRouterRetryableTransportError
+import com.sibgear.deepseek.chat.data.magnit.internal.repository.isTimeoutError
+import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
+import com.sibgear.deepseek.chat.domain.model.AgentResponse
+import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolInvocation
+import com.sibgear.deepseek.chat.domain.model.AiToolSession
+import com.sibgear.deepseek.chat.domain.model.BranchSelection
+import com.sibgear.deepseek.chat.domain.model.ChatBranch
+import com.sibgear.deepseek.chat.domain.model.ChatInvariant
+import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
+import com.sibgear.deepseek.chat.domain.model.ContextMessage
+import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
+import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
+import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.isSuccess
+import io.ktor.utils.io.readLine
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlin.time.TimeSource
+
+internal class MagnitCopilotOpenAiChatRepository(
+    private val apiKey: String,
+    private val historyInteractor: ChatHistoryInteractor,
+    private val memoryInteractor: AssistantMemoryInteractor? = null,
+    private val contextPlanner: ChatContextPlanner = ChatContextPlanner(),
+    private val baseUrl: String = MagnitCopilotBaseUrl,
+    private val providerLabel: String = MagnitCopilotProviderLabel,
+    private val includeUsageCost: Boolean = false,
+) : AiChatRepository {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
+
+    private val client = magnitCopilotHttpClient(
+        json = json,
+        connectTimeoutMillis = ConnectTimeoutMillis,
+        socketTimeoutMillis = DefaultRequestTimeoutMillis,
+        requestTimeoutMillis = DefaultRequestTimeoutMillis,
+    )
+    private val chatCompletionsUrl = "${baseUrl.trimEnd('/')}/chat/completions"
+
+    override suspend fun sendMessage(request: AiRequestData): AgentResponse =
+        if (request.contextManagementSettings.mode == ContextManagementMode.Branching) {
+            sendBranchingMessage(request)
+        } else {
+            sendLinearMessage(request)
+        }
+
+    private suspend fun sendLinearMessage(request: AiRequestData): AgentResponse {
+        val preparedMemory = prepareMemory(request)
+        if (request.persistUserMessage) {
+            historyInteractor.add(request.toOpenRouterUserHistoryMessage(memory = preparedMemory.metadata))
+        }
+        val startedAt = TimeSource.Monotonic.markNow()
+        var retryCount = 0
+
+        return try {
+            val historyMessages = historyInteractor.getMessages()
+            val stickyFacts = historyInteractor.getFacts().toStickyFacts()
+            val completion = sendCompletionWithRetry(
+                request = request,
+                contextMessages = contextPlanner.plan(
+                    messages = historyMessages.toContextMessages(),
+                    contextManagementSettings = request.contextManagementSettings,
+                    stickyFacts = stickyFacts,
+                ).apiMessages,
+                includeSystemPrompt = true,
+                effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
+                servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
+                allowTools = true,
+            ) { retryCount = it }
+            val messagesWithAssistant = historyInteractor.add(
+                request.toOpenRouterAssistantHistoryMessage(
+                    content = completion.content,
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    usage = completion.usage,
+                    retryCount = retryCount,
+                    providerLabel = providerLabel,
+                    includeUsageCost = includeUsageCost,
+                ),
+            )
+            val updatedStickyFacts = if (!completion.isError &&
+                request.persistUserMessage &&
+                request.contextManagementSettings.mode == ContextManagementMode.StickyFacts
+            ) {
+                updateStickyFacts(request, messagesWithAssistant, stickyFacts)
+            } else {
+                stickyFacts
+            }
+            AgentResponse(
+                messages = if (completion.isError) {
+                    messagesWithAssistant
+                } else {
+                    maybeCompressContext(request, messagesWithAssistant)
+                }.toChatMessages(),
+                stickyFacts = updatedStickyFacts,
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = messagesWithAssistant.lastOrNull { it.branchId != null }?.branchId,
+            )
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Throwable) {
+            val messages = historyInteractor.add(
+                request.toOpenRouterAssistantHistoryMessage(
+                    content = formatException(exception),
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    retryCount = retryCount,
+                    providerLabel = providerLabel,
+                    includeUsageCost = includeUsageCost,
+                ),
+            )
+            AgentResponse(
+                messages = messages.toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = messages.lastOrNull { it.branchId != null }?.branchId,
+            )
+        }
+    }
+
+    private suspend fun sendBranchingMessage(request: AiRequestData): AgentResponse {
+        val startedAt = TimeSource.Monotonic.markNow()
+        var retryCount = 0
+        val preparedMemory = prepareMemory(request)
+        val historyBeforeUser = historyInteractor.getMessages()
+        var branchSelection = resolveBranch(
+            request = request,
+            branches = historyInteractor.getBranches().toChatBranches(),
+            fallbackActiveBranchId = historyBeforeUser.lastOrNull { it.branchId != null }?.branchId,
+        )
+        historyInteractor.replaceBranches(branchSelection.branches.toHistoryBranches())
+        if (request.persistUserMessage) {
+            historyInteractor.add(
+                request.toOpenRouterUserHistoryMessage(
+                    branchId = branchSelection.activeBranchId,
+                    memory = preparedMemory.metadata,
+                ),
+            )
+        }
+
+        return try {
+            val historyMessages = historyInteractor.getMessages()
+            val completion = sendCompletionWithRetry(
+                request = request,
+                contextMessages = contextPlanner.plan(
+                    messages = historyMessages.toContextMessages(),
+                    contextManagementSettings = request.contextManagementSettings,
+                    branches = branchSelection.branches,
+                    activeBranchId = branchSelection.activeBranchId,
+                ).apiMessages,
+                includeSystemPrompt = true,
+                effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
+                servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
+                allowTools = true,
+            ) { retryCount = it }
+            val messagesWithAssistant = historyInteractor.add(
+                request.toOpenRouterAssistantHistoryMessage(
+                    content = completion.content,
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    usage = completion.usage,
+                    retryCount = retryCount,
+                    branchId = branchSelection.activeBranchId,
+                    providerLabel = providerLabel,
+                    includeUsageCost = includeUsageCost,
+                ),
+            )
+            branchSelection = if (completion.isError) {
+                branchSelection
+            } else {
+                branchSelection.copy(
+                    branches = updateBranchSummary(
+                        request = request,
+                        currentMessages = messagesWithAssistant,
+                        branches = branchSelection.branches,
+                        activeBranchId = branchSelection.activeBranchId,
+                    ),
+                )
+            }
+
+            AgentResponse(
+                messages = messagesWithAssistant.toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
+                branches = branchSelection.branches,
+                activeBranchId = branchSelection.activeBranchId,
+            )
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Throwable) {
+            val messages = historyInteractor.add(
+                request.toOpenRouterAssistantHistoryMessage(
+                    content = formatException(exception),
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    retryCount = retryCount,
+                    branchId = branchSelection.activeBranchId,
+                    providerLabel = providerLabel,
+                    includeUsageCost = includeUsageCost,
+                ),
+            )
+            AgentResponse(
+                messages = messages.toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = branchSelection.activeBranchId,
+            )
+        }
+    }
+
+    private suspend fun resolveBranch(
+        request: AiRequestData,
+        branches: List<ChatBranch>,
+        fallbackActiveBranchId: Int?,
+    ): BranchSelection {
+        val routingRequest = contextPlanner.branchRoutingRequest(
+            branches = branches,
+            userPrompt = request.prompt,
+        )
+        val decision = runCatching {
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = routingRequest.prompt,
+                onRetryCountChanged = {},
+            )
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return fallbackBranch(branches, fallbackActiveBranchId)
+        }
+
+        if (decision.isError) {
+            return fallbackBranch(branches, fallbackActiveBranchId)
+        }
+
+        return contextPlanner.selectBranch(
+            branches = branches,
+            decision = decision.content.toBranchRoutingDecision(json),
+        )
+    }
+
+    private fun fallbackBranch(
+        branches: List<ChatBranch>,
+        fallbackActiveBranchId: Int?,
+    ): BranchSelection {
+        if (fallbackActiveBranchId != null && branches.any { it.id == fallbackActiveBranchId }) {
+            return BranchSelection(
+                branches = branches,
+                activeBranchId = fallbackActiveBranchId,
+            )
+        }
+
+        return contextPlanner.fallbackBranch(branches)
+    }
+
+    private suspend fun updateBranchSummary(
+        request: AiRequestData,
+        currentMessages: List<HistoryMessage>,
+        branches: List<ChatBranch>,
+        activeBranchId: Int,
+    ): List<ChatBranch> {
+        val updateRequest = contextPlanner.plan(
+            messages = currentMessages.toContextMessages(),
+            contextManagementSettings = request.contextManagementSettings,
+            branches = branches,
+            activeBranchId = activeBranchId,
+        ).branchSummaryUpdateRequest ?: return branches
+
+        val update = runCatching {
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = updateRequest.messages,
+                includeSystemPrompt = false,
+                servicePrompt = updateRequest.prompt,
+                onRetryCountChanged = {},
+            )
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return branches
+        }
+        if (update.isError) {
+            return branches
+        }
+
+        val summary = update.content.trim().takeIf { it.isNotEmpty() } ?: return branches
+        val updatedBranches = branches.map { branch ->
+            if (branch.id == activeBranchId) {
+                branch.copy(summary = summary)
+            } else {
+                branch
+            }
+        }
+        historyInteractor.replaceBranches(updatedBranches.toHistoryBranches())
+        return updatedBranches
+    }
+
+    private suspend fun updateStickyFacts(
+        request: AiRequestData,
+        currentMessages: List<HistoryMessage>,
+        currentFacts: List<StickyFact>,
+    ): List<StickyFact> {
+        val updateRequest = contextPlanner.plan(
+            messages = currentMessages.toContextMessages(),
+            contextManagementSettings = request.contextManagementSettings,
+            stickyFacts = currentFacts,
+        ).stickyFactsUpdateRequest ?: return currentFacts
+
+        val update = runCatching {
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = updateRequest.messages,
+                includeSystemPrompt = false,
+                servicePrompt = updateRequest.prompt,
+                onRetryCountChanged = {},
+            )
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return currentFacts
+        }
+        if (update.isError) {
+            return currentFacts
+        }
+
+        val updatedFacts = update.content.mergeStickyFacts(currentFacts, json) ?: return currentFacts
+        historyInteractor.replaceFacts(updatedFacts.toHistoryFacts())
+        return updatedFacts
+    }
+
+    private suspend fun sendCompletionWithRetry(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String? = null,
+        allowTools: Boolean = false,
+        onRetryCountChanged: (Int) -> Unit,
+    ): OpenRouterCompletionResult {
+        var retryCount = 0
+
+        while (true) {
+            try {
+                val toolProvider = request.toolProvider.takeIf { allowTools }
+                val completion = if (toolProvider != null) {
+                    toolProvider.withSession { session ->
+                        sendNonStreamingCompletionWithTools(
+                            request = request,
+                            contextMessages = contextMessages,
+                            includeSystemPrompt = includeSystemPrompt,
+                            servicePrompt = servicePrompt,
+                            effectiveSystemPrompt = effectiveSystemPrompt,
+                            toolSession = session,
+                        )
+                    }
+                } else {
+                    sendStreamingCompletion(
+                        request = request,
+                        contextMessages = contextMessages,
+                        includeSystemPrompt = includeSystemPrompt,
+                        servicePrompt = servicePrompt,
+                        effectiveSystemPrompt = effectiveSystemPrompt,
+                    )
+                }
+                if (completion.isRetryable && retryCount < OpenRouterMaxRetries) {
+                    retryCount += 1
+                    onRetryCountChanged(retryCount)
+                    delay(OpenRouterRetryDelayMillis)
+                    continue
+                }
+
+                return completion
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Throwable) {
+                if (exception.isOpenRouterRetryableTransportError() && retryCount < OpenRouterMaxRetries) {
+                    retryCount += 1
+                    onRetryCountChanged(retryCount)
+                    delay(OpenRouterRetryDelayMillis)
+                    continue
+                }
+
+                throw exception
+            }
+        }
+    }
+
+    private suspend fun maybeCompressContext(
+        request: AiRequestData,
+        currentMessages: List<HistoryMessage>,
+    ): List<HistoryMessage> {
+        val compressionRequest = contextPlanner.plan(
+            messages = currentMessages.toContextMessages(),
+            contextManagementSettings = request.contextManagementSettings,
+        ).compressionRequest ?: return currentMessages
+
+        val startedAt = TimeSource.Monotonic.markNow()
+        var retryCount = 0
+        return try {
+            val compression = sendCompletionWithRetry(
+                request = request,
+                contextMessages = compressionRequest.messages,
+                includeSystemPrompt = false,
+                servicePrompt = compressionRequest.prompt,
+            ) { retryCount = it }
+            if (compression.isError) {
+                historyInteractor.add(
+                    request.toOpenRouterAssistantHistoryMessage(
+                        content = "Ошибка сжатия истории: ${compression.content}",
+                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                        retryCount = retryCount,
+                        providerLabel = providerLabel,
+                        includeUsageCost = includeUsageCost,
+                    ),
+                )
+            } else {
+                historyInteractor.add(
+                    request.toOpenRouterCompressionSummaryHistoryMessage(
+                        content = compression.content,
+                        responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                        usage = compression.usage,
+                        retryCount = retryCount,
+                        providerLabel = providerLabel,
+                        includeUsageCost = includeUsageCost,
+                    ),
+                )
+            }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Throwable) {
+            historyInteractor.add(
+                request.toOpenRouterAssistantHistoryMessage(
+                    content = "Ошибка сжатия истории: ${formatException(exception)}",
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    retryCount = retryCount,
+                    providerLabel = providerLabel,
+                    includeUsageCost = includeUsageCost,
+                ),
+            )
+        }
+    }
+
+    private suspend fun sendNonStreamingCompletionWithTools(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        toolSession: AiToolSession,
+    ): OpenRouterCompletionResult {
+        val catalog = toolSession.catalog
+        if (catalog.tools.isEmpty()) {
+            return sendNonStreamingCompletion(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                toolWarnings = catalog.warnings,
+            )
+        }
+
+        var extraMessages = emptyList<OpenRouterApiChatMessage>()
+        repeat(MaxToolCallRounds) {
+            val result = sendNonStreamingCompletionRaw(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                tools = catalog.tools,
+                toolWarnings = catalog.warnings,
+                extraMessages = extraMessages,
+            )
+            result.errorResult?.let { return it }
+
+            val message = result.message
+            val toolCalls = message?.toolCalls.orEmpty()
+            if (toolCalls.isEmpty()) {
+                val content = message?.content?.takeIf { it.isNotBlank() }
+                    ?: "$providerLabel вернул пустой ответ."
+                return OpenRouterCompletionResult(
+                    content = content,
+                    usage = result.usage,
+                )
+            }
+
+            extraMessages = extraMessages + OpenRouterApiChatMessage(
+                role = "assistant",
+                content = message?.content,
+                toolCalls = toolCalls,
+            ) + toolCalls.map { toolCall ->
+                val toolResult = toolSession.callTool(
+                    AiToolInvocation(
+                        name = toolCall.function.name,
+                        arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                    ),
+                )
+                OpenRouterApiChatMessage(
+                    role = "tool",
+                    content = toolResult.content,
+                    toolCallId = toolCall.id,
+                )
+            }
+        }
+
+        return OpenRouterCompletionResult(
+            content = "Ошибка MCP tools: достигнут лимит вызовов tools за один запрос.",
+            isError = true,
+        )
+    }
+
+    private suspend fun sendNonStreamingCompletion(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        toolWarnings: List<String> = emptyList(),
+    ): OpenRouterCompletionResult {
+        val result = sendNonStreamingCompletionRaw(
+            request = request,
+            contextMessages = contextMessages,
+            includeSystemPrompt = includeSystemPrompt,
+            servicePrompt = servicePrompt,
+            effectiveSystemPrompt = effectiveSystemPrompt,
+            toolWarnings = toolWarnings,
+        )
+        result.errorResult?.let { return it }
+
+        val content = result.message?.content?.takeIf { it.isNotBlank() }
+            ?: "$providerLabel вернул пустой ответ."
+        return OpenRouterCompletionResult(
+            content = content,
+            usage = result.usage,
+        )
+    }
+
+    private suspend fun sendNonStreamingCompletionRaw(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        tools: List<com.sibgear.deepseek.chat.domain.model.AiToolDefinition> = emptyList(),
+        toolWarnings: List<String> = emptyList(),
+        extraMessages: List<OpenRouterApiChatMessage> = emptyList(),
+    ): OpenRouterRawCompletionResult {
+        val response = client.post(chatCompletionsUrl) {
+            bearerAuth(apiKey)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            timeout {
+                connectTimeoutMillis = ConnectTimeoutMillis
+                socketTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+                requestTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+            }
+            setBody(
+                request.toOpenRouterChatCompletionRequest(
+                    contextMessages = contextMessages,
+                    includeSystemPrompt = includeSystemPrompt,
+                    servicePrompt = servicePrompt,
+                    effectiveSystemPrompt = effectiveSystemPrompt,
+                    stream = false,
+                    tools = tools,
+                    toolWarnings = toolWarnings,
+                    extraMessages = extraMessages,
+                ),
+            )
+        }
+
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            return OpenRouterRawCompletionResult(
+                errorResult = OpenRouterCompletionResult(
+                    content = formatApiError(
+                        statusCode = response.status.value,
+                        statusDescription = response.status.description,
+                        body = body,
+                    ),
+                    isRetryable = response.status.isOpenRouterRetryableStatus(),
+                    isError = true,
+                ),
+            )
+        }
+
+        val completion = json.decodeFromString<OpenRouterChatCompletionResponse>(body)
+        return OpenRouterRawCompletionResult(
+            message = completion.choices.firstOrNull()?.message,
+            usage = completion.usage,
+        )
+    }
+
+    private suspend fun sendStreamingCompletion(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String? = null,
+    ): OpenRouterCompletionResult {
+        val response = client.post(chatCompletionsUrl) {
+            bearerAuth(apiKey)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            header(HttpHeaders.Accept, "text/event-stream")
+            timeout {
+                connectTimeoutMillis = ConnectTimeoutMillis
+                socketTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+                requestTimeoutMillis = OpenRouterChatRequestTimeoutMillis
+            }
+            setBody(
+                request.toOpenRouterChatCompletionRequest(
+                    contextMessages = contextMessages,
+                    includeSystemPrompt = includeSystemPrompt,
+                    servicePrompt = servicePrompt,
+                    effectiveSystemPrompt = effectiveSystemPrompt,
+                ),
+            )
+        }
+
+        if (!response.status.isSuccess()) {
+            val body = response.bodyAsText()
+            return OpenRouterCompletionResult(
+                content = formatApiError(
+                    statusCode = response.status.value,
+                    statusDescription = response.status.description,
+                    body = body,
+                ),
+                isRetryable = response.status.isOpenRouterRetryableStatus(),
+                isError = true,
+            )
+        }
+
+        val stream = response.readOpenRouterStream()
+        val content = stream.content.takeIf { it.isNotBlank() }
+            ?: "$providerLabel вернул пустой ответ."
+
+        return OpenRouterCompletionResult(
+            content = content,
+            usage = stream.usage,
+            isError = stream.hasStreamError,
+        )
+    }
+
+    private suspend fun HttpResponse.readOpenRouterStream(): OpenRouterStreamResult {
+        val accumulator = OpenRouterStreamAccumulator(json, providerLabel)
+        val channel = bodyAsChannel()
+
+        while (true) {
+            val line = channel.readLine() ?: break
+            accumulator.acceptLine(line)
+        }
+
+        return accumulator.result()
+    }
+
+    private suspend fun prepareMemory(request: AiRequestData): PreparedMemory {
+        val memory = memoryInteractor ?: return PreparedMemory(
+            effectiveSystemPrompt = request.systemPrompt,
+            metadata = null,
+        )
+
+        val originalItems = runCatching { memory.getItems() }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            return PreparedMemory(
+                effectiveSystemPrompt = request.systemPrompt,
+                metadata = HistoryMessageMemoryMetadata(error = formatMemoryError(exception)),
+            )
+        }
+
+        var currentItems = originalItems
+        var changes = emptyList<com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange>()
+        val errors = mutableListOf<String>()
+        val userProfile = runCatching {
+            memory.getProfile().text
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            ""
+        }
+        val invariants = runCatching {
+            memory.getInvariants()
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            emptyList()
+        }
+
+        val candidates = if (request.persistUserMessage) runCatching {
+            val classificationRequest = contextPlanner.memoryClassificationRequest(request.prompt)
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = classificationRequest.prompt,
+                onRetryCountChanged = {},
+            ).takeUnless { it.isError }
+                ?.content
+                ?.toMemoryCandidates(json)
+                .orEmpty()
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            emptyList()
+        } else {
+            emptyList()
+        }
+
+        if (candidates.isNotEmpty()) {
+            val updates = runCatching {
+                val mutationRequest = contextPlanner.memoryMutationRequest(
+                    currentMemory = currentItems.toChatMemoryItems(),
+                    candidates = candidates,
+                )
+                sendCompletionWithRetry(
+                    request = request,
+                    contextMessages = emptyList(),
+                    includeSystemPrompt = false,
+                    servicePrompt = mutationRequest.prompt,
+                    onRetryCountChanged = {},
+                ).takeUnless { it.isError }
+                    ?.content
+                    ?.toMemoryUpdates(json)
+                    .orEmpty()
+            }.getOrElse { exception ->
+                if (exception is CancellationException) {
+                    throw exception
+                }
+                errors += formatMemoryError(exception)
+                emptyList()
+            }
+
+            if (updates.isNotEmpty()) {
+                changes = updates.toHistoryMemoryChanges(currentItems)
+                currentItems = runCatching {
+                    memory.applyUpdates(updates)
+                }.getOrElse { exception ->
+                    if (exception is CancellationException) {
+                        throw exception
+                    }
+                    errors += formatMemoryError(exception)
+                    currentItems
+                }
+            }
+        }
+
+        val retrievalPlan = runCatching {
+            val retrievalRequest = contextPlanner.memoryRetrievalRequest(
+                userPrompt = request.prompt,
+                availableMemory = currentItems.toChatMemoryItems(),
+            )
+            sendCompletionWithRetry(
+                request = request,
+                contextMessages = emptyList(),
+                includeSystemPrompt = false,
+                servicePrompt = retrievalRequest.prompt,
+                onRetryCountChanged = {},
+            ).takeUnless { it.isError }
+                ?.content
+                ?.toChatMemoryRetrievalPlan(json)
+        }.getOrElse { exception ->
+            if (exception is CancellationException) {
+                throw exception
+            }
+            errors += formatMemoryError(exception)
+            null
+        }
+
+        val injection = contextPlanner.memoryInjection(
+            originalSystemPrompt = request.systemPrompt,
+            invariants = invariants.map { it.toChatInvariant() },
+            userProfile = userProfile,
+            retrievalPlan = retrievalPlan ?: com.sibgear.deepseek.chat.domain.model.ChatMemoryRetrievalPlan(),
+            availableMemory = currentItems.toChatMemoryItems(),
+        )
+
+        return PreparedMemory(
+            effectiveSystemPrompt = injection.effectiveSystemPrompt,
+            metadata = HistoryMessageMemoryMetadata(
+                storedLayers = changes.map { it.layer }.distinct(),
+                usedLayers = injection.usedLayers.toHistoryMemoryLayers(),
+                changes = changes,
+                injectedItems = injection.injectedItems.toHistoryMemoryItems(),
+                error = errors.joinToString(separator = "; ").takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
+    private fun formatApiError(
+        statusCode: Int,
+        statusDescription: String,
+        body: String,
+    ): String {
+        val apiMessage = runCatching {
+            json.decodeFromString<OpenRouterApiErrorResponse>(body).error?.message
+        }.getOrNull()
+
+        val message = apiMessage ?: body.take(600).ifBlank { "без тела ответа" }
+        return "Ошибка $providerLabel API: HTTP $statusCode $statusDescription\n$message"
+    }
+
+    private fun formatException(exception: Throwable): String {
+        if (exception.isTimeoutError()) {
+            return "$providerLabel timeout after ${OpenRouterChatRequestTimeoutMillis / 1_000}s"
+        }
+
+        return "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
+    }
+}
+
+private data class PreparedMemory(
+    val effectiveSystemPrompt: String,
+    val metadata: HistoryMessageMemoryMetadata?,
+)
+
+private data class OpenRouterRawCompletionResult(
+    val message: OpenRouterAssistantMessage? = null,
+    val usage: com.sibgear.deepseek.chat.data.magnit.internal.model.OpenRouterResponseUsage? = null,
+    val errorResult: OpenRouterCompletionResult? = null,
+)
+
+private fun AssistantInvariant.toChatInvariant(): ChatInvariant =
+    ChatInvariant(
+        category = category.storageValue,
+        statement = statement,
+        rationale = rationale,
+        enabled = enabled,
+    )
+
+private val InvariantCategory.storageValue: String
+    get() = when (this) {
+        InvariantCategory.Architecture -> "architecture"
+        InvariantCategory.TechnicalDecision -> "technical_decision"
+        InvariantCategory.StackConstraint -> "stack_constraint"
+        InvariantCategory.BusinessRule -> "business_rule"
+        InvariantCategory.Process -> "process"
+        InvariantCategory.Security -> "security"
+        InvariantCategory.Other -> "other"
+    }
+
+private fun formatMemoryError(exception: Throwable): String =
+    "memory: ${exception.message ?: exception::class.simpleName ?: "unknown"}"
+
+private fun String.toJsonObjectOrEmpty(): JsonObject =
+    runCatching {
+        ToolArgumentsJson.parseToJsonElement(this) as? JsonObject
+    }.getOrNull() ?: JsonObject(emptyMap())
+
+private val ToolArgumentsJson = Json {
+    ignoreUnknownKeys = true
+    explicitNulls = false
+}
+
+private const val MaxToolCallRounds = 4
+private const val ConnectTimeoutMillis = 30_000L
+private const val DefaultRequestTimeoutMillis = 180_000L
+private const val OpenRouterChatRequestTimeoutMillis = 300_000L
