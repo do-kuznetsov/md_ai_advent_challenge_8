@@ -37,3 +37,5 @@ local.properties
 
 # Kotlin/Wasm package manager state
 kotlin-js-store/
+
+rag/indexed/
