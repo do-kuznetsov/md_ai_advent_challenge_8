@@ -11,6 +11,7 @@ import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildContextUsageLabel
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildPinnedContextMessageIndex
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
+import com.sibgear.rag.domain.model.ChunkingStrategyType
 
 data class ChatViewState(
     val systemPrompt: String = "",
@@ -20,9 +21,11 @@ data class ChatViewState(
     val attachmentError: String? = null,
     val selectedModel: AiModel = ChatDefaults.DefaultModel,
     val openRouterModels: List<AiModel> = emptyList(),
+    val magnitCopilotModels: List<AiModel> = emptyList(),
     val deepSeekModels: List<AiModel> = listOf(ChatDefaults.DefaultModel),
     val modelFilter: String = "free",
     val openRouterModelsStatus: String? = null,
+    val magnitCopilotModelsStatus: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val contextUsageLabel: String = buildContextUsageLabel(messages, selectedModel),
     val isLoading: Boolean = false,
@@ -45,9 +48,13 @@ data class ChatViewState(
     val expandedCompressionMessageIndexes: Set<Int> = emptySet(),
     val apiSettings: ApiSettings = ApiSettings(),
     val maxTokensInput: String = ApiSettings().maxTokens.toString(),
+    val isRagEnabled: Boolean = false,
+    val ragStrategy: ChunkingStrategyType = ChunkingStrategyType.Structure,
+    val ragIndexDirectory: String = "rag/indexed",
+    val ragStatus: String? = null,
 ) {
     val availableModels: List<AiModel>
-        get() = openRouterModels + deepSeekModels
+        get() = openRouterModels + magnitCopilotModels + deepSeekModels
 
     val isSendEnabled: Boolean
         get() = prompt.isNotBlank() && !isLoading

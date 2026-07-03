@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.domain.model
 enum class AiProvider {
     DeepSeek,
     OpenRouter,
+    MagnitCopilot,
 }
 
 data class AiModel(

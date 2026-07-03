@@ -13,6 +13,9 @@ import com.sibgear.deepseek.assistant.memory.domain.service.AssistantProfileServ
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekChatRepository
 import com.sibgear.deepseek.chat.data.deepseek.external.repository.DeepSeekModelsRepository
 import com.sibgear.deepseek.chat.data.deepseek.external.service.DeepSeekAssistantProfileService
+import com.sibgear.deepseek.chat.data.magnit.external.repository.MagnitCopilotChatRepository
+import com.sibgear.deepseek.chat.data.magnit.external.repository.MagnitCopilotModelsRepository
+import com.sibgear.deepseek.chat.data.magnit.external.service.MagnitCopilotAssistantProfileService
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterChatRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterModelsRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.service.OpenRouterAssistantProfileService
@@ -54,6 +57,9 @@ import com.sibgear.deepseek.tools.LocalFileAiToolProvider
 import com.sibgear.deepseek.tools.LocalTimeAiToolProvider
 import com.sibgear.mcp.client.McpAiToolProvider
 import com.sibgear.mcp.client.McpServerConnection
+import com.sibgear.rag.data.embedding.OllamaEmbeddingProvider
+import com.sibgear.rag.data.sqlite.SQLiteRagSearchRepository
+import com.sibgear.rag.domain.interactor.RagQueryInteractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
@@ -88,15 +94,20 @@ fun App() {
     val openRouterAssistantService = remember {
         OpenRouterAssistantProfileService(apiKey = BuildConfig.OPENROUTER_AI_KEY)
     }
-    val profileServices = remember(deepSeekAssistantService, openRouterAssistantService) {
+    val magnitCopilotAssistantService = remember {
+        MagnitCopilotAssistantProfileService(apiKey = BuildConfig.MAGNIT_COPILOT_API_KEY)
+    }
+    val profileServices = remember(deepSeekAssistantService, magnitCopilotAssistantService, openRouterAssistantService) {
         mapOf<String, AssistantProfileService>(
             AiProvider.DeepSeek.name to deepSeekAssistantService,
+            AiProvider.MagnitCopilot.name to magnitCopilotAssistantService,
             AiProvider.OpenRouter.name to openRouterAssistantService,
         )
     }
-    val invariantServices = remember(deepSeekAssistantService, openRouterAssistantService) {
+    val invariantServices = remember(deepSeekAssistantService, magnitCopilotAssistantService, openRouterAssistantService) {
         mapOf<String, AssistantInvariantService>(
             AiProvider.DeepSeek.name to deepSeekAssistantService,
+            AiProvider.MagnitCopilot.name to magnitCopilotAssistantService,
             AiProvider.OpenRouter.name to openRouterAssistantService,
         )
     }
@@ -129,8 +140,14 @@ fun App() {
             ),
         )
     }
+    val ragQueryInteractor = remember {
+        RagQueryInteractor(
+            embeddingProvider = OllamaEmbeddingProvider(model = "nomic-embed-text"),
+            searchRepository = SQLiteRagSearchRepository(),
+        )
+    }
 
-    val viewModel = remember(scope, workspaceStorage, toolProvider) {
+    val viewModel = remember(scope, workspaceStorage, toolProvider, ragQueryInteractor) {
         fun createChatViewModel(
             tabNumber: Int,
             storageType: ChatStorageType,
@@ -170,6 +187,11 @@ fun App() {
                         historyInteractor = historyInteractor,
                         memoryInteractor = memoryInteractor,
                     ),
+                    AiProvider.MagnitCopilot to MagnitCopilotChatRepository(
+                        apiKey = BuildConfig.MAGNIT_COPILOT_API_KEY,
+                        historyInteractor = historyInteractor,
+                        memoryInteractor = memoryInteractor,
+                    ),
                     AiProvider.OpenRouter to OpenRouterChatRepository(
                         apiKey = BuildConfig.OPENROUTER_AI_KEY,
                         historyInteractor = historyInteractor,
@@ -178,6 +200,7 @@ fun App() {
                 ),
                 modelRepositories = mapOf(
                     AiProvider.DeepSeek to DeepSeekModelsRepository(),
+                    AiProvider.MagnitCopilot to MagnitCopilotModelsRepository(),
                     AiProvider.OpenRouter to OpenRouterModelsRepository(
                         apiKey = BuildConfig.OPENROUTER_AI_KEY,
                     ),
@@ -198,6 +221,7 @@ fun App() {
                 initialPrompt = initialPrompt,
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
                 toolProvider = toolProvider,
+                ragQueryInteractor = ragQueryInteractor,
                 persistMessage = { message ->
                     historyInteractor.add(listOf(message).toHistoryMessages().single()).toChatMessages()
                 },
