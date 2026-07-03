@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
+import com.sibgear.rag.domain.model.ChunkingStrategyType
 
 @Composable
 internal fun ApiSettingsPanel(
@@ -74,6 +76,13 @@ internal fun ApiSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+
+            HorizontalDivider(modifier = Modifier.fillMaxWidth())
+
+            RagSettings(
+                state = state,
+                onEvent = onEvent,
+            )
 
             HorizontalDivider(modifier = Modifier.fillMaxWidth())
 
@@ -130,6 +139,93 @@ internal fun ApiSettingsPanel(
                 singleLine = true,
                 enabled = isApiControlEnabled,
             )
+        }
+    }
+}
+
+@Composable
+private fun RagSettings(
+    state: ChatViewState,
+    onEvent: (ChatEvent) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = state.isRagEnabled,
+                onCheckedChange = { onEvent(ChatEvent.RagEnabledChanged(it)) },
+            )
+
+            ApiSettingsLabel(
+                text = "RAG",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RagStrategyButton(
+                text = "fixed",
+                isSelected = state.ragStrategy == ChunkingStrategyType.Fixed,
+                isEnabled = state.isRagEnabled,
+                onClick = { onEvent(ChatEvent.RagStrategySelected(ChunkingStrategyType.Fixed)) },
+                modifier = Modifier.weight(1f),
+            )
+            RagStrategyButton(
+                text = "structure",
+                isSelected = state.ragStrategy == ChunkingStrategyType.Structure,
+                isEnabled = state.isRagEnabled,
+                onClick = { onEvent(ChatEvent.RagStrategySelected(ChunkingStrategyType.Structure)) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        ShortcutOutlinedTextField(
+            value = state.ragIndexDirectory,
+            onValueChange = { onEvent(ChatEvent.RagIndexDirectoryChanged(it)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = state.isRagEnabled,
+        )
+
+        state.ragStatus?.let { status ->
+            ApiSettingsLabel(
+                text = status,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RagStrategyButton(
+    text: String,
+    isSelected: Boolean,
+    isEnabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (isSelected) {
+        Button(
+            onClick = onClick,
+            enabled = isEnabled,
+            modifier = modifier,
+        ) {
+            Text(text = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = isEnabled,
+            modifier = modifier,
+        ) {
+            Text(text = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

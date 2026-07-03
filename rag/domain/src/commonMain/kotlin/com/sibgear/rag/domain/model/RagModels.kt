@@ -68,3 +68,18 @@ data class RagIndexSummary(
     val databaseSizeBytes: Long,
     val warnings: List<String>,
 )
+
+data class RagSearchResult(
+    val source: String,
+    val title: String,
+    val section: String,
+    val chunkId: String,
+    val text: String,
+    val score: Float,
+)
+
+data class RagQuery(
+    val strategy: ChunkingStrategyType,
+    val indexDirectory: String,
+    val question: String,
+)

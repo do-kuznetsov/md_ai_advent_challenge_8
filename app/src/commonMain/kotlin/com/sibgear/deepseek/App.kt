@@ -57,6 +57,9 @@ import com.sibgear.deepseek.tools.LocalFileAiToolProvider
 import com.sibgear.deepseek.tools.LocalTimeAiToolProvider
 import com.sibgear.mcp.client.McpAiToolProvider
 import com.sibgear.mcp.client.McpServerConnection
+import com.sibgear.rag.data.embedding.OllamaEmbeddingProvider
+import com.sibgear.rag.data.sqlite.SQLiteRagSearchRepository
+import com.sibgear.rag.domain.interactor.RagQueryInteractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
@@ -137,8 +140,14 @@ fun App() {
             ),
         )
     }
+    val ragQueryInteractor = remember {
+        RagQueryInteractor(
+            embeddingProvider = OllamaEmbeddingProvider(model = "nomic-embed-text"),
+            searchRepository = SQLiteRagSearchRepository(),
+        )
+    }
 
-    val viewModel = remember(scope, workspaceStorage, toolProvider) {
+    val viewModel = remember(scope, workspaceStorage, toolProvider, ragQueryInteractor) {
         fun createChatViewModel(
             tabNumber: Int,
             storageType: ChatStorageType,
@@ -212,6 +221,7 @@ fun App() {
                 initialPrompt = initialPrompt,
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
                 toolProvider = toolProvider,
+                ragQueryInteractor = ragQueryInteractor,
                 persistMessage = { message ->
                     historyInteractor.add(listOf(message).toHistoryMessages().single()).toChatMessages()
                 },

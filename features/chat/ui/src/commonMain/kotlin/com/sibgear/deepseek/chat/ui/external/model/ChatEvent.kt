@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.ui.external.model
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
+import com.sibgear.rag.domain.model.ChunkingStrategyType
 
 sealed interface ChatEvent {
     data class SystemPromptChanged(val systemPrompt: String) : ChatEvent
@@ -23,5 +24,8 @@ sealed interface ChatEvent {
     data class MaxTokensChanged(val maxTokens: String) : ChatEvent
     data class StopWordChanged(val stopWord: String) : ChatEvent
     data class ApiControlChanged(val isEnabled: Boolean) : ChatEvent
+    data class RagEnabledChanged(val isEnabled: Boolean) : ChatEvent
+    data class RagStrategySelected(val strategy: ChunkingStrategyType) : ChatEvent
+    data class RagIndexDirectoryChanged(val indexDirectory: String) : ChatEvent
     data object SendClicked : ChatEvent
 }

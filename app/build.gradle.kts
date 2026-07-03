@@ -29,6 +29,8 @@ kotlin {
             implementation(project(":features:chat-workspace:ui"))
             implementation(project(":features:settings:ui"))
             implementation(project(":mcp:client"))
+            implementation(project(":rag:data"))
+            implementation(project(":rag:domain"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

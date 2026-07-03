@@ -23,6 +23,9 @@ import com.sibgear.deepseek.chat.ui.internal.mapper.buildContextUsageLabel
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildPinnedContextMessageIndex
 import com.sibgear.deepseek.chat.ui.internal.mapper.selectOpenRouterModels
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
+import com.sibgear.rag.domain.interactor.RagQueryInteractor
+import com.sibgear.rag.domain.model.RagQuery
+import com.sibgear.rag.domain.model.RagSearchResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -37,6 +40,7 @@ class ChatViewModel(
     initialPrompt: String = "",
     isSystemPromptReadOnly: Boolean = false,
     private val toolProvider: AiToolProvider? = null,
+    private val ragQueryInteractor: RagQueryInteractor? = null,
     private val persistMessage: (suspend (ChatMessage) -> List<ChatMessage>)? = null,
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
@@ -85,6 +89,27 @@ class ChatViewModel(
                     apiSettings = state.apiSettings.copy(
                         isApiControlEnabled = event.isEnabled,
                     ),
+                )
+            }
+
+            is ChatEvent.RagEnabledChanged -> {
+                state = state.copy(
+                    isRagEnabled = event.isEnabled,
+                    ragStatus = if (event.isEnabled) state.ragStatus else null,
+                )
+            }
+
+            is ChatEvent.RagStrategySelected -> {
+                state = state.copy(
+                    ragStrategy = event.strategy,
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagIndexDirectoryChanged -> {
+                state = state.copy(
+                    ragIndexDirectory = event.indexDirectory,
+                    ragStatus = null,
                 )
             }
 
@@ -242,6 +267,7 @@ class ChatViewModel(
             return
         }
 
+        val ragSettings = state.toRagRequestSettings()
         val request = buildRequest(
             prompt = prompt,
             runtimeSystemPrompt = runtimeSystemPrompt,
@@ -270,7 +296,23 @@ class ChatViewModel(
             ).withContextPresentation()
 
             try {
-                sendRequestAndUpdateState(request, onCompleted)
+                val preparedRequest = try {
+                    request.withRagContextIfNeeded(prompt, ragSettings)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Throwable) {
+                    state = state.copy(
+                        isLoading = false,
+                        messages = state.messages + ChatMessage(
+                            role = ChatRole.Assistant,
+                            content = "Ошибка RAG: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                        ),
+                        ragStatus = "RAG: ошибка",
+                    ).withContextPresentation()
+                    onCompleted?.invoke(state)
+                    return@launch
+                }
+                sendRequestAndUpdateState(preparedRequest, onCompleted)
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -374,6 +416,10 @@ class ChatViewModel(
             stickyFactsWindowInput = source.stickyFactsWindowInput,
             apiSettings = source.apiSettings,
             maxTokensInput = source.maxTokensInput,
+            isRagEnabled = source.isRagEnabled,
+            ragStrategy = source.ragStrategy,
+            ragIndexDirectory = source.ragIndexDirectory,
+            ragStatus = source.ragStatus,
         ).withContextPresentation()
     }
 
@@ -404,6 +450,38 @@ class ChatViewModel(
             persistUserMessage = persistUserMessage,
             toolProvider = toolProvider,
         )
+
+    private suspend fun AiRequestData.withRagContextIfNeeded(
+        originalPrompt: String,
+        ragSettings: RagRequestSettings,
+    ): AiRequestData {
+        if (!ragSettings.isEnabled) {
+            return this
+        }
+
+        val ragInteractor = requireNotNull(ragQueryInteractor) {
+            "RAG не настроен в приложении."
+        }
+        val results = ragInteractor.search(
+            RagQuery(
+                strategy = ragSettings.strategy,
+                indexDirectory = ragSettings.indexDirectory,
+                question = originalPrompt,
+            ),
+        )
+        require(results.isNotEmpty()) {
+            "релевантные чанки не найдены."
+        }
+
+        state = state.copy(
+            ragStatus = "RAG: ${results.size} chunks (${ragSettings.strategy.cliName})",
+        ).withContextPresentation()
+
+        return copy(
+            systemPrompt = systemPrompt.withRagContext(results),
+            prompt = originalPrompt,
+        )
+    }
 
     private suspend fun sendRequestAndUpdateState(
         request: AiRequestData,
@@ -462,6 +540,46 @@ class ChatViewModel(
             ),
         )
 }
+
+private data class RagRequestSettings(
+    val isEnabled: Boolean,
+    val strategy: com.sibgear.rag.domain.model.ChunkingStrategyType,
+    val indexDirectory: String,
+)
+
+private fun ChatViewState.toRagRequestSettings(): RagRequestSettings =
+    RagRequestSettings(
+        isEnabled = isRagEnabled,
+        strategy = ragStrategy,
+        indexDirectory = ragIndexDirectory.trim().ifBlank { DefaultRagIndexDirectory },
+    )
+
+private fun String.withRagContext(results: List<RagSearchResult>): String =
+    buildString {
+        append(this@withRagContext)
+        if (isNotBlank()) {
+            appendLine()
+            appendLine()
+        }
+        appendLine("[RAG_CONTEXT]")
+        appendLine("Используй этот контекст для ответа на вопрос пользователя.")
+        appendLine("Если контекст не содержит ответа, явно скажи об этом.")
+        appendLine("В ответе укажи использованные источники по source/title/section/chunk_id.")
+        results.forEachIndexed { index, result ->
+            appendLine()
+            appendLine("Chunk ${index + 1}")
+            appendLine("source: ${result.source}")
+            appendLine("title: ${result.title}")
+            appendLine("section: ${result.section}")
+            appendLine("chunk_id: ${result.chunkId}")
+            appendLine("score: ${result.score}")
+            appendLine("text:")
+            appendLine(result.text)
+        }
+        append("[/RAG_CONTEXT]")
+    }
+
+private const val DefaultRagIndexDirectory = "rag/indexed"
 
 private fun Set<Int>.toggle(value: Int): Set<Int> =
     if (value in this) this - value else this + value
