@@ -2,6 +2,7 @@ package com.sibgear.rag.domain.repository
 
 import com.sibgear.rag.domain.model.EmbeddedDocumentChunk
 import com.sibgear.rag.domain.model.RagIndexRun
+import com.sibgear.rag.domain.model.RagRetrievalConfig
 import com.sibgear.rag.domain.model.RagSearchResult
 import com.sibgear.rag.domain.model.ChunkingStrategyType
 import com.sibgear.rag.domain.model.SourceDocument
@@ -29,5 +30,13 @@ interface RagSearchRepository {
         indexDirectory: String,
         strategy: ChunkingStrategyType,
         queryEmbedding: FloatArray,
+        limit: Int,
+    ): List<RagSearchResult>
+}
+
+fun interface RagResultProcessor {
+    fun process(
+        results: List<RagSearchResult>,
+        config: RagRetrievalConfig,
     ): List<RagSearchResult>
 }

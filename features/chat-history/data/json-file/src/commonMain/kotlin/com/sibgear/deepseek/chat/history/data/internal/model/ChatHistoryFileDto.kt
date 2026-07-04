@@ -109,4 +109,7 @@ internal enum class HistoryMessageKindDto(val value: String) {
 
     @SerialName("task_state_event")
     TaskStateEvent("task_state_event"),
+
+    @SerialName("rag_diagnostic")
+    RagDiagnostic("rag_diagnostic"),
 }

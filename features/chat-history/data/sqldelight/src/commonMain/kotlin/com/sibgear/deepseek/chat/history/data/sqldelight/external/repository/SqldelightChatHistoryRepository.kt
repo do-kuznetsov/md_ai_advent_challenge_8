@@ -278,6 +278,7 @@ class SqldelightChatHistoryRepository(
             HistoryMessageKind.Regular -> RegularKind
             HistoryMessageKind.CompressionSummary -> CompressionSummaryKind
             HistoryMessageKind.TaskStateEvent -> TaskStateEventKind
+            HistoryMessageKind.RagDiagnostic -> RagDiagnosticKind
         }
 
     private fun String.toHistoryRole(): HistoryRole =
@@ -291,6 +292,7 @@ class SqldelightChatHistoryRepository(
         when (this) {
             CompressionSummaryKind -> HistoryMessageKind.CompressionSummary
             TaskStateEventKind -> HistoryMessageKind.TaskStateEvent
+            RagDiagnosticKind -> HistoryMessageKind.RagDiagnostic
             else -> HistoryMessageKind.Regular
         }
 
@@ -300,6 +302,7 @@ class SqldelightChatHistoryRepository(
         const val RegularKind = "regular"
         const val CompressionSummaryKind = "compression_summary"
         const val TaskStateEventKind = "task_state_event"
+        const val RagDiagnosticKind = "rag_diagnostic"
     }
 }
 

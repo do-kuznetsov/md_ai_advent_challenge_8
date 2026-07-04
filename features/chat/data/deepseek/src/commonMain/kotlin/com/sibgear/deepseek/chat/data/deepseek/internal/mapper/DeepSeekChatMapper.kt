@@ -322,6 +322,7 @@ private fun HistoryMessageKind.toChatMessageKind(): ChatMessageKind =
         HistoryMessageKind.Regular -> ChatMessageKind.Regular
         HistoryMessageKind.CompressionSummary -> ChatMessageKind.CompressionSummary
         HistoryMessageKind.TaskStateEvent -> ChatMessageKind.TaskStateEvent
+        HistoryMessageKind.RagDiagnostic -> ChatMessageKind.RagDiagnostic
     }
 
 private fun HistoryMessageFooter.toChatMessageFooter(): ChatMessageFooter =

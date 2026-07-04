@@ -21,6 +21,7 @@ enum class HistoryMessageKind {
     Regular,
     CompressionSummary,
     TaskStateEvent,
+    RagDiagnostic,
 }
 
 data class HistoryMessageFooter(

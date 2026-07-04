@@ -194,12 +194,105 @@ private fun RagSettings(
             enabled = state.isRagEnabled,
         )
 
+        RagToggleRow(
+            text = "rewrite",
+            checked = state.isRagQueryRewriteEnabled,
+            enabled = state.isRagEnabled,
+            onCheckedChange = { onEvent(ChatEvent.RagQueryRewriteEnabledChanged(it)) },
+        )
+
+        RagToggleRow(
+            text = "filter",
+            checked = state.isRagFilteringEnabled,
+            enabled = state.isRagEnabled,
+            onCheckedChange = { onEvent(ChatEvent.RagFilteringEnabledChanged(it)) },
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RagInputField(
+                label = "before",
+                value = state.ragTopKBeforeFilterInput,
+                onValueChange = { onEvent(ChatEvent.RagTopKBeforeFilterChanged(it)) },
+                enabled = state.isRagEnabled && state.isRagFilteringEnabled,
+                modifier = Modifier.weight(1f),
+            )
+            RagInputField(
+                label = "after",
+                value = state.ragTopKAfterFilterInput,
+                onValueChange = { onEvent(ChatEvent.RagTopKAfterFilterChanged(it)) },
+                enabled = state.isRagEnabled,
+                modifier = Modifier.weight(1f),
+            )
+            RagInputField(
+                label = "threshold",
+                value = state.ragSimilarityThresholdInput,
+                onValueChange = { onEvent(ChatEvent.RagSimilarityThresholdChanged(it)) },
+                enabled = state.isRagEnabled && state.isRagFilteringEnabled,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
         state.ragStatus?.let { status ->
             ApiSettingsLabel(
                 text = status,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun RagToggleRow(
+    text: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+        )
+
+        ApiSettingsLabel(
+            text = text,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun RagInputField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        ApiSettingsLabel(
+            text = label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ShortcutOutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = enabled,
+        )
     }
 }
 

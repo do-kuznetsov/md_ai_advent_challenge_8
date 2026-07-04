@@ -5,9 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
+import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
 import com.sibgear.deepseek.chat.domain.model.ChatBranch
+import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.model.ContextManagementSettings
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
@@ -25,6 +27,8 @@ import com.sibgear.deepseek.chat.ui.internal.mapper.selectOpenRouterModels
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
 import com.sibgear.rag.domain.interactor.RagQueryInteractor
 import com.sibgear.rag.domain.model.RagQuery
+import com.sibgear.rag.domain.model.RagQueryResult
+import com.sibgear.rag.domain.model.RagRetrievalConfig
 import com.sibgear.rag.domain.model.RagSearchResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -109,6 +113,41 @@ class ChatViewModel(
             is ChatEvent.RagIndexDirectoryChanged -> {
                 state = state.copy(
                     ragIndexDirectory = event.indexDirectory,
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagFilteringEnabledChanged -> {
+                state = state.copy(
+                    isRagFilteringEnabled = event.isEnabled,
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagTopKBeforeFilterChanged -> {
+                state = state.copy(
+                    ragTopKBeforeFilterInput = event.topK.filter { it.isDigit() },
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagTopKAfterFilterChanged -> {
+                state = state.copy(
+                    ragTopKAfterFilterInput = event.topK.filter { it.isDigit() },
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagSimilarityThresholdChanged -> {
+                state = state.copy(
+                    ragSimilarityThresholdInput = event.threshold.filter { it.isDigit() || it == '.' },
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagQueryRewriteEnabledChanged -> {
+                state = state.copy(
+                    isRagQueryRewriteEnabled = event.isEnabled,
                     ragStatus = null,
                 )
             }
@@ -296,6 +335,7 @@ class ChatViewModel(
             ).withContextPresentation()
 
             try {
+                val messagesBeforeRagCount = state.messages.size
                 val preparedRequest = try {
                     request.withRagContextIfNeeded(prompt, ragSettings)
                 } catch (exception: CancellationException) {
@@ -312,7 +352,10 @@ class ChatViewModel(
                     onCompleted?.invoke(state)
                     return@launch
                 }
-                sendRequestAndUpdateState(preparedRequest, onCompleted)
+                val ragDiagnostics = state.messages
+                    .drop(messagesBeforeRagCount)
+                    .filter { it.kind == ChatMessageKind.RagDiagnostic }
+                sendRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -419,6 +462,11 @@ class ChatViewModel(
             isRagEnabled = source.isRagEnabled,
             ragStrategy = source.ragStrategy,
             ragIndexDirectory = source.ragIndexDirectory,
+            isRagFilteringEnabled = source.isRagFilteringEnabled,
+            ragTopKBeforeFilterInput = source.ragTopKBeforeFilterInput,
+            ragTopKAfterFilterInput = source.ragTopKAfterFilterInput,
+            ragSimilarityThresholdInput = source.ragSimilarityThresholdInput,
+            isRagQueryRewriteEnabled = source.isRagQueryRewriteEnabled,
             ragStatus = source.ragStatus,
         ).withContextPresentation()
     }
@@ -462,35 +510,87 @@ class ChatViewModel(
         val ragInteractor = requireNotNull(ragQueryInteractor) {
             "RAG не настроен в приложении."
         }
-        val results = ragInteractor.search(
+        val rewrittenPrompt = if (ragSettings.isQueryRewriteEnabled) {
+            rewriteRagQuery(originalPrompt).also { rewritten ->
+                appendRagDiagnostic(originalPrompt, rewritten)
+            }
+        } else {
+            null
+        }
+        val searchQuestion = rewrittenPrompt ?: originalPrompt
+        val result = ragInteractor.search(
             RagQuery(
                 strategy = ragSettings.strategy,
                 indexDirectory = ragSettings.indexDirectory,
-                question = originalPrompt,
+                question = searchQuestion,
+                retrievalConfig = ragSettings.retrievalConfig,
+                rewrittenQuestion = rewrittenPrompt,
             ),
         )
-        require(results.isNotEmpty()) {
+        require(result.results.isNotEmpty()) {
             "релевантные чанки не найдены."
         }
 
         state = state.copy(
-            ragStatus = "RAG: ${results.size} chunks (${ragSettings.strategy.cliName})",
+            ragStatus = result.toStatus(ragSettings),
         ).withContextPresentation()
 
         return copy(
-            systemPrompt = systemPrompt.withRagContext(results),
+            systemPrompt = systemPrompt.withRagContext(result.results),
             prompt = originalPrompt,
         )
+    }
+
+    private suspend fun rewriteRagQuery(originalPrompt: String): String {
+        val response = interactor.sendMessage(
+            AiRequestData(
+                systemPrompt = RagRewriteSystemPrompt,
+                prompt = originalPrompt,
+                attachment = null,
+                model = state.selectedModel,
+                apiSettings = RagRewriteApiSettings,
+                contextManagementSettings = ContextManagementSettings(),
+                persistUserMessage = false,
+                toolProvider = null,
+            ),
+        )
+        return response.messages
+            .lastOrNull { it.role == ChatRole.Assistant }
+            ?.content
+            ?.lineSequence()
+            ?.firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?.removeSurrounding("\"")
+            ?.takeIf { it.isNotBlank() }
+            ?: error("query rewrite failed: empty response")
+    }
+
+    private fun appendRagDiagnostic(
+        originalPrompt: String,
+        rewrittenPrompt: String,
+    ) {
+        state = state.copy(
+            messages = state.messages + ChatMessage(
+                role = ChatRole.Assistant,
+                kind = ChatMessageKind.RagDiagnostic,
+                content = buildString {
+                    appendLine("RAG rewrite:")
+                    appendLine("original: $originalPrompt")
+                    append("rewritten: $rewrittenPrompt")
+                },
+            ),
+        ).withContextPresentation()
     }
 
     private suspend fun sendRequestAndUpdateState(
         request: AiRequestData,
         onCompleted: ((ChatViewState) -> Unit)?,
+        preservedLocalMessages: List<ChatMessage> = emptyList(),
     ) {
         val response = interactor.sendMessage(request)
         state = state.copy(
             isLoading = false,
-            messages = response.messages,
+            messages = response.messages.withPreservedLocalMessages(preservedLocalMessages),
             stickyFacts = response.stickyFacts,
             stickyFactsStatus = response.stickyFacts
                 .takeIf { it.isNotEmpty() }
@@ -545,14 +645,62 @@ private data class RagRequestSettings(
     val isEnabled: Boolean,
     val strategy: com.sibgear.rag.domain.model.ChunkingStrategyType,
     val indexDirectory: String,
+    val retrievalConfig: RagRetrievalConfig,
+    val isQueryRewriteEnabled: Boolean,
 )
 
-private fun ChatViewState.toRagRequestSettings(): RagRequestSettings =
-    RagRequestSettings(
+private fun ChatViewState.toRagRequestSettings(): RagRequestSettings {
+    val topKAfterFilter = ragTopKAfterFilterInput.toIntOrNull()
+        ?.coerceAtLeast(1)
+        ?: DefaultRagTopKAfterFilter
+    val topKBeforeFilter = ragTopKBeforeFilterInput.toIntOrNull()
+        ?.coerceAtLeast(1)
+        ?.coerceAtLeast(topKAfterFilter)
+        ?: DefaultRagTopKBeforeFilter.coerceAtLeast(topKAfterFilter)
+    return RagRequestSettings(
         isEnabled = isRagEnabled,
         strategy = ragStrategy,
         indexDirectory = ragIndexDirectory.trim().ifBlank { DefaultRagIndexDirectory },
+        retrievalConfig = RagRetrievalConfig(
+            topKBeforeFilter = topKBeforeFilter,
+            topKAfterFilter = topKAfterFilter,
+            similarityThreshold = ragSimilarityThresholdInput.toFloatOrNull()?.coerceIn(0f, 1f)
+                ?: DefaultRagSimilarityThreshold,
+            isFilteringEnabled = isRagFilteringEnabled,
+        ),
+        isQueryRewriteEnabled = isRagQueryRewriteEnabled,
     )
+}
+
+private fun RagQueryResult.toStatus(settings: RagRequestSettings): String =
+    "RAG: ${settings.strategy.cliName}; " +
+        "rewrite ${settings.isQueryRewriteEnabled.onOff()}; " +
+        "filter ${settings.retrievalConfig.isFilteringEnabled.onOff()}; " +
+        "${rawResultsCount}->${filteredResultsCount} chunks; " +
+        "threshold ${settings.retrievalConfig.similarityThreshold}; " +
+        "topK ${settings.retrievalConfig.topKBeforeFilter}/${settings.retrievalConfig.topKAfterFilter}"
+
+private fun List<ChatMessage>.withPreservedLocalMessages(
+    preservedLocalMessages: List<ChatMessage>,
+): List<ChatMessage> {
+    val missingMessages = preservedLocalMessages.filterNot { preserved ->
+        any { it.kind == preserved.kind && it.content == preserved.content }
+    }
+    if (missingMessages.isEmpty()) {
+        return this
+    }
+
+    val lastAssistantIndex = indexOfLast {
+        it.role == ChatRole.Assistant && it.kind == ChatMessageKind.Regular
+    }
+    return if (lastAssistantIndex == -1) {
+        this + missingMessages
+    } else {
+        take(lastAssistantIndex) + missingMessages + drop(lastAssistantIndex)
+    }
+}
+
+private fun Boolean.onOff(): String = if (this) "on" else "off"
 
 private fun String.withRagContext(results: List<RagSearchResult>): String =
     buildString {
@@ -580,6 +728,22 @@ private fun String.withRagContext(results: List<RagSearchResult>): String =
     }
 
 private const val DefaultRagIndexDirectory = "rag/indexed"
+private const val DefaultRagTopKBeforeFilter = 15
+private const val DefaultRagTopKAfterFilter = 5
+private const val DefaultRagSimilarityThreshold = 0.7f
+
+private val RagRewriteApiSettings = ApiSettings(
+    temperature = 0f,
+    maxTokens = 256,
+    isApiControlEnabled = true,
+)
+
+private val RagRewriteSystemPrompt = """
+    Перепиши вопрос пользователя для поиска по локальной технической документации.
+    Сохрани важные имена модулей, файлов, классов, технологий и терминов.
+    Не отвечай на вопрос.
+    Верни только один переписанный поисковый запрос без пояснений.
+""".trimIndent()
 
 private fun Set<Int>.toggle(value: Int): Set<Int> =
     if (value in this) this - value else this + value

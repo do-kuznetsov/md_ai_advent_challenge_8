@@ -9,15 +9,15 @@ import java.sql.Connection
 import java.sql.DriverManager
 import kotlin.math.sqrt
 
-class SQLiteRagSearchRepository(
-    private val topK: Int = DefaultRagTopK,
-) : RagSearchRepository {
+class SQLiteRagSearchRepository : RagSearchRepository {
     override suspend fun search(
         indexDirectory: String,
         strategy: ChunkingStrategyType,
         queryEmbedding: FloatArray,
+        limit: Int,
     ): List<RagSearchResult> {
         require(queryEmbedding.isNotEmpty()) { "RAG query embedding is empty." }
+        require(limit > 0) { "RAG search limit must be positive." }
 
         val databaseFile = File(indexDirectory, strategy.databaseFileName)
         require(databaseFile.exists()) {
@@ -34,7 +34,7 @@ class SQLiteRagSearchRepository(
                     row.toSearchResult(score = cosineSimilarity(queryEmbedding, embedding))
                 }
                 .sortedByDescending(RagSearchResult::score)
-                .take(topK)
+                .take(limit)
         }
     }
 
@@ -76,8 +76,6 @@ class SQLiteRagSearchRepository(
         DriverManager.getConnection("jdbc:sqlite:${databaseFile.absolutePath}").use(block)
 
     private companion object {
-        const val DefaultRagTopK = 5
-
         val ChunkingStrategyType.databaseFileName: String
             get() = when (this) {
                 ChunkingStrategyType.Fixed -> "rag-fixed.sqlite"

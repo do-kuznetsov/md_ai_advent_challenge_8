@@ -31,6 +31,7 @@ class SQLiteRagSearchRepositoryTest {
             indexDirectory = indexDirectory.absolutePath,
             strategy = ChunkingStrategyType.Structure,
             queryEmbedding = floatArrayOf(1f, 0f),
+            limit = 5,
         )
 
         assertEquals(listOf("first", "third", "second"), results.map { it.chunkId })
@@ -55,11 +56,13 @@ class SQLiteRagSearchRepositoryTest {
             indexDirectory = indexDirectory.absolutePath,
             strategy = ChunkingStrategyType.Fixed,
             queryEmbedding = floatArrayOf(1f, 0f),
+            limit = 5,
         )
         val structure = SQLiteRagSearchRepository().search(
             indexDirectory = indexDirectory.absolutePath,
             strategy = ChunkingStrategyType.Structure,
             queryEmbedding = floatArrayOf(1f, 0f),
+            limit = 5,
         )
 
         assertEquals("fixed", fixed.single().chunkId)
@@ -75,10 +78,34 @@ class SQLiteRagSearchRepositoryTest {
                 indexDirectory = indexDirectory.absolutePath,
                 strategy = ChunkingStrategyType.Structure,
                 queryEmbedding = floatArrayOf(1f, 0f),
+                limit = 5,
             )
         }
 
         assertTrue(error.message.orEmpty().contains("RAG index not found"))
+    }
+
+    @Test
+    fun searchAppliesDynamicLimit() = runTest {
+        val indexDirectory = Files.createTempDirectory("rag-search-limit").toFile()
+        createIndex(
+            indexDirectory = indexDirectory,
+            strategy = ChunkingStrategyType.Structure,
+            chunks = listOf(
+                embeddedChunk("first", "alpha", floatArrayOf(1f, 0f), ChunkingStrategyType.Structure),
+                embeddedChunk("second", "beta", floatArrayOf(0.9f, 0.1f), ChunkingStrategyType.Structure),
+                embeddedChunk("third", "gamma", floatArrayOf(0.8f, 0.2f), ChunkingStrategyType.Structure),
+            ),
+        )
+
+        val results = SQLiteRagSearchRepository().search(
+            indexDirectory = indexDirectory.absolutePath,
+            strategy = ChunkingStrategyType.Structure,
+            queryEmbedding = floatArrayOf(1f, 0f),
+            limit = 2,
+        )
+
+        assertEquals(listOf("first", "second"), results.map { it.chunkId })
     }
 
     private suspend fun createIndex(

@@ -51,6 +51,11 @@ data class ChatViewState(
     val isRagEnabled: Boolean = false,
     val ragStrategy: ChunkingStrategyType = ChunkingStrategyType.Structure,
     val ragIndexDirectory: String = "rag/indexed",
+    val isRagFilteringEnabled: Boolean = false,
+    val ragTopKBeforeFilterInput: String = "15",
+    val ragTopKAfterFilterInput: String = "5",
+    val ragSimilarityThresholdInput: String = "0.7",
+    val isRagQueryRewriteEnabled: Boolean = false,
     val ragStatus: String? = null,
 ) {
     val availableModels: List<AiModel>
