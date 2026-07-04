@@ -30,6 +30,7 @@ import com.sibgear.rag.domain.model.RagQuery
 import com.sibgear.rag.domain.model.RagQueryResult
 import com.sibgear.rag.domain.model.RagRetrievalConfig
 import com.sibgear.rag.domain.model.RagSearchResult
+import com.sibgear.rag.domain.repository.RagReranker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -45,6 +46,7 @@ class ChatViewModel(
     isSystemPromptReadOnly: Boolean = false,
     private val toolProvider: AiToolProvider? = null,
     private val ragQueryInteractor: RagQueryInteractor? = null,
+    private val ragRerankerFactory: ((String) -> RagReranker)? = null,
     private val persistMessage: (suspend (ChatMessage) -> List<ChatMessage>)? = null,
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
@@ -148,6 +150,20 @@ class ChatViewModel(
             is ChatEvent.RagQueryRewriteEnabledChanged -> {
                 state = state.copy(
                     isRagQueryRewriteEnabled = event.isEnabled,
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagRerankingEnabledChanged -> {
+                state = state.copy(
+                    isRagRerankingEnabled = event.isEnabled,
+                    ragStatus = null,
+                )
+            }
+
+            is ChatEvent.RagRerankerModelDirectoryChanged -> {
+                state = state.copy(
+                    ragRerankerModelDirectory = event.modelDirectory,
                     ragStatus = null,
                 )
             }
@@ -467,6 +483,8 @@ class ChatViewModel(
             ragTopKAfterFilterInput = source.ragTopKAfterFilterInput,
             ragSimilarityThresholdInput = source.ragSimilarityThresholdInput,
             isRagQueryRewriteEnabled = source.isRagQueryRewriteEnabled,
+            isRagRerankingEnabled = source.isRagRerankingEnabled,
+            ragRerankerModelDirectory = source.ragRerankerModelDirectory,
             ragStatus = source.ragStatus,
         ).withContextPresentation()
     }
@@ -518,6 +536,13 @@ class ChatViewModel(
             null
         }
         val searchQuestion = rewrittenPrompt ?: originalPrompt
+        val reranker = if (ragSettings.retrievalConfig.isRerankingEnabled) {
+            requireNotNull(ragRerankerFactory) {
+                "RAG reranker не настроен в приложении."
+            }.invoke(ragSettings.rerankerModelDirectory)
+        } else {
+            null
+        }
         val result = ragInteractor.search(
             RagQuery(
                 strategy = ragSettings.strategy,
@@ -526,6 +551,7 @@ class ChatViewModel(
                 retrievalConfig = ragSettings.retrievalConfig,
                 rewrittenQuestion = rewrittenPrompt,
             ),
+            reranker = reranker,
         )
         require(result.results.isNotEmpty()) {
             "релевантные чанки не найдены."
@@ -647,6 +673,7 @@ private data class RagRequestSettings(
     val indexDirectory: String,
     val retrievalConfig: RagRetrievalConfig,
     val isQueryRewriteEnabled: Boolean,
+    val rerankerModelDirectory: String,
 )
 
 private fun ChatViewState.toRagRequestSettings(): RagRequestSettings {
@@ -667,8 +694,10 @@ private fun ChatViewState.toRagRequestSettings(): RagRequestSettings {
             similarityThreshold = ragSimilarityThresholdInput.toFloatOrNull()?.coerceIn(0f, 1f)
                 ?: DefaultRagSimilarityThreshold,
             isFilteringEnabled = isRagFilteringEnabled,
+            isRerankingEnabled = isRagRerankingEnabled,
         ),
         isQueryRewriteEnabled = isRagQueryRewriteEnabled,
+        rerankerModelDirectory = ragRerankerModelDirectory.trim().ifBlank { DefaultRagRerankerModelDirectory },
     )
 }
 
@@ -676,7 +705,8 @@ private fun RagQueryResult.toStatus(settings: RagRequestSettings): String =
     "RAG: ${settings.strategy.cliName}; " +
         "rewrite ${settings.isQueryRewriteEnabled.onOff()}; " +
         "filter ${settings.retrievalConfig.isFilteringEnabled.onOff()}; " +
-        "${rawResultsCount}->${filteredResultsCount} chunks; " +
+        "rerank ${settings.retrievalConfig.isRerankingEnabled.onOff()}; " +
+        "${rawResultsCount}->${filteredResultsCount}->${rerankedResultsCount} chunks; " +
         "threshold ${settings.retrievalConfig.similarityThreshold}; " +
         "topK ${settings.retrievalConfig.topKBeforeFilter}/${settings.retrievalConfig.topKAfterFilter}"
 
@@ -721,6 +751,8 @@ private fun String.withRagContext(results: List<RagSearchResult>): String =
             appendLine("section: ${result.section}")
             appendLine("chunk_id: ${result.chunkId}")
             appendLine("score: ${result.score}")
+            result.rerankScore?.let { appendLine("rerank_score: $it") }
+            result.rerankRawScore?.let { appendLine("rerank_raw_score: $it") }
             appendLine("text:")
             appendLine(result.text)
         }
@@ -728,6 +760,7 @@ private fun String.withRagContext(results: List<RagSearchResult>): String =
     }
 
 private const val DefaultRagIndexDirectory = "rag/indexed"
+private const val DefaultRagRerankerModelDirectory = "rag/models/bge-reranker-v2-m3"
 private const val DefaultRagTopKBeforeFilter = 15
 private const val DefaultRagTopKAfterFilter = 5
 private const val DefaultRagSimilarityThreshold = 0.7f

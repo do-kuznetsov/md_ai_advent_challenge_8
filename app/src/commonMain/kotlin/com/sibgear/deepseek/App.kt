@@ -58,6 +58,7 @@ import com.sibgear.deepseek.tools.LocalTimeAiToolProvider
 import com.sibgear.mcp.client.McpAiToolProvider
 import com.sibgear.mcp.client.McpServerConnection
 import com.sibgear.rag.data.embedding.OllamaEmbeddingProvider
+import com.sibgear.rag.data.rerank.OnnxBgeReranker
 import com.sibgear.rag.data.sqlite.SQLiteRagSearchRepository
 import com.sibgear.rag.domain.interactor.RagQueryInteractor
 import kotlinx.coroutines.Dispatchers
@@ -146,8 +147,17 @@ fun App() {
             searchRepository = SQLiteRagSearchRepository(),
         )
     }
+    val ragRerankerFactory = remember {
+        val rerankers = mutableMapOf<String, OnnxBgeReranker>()
+        val factory: (String) -> OnnxBgeReranker = { modelDirectory ->
+            rerankers.getOrPut(modelDirectory) {
+                OnnxBgeReranker(modelDirectory = modelDirectory)
+            }
+        }
+        factory
+    }
 
-    val viewModel = remember(scope, workspaceStorage, toolProvider, ragQueryInteractor) {
+    val viewModel = remember(scope, workspaceStorage, toolProvider, ragQueryInteractor, ragRerankerFactory) {
         fun createChatViewModel(
             tabNumber: Int,
             storageType: ChatStorageType,
@@ -222,6 +232,7 @@ fun App() {
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
                 toolProvider = toolProvider,
                 ragQueryInteractor = ragQueryInteractor,
+                ragRerankerFactory = ragRerankerFactory,
                 persistMessage = { message ->
                     historyInteractor.add(listOf(message).toHistoryMessages().single()).toChatMessages()
                 },

@@ -9,6 +9,8 @@ mcp = "0.13.0" # https://github.com/modelcontextprotocol/kotlin-sdk/releases
 slf4j = "2.0.18" # https://www.slf4j.org/
 sqldelight = "2.3.2" # https://github.com/cashapp/sqldelight/releases
 compose-material-icons = "1.7.3" # https://mvnrepository.com/artifact/org.jetbrains.compose.material/material-icons-core
+onnxruntime = "1.27.0" # https://mvnrepository.com/artifact/com.microsoft.onnxruntime/onnxruntime
+djl = "0.36.0" # https://mvnrepository.com/artifact/ai.djl.huggingface/tokenizers
 
 [libraries]
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
@@ -27,6 +29,8 @@ slf4j-nop = { module = "org.slf4j:slf4j-nop", version.ref = "slf4j" }
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 compose-material-icons-core = { module = "org.jetbrains.compose.material:material-icons-core", version.ref = "compose-material-icons" }
 compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version.ref = "compose-material-icons" }
+onnxruntime = { module = "com.microsoft.onnxruntime:onnxruntime", version.ref = "onnxruntime" }
+djl-huggingface-tokenizers = { module = "ai.djl.huggingface:tokenizers", version.ref = "djl" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

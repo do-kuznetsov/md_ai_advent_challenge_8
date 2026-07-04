@@ -91,6 +91,21 @@ internal fun RagSettingsPanel(
             onCheckedChange = { onEvent(ChatEvent.RagFilteringEnabledChanged(it)) },
         )
 
+        RagToggleRow(
+            text = "rerank",
+            checked = state.isRagRerankingEnabled,
+            enabled = state.isRagEnabled,
+            onCheckedChange = { onEvent(ChatEvent.RagRerankingEnabledChanged(it)) },
+        )
+
+        ShortcutOutlinedTextField(
+            value = state.ragRerankerModelDirectory,
+            onValueChange = { onEvent(ChatEvent.RagRerankerModelDirectoryChanged(it)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = state.isRagEnabled && state.isRagRerankingEnabled,
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

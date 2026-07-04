@@ -56,6 +56,8 @@ data class ChatViewState(
     val ragTopKAfterFilterInput: String = "5",
     val ragSimilarityThresholdInput: String = "0.7",
     val isRagQueryRewriteEnabled: Boolean = false,
+    val isRagRerankingEnabled: Boolean = false,
+    val ragRerankerModelDirectory: String = "rag/models/bge-reranker-v2-m3",
     val ragStatus: String? = null,
 ) {
     val availableModels: List<AiModel>

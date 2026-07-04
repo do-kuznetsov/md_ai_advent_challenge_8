@@ -14,6 +14,6 @@ class SimilarityThresholdRagResultProcessor : RagResultProcessor {
         } else {
             results
         }
-        return filtered.take(config.topKAfterFilter)
+        return filtered.sortedByDescending(RagSearchResult::score)
     }
 }

@@ -13,6 +13,7 @@ import com.sibgear.rag.domain.interactor.RagQueryInteractor
 import com.sibgear.rag.domain.model.ChunkingStrategyType
 import com.sibgear.rag.domain.model.RagSearchResult
 import com.sibgear.rag.domain.repository.EmbeddingProvider
+import com.sibgear.rag.domain.repository.RagReranker
 import com.sibgear.rag.domain.repository.RagSearchRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -122,9 +123,70 @@ class ChatViewModelTest {
         assertTrue(request.systemPrompt.contains("chunk_id: high"))
         assertFalse(request.systemPrompt.contains("chunk_id: low"))
         assertEquals(15, ragRepository.lastLimit)
-        assertTrue(viewModel.state.ragStatus.orEmpty().contains("2->1 chunks"))
+        assertTrue(viewModel.state.ragStatus.orEmpty().contains("2->1->1 chunks"))
         assertTrue(viewModel.state.ragStatus.orEmpty().contains("threshold 0.7"))
         assertTrue(viewModel.state.ragStatus.orEmpty().contains("topK 15/5"))
+    }
+
+    @Test
+    fun ragRerankAddsRerankScoresToSystemPrompt() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val ragRepository = RecordingRagSearchRepository(
+            results = listOf(
+                ragResult("first", "Первый контекст.", 0.9f),
+                ragResult("second", "Второй контекст.", 0.8f),
+            ),
+        )
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            ragQueryInteractor = RagQueryInteractor(RecordingEmbeddingProvider(), ragRepository),
+            ragRerankerFactory = {
+                RecordingReranker(
+                    scores = mapOf(
+                        "first" to 0.1f,
+                        "second" to 0.95f,
+                    ),
+                )
+            },
+        )
+
+        viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagRerankerModelDirectoryChanged("/tmp/reranker"))
+        viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
+        viewModel.sendPrompt()
+
+        val systemPrompt = requireNotNull(chatRepository.lastRequest).systemPrompt
+        assertTrue(systemPrompt.indexOf("chunk_id: second") < systemPrompt.indexOf("chunk_id: first"))
+        assertTrue(systemPrompt.contains("rerank_score: 0.95"))
+        assertTrue(systemPrompt.contains("rerank_raw_score: 0.95"))
+        assertEquals("/tmp/reranker", lastRerankerModelDirectory)
+        assertTrue(viewModel.state.ragStatus.orEmpty().contains("rerank on"))
+        assertTrue(viewModel.state.ragStatus.orEmpty().contains("2->2->2 chunks"))
+    }
+
+    @Test
+    fun ragRerankErrorAddsAssistantMessageAndDoesNotCallFinalLlm() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val ragRepository = RecordingRagSearchRepository(
+            results = listOf(ragResult("first", "Первый контекст.", 0.9f)),
+        )
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            ragQueryInteractor = RagQueryInteractor(RecordingEmbeddingProvider(), ragRepository),
+            ragRerankerFactory = {
+                RecordingReranker(error = IllegalStateException("model files missing"))
+            },
+        )
+
+        viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
+        viewModel.sendPrompt()
+
+        assertEquals(0, chatRepository.callCount)
+        assertEquals(ChatRole.Assistant, viewModel.state.messages.last().role)
+        assertTrue(viewModel.state.messages.last().content.contains("Ошибка RAG: model files missing"))
     }
 
     @Test
@@ -197,6 +259,7 @@ class ChatViewModelTest {
     private fun chatViewModel(
         chatRepository: RecordingChatRepository = RecordingChatRepository(),
         ragQueryInteractor: RagQueryInteractor? = null,
+        ragRerankerFactory: ((String) -> RagReranker)? = null,
     ): ChatViewModel =
         ChatViewModel(
             interactor = ChatInteractor(
@@ -210,7 +273,13 @@ class ChatViewModelTest {
             ),
             coroutineScope = CoroutineScope(Dispatchers.Unconfined),
             ragQueryInteractor = ragQueryInteractor,
+            ragRerankerFactory = { modelDirectory: String ->
+                lastRerankerModelDirectory = modelDirectory
+                requireNotNull(ragRerankerFactory).invoke(modelDirectory)
+            }.takeIf { ragRerankerFactory != null },
         )
+
+    private var lastRerankerModelDirectory: String? = null
 
     private fun ragResult(
         id: String,
@@ -269,6 +338,25 @@ private class RecordingEmbeddingProvider(
         lastText = text
         error?.let { throw it }
         return floatArrayOf(1f, 0f)
+    }
+}
+
+private class RecordingReranker(
+    private val scores: Map<String, Float> = emptyMap(),
+    private val error: Throwable? = null,
+) : RagReranker {
+    override suspend fun rerank(
+        question: String,
+        results: List<RagSearchResult>,
+    ): List<RagSearchResult> {
+        error?.let { throw it }
+        return results.map { result ->
+            val score = scores[result.chunkId] ?: result.score
+            result.copy(
+                rerankScore = score,
+                rerankRawScore = score,
+            )
+        }
     }
 }
 

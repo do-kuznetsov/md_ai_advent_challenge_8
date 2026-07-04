@@ -34,6 +34,13 @@ interface RagSearchRepository {
     ): List<RagSearchResult>
 }
 
+fun interface RagReranker {
+    suspend fun rerank(
+        question: String,
+        results: List<RagSearchResult>,
+    ): List<RagSearchResult>
+}
+
 fun interface RagResultProcessor {
     fun process(
         results: List<RagSearchResult>,

@@ -76,6 +76,8 @@ data class RagSearchResult(
     val chunkId: String,
     val text: String,
     val score: Float,
+    val rerankScore: Float? = null,
+    val rerankRawScore: Float? = null,
 )
 
 enum class RagResultProcessingMode {
@@ -88,6 +90,7 @@ data class RagRetrievalConfig(
     val topKAfterFilter: Int = 5,
     val similarityThreshold: Float = 0.7f,
     val isFilteringEnabled: Boolean = false,
+    val isRerankingEnabled: Boolean = false,
     val processingMode: RagResultProcessingMode = RagResultProcessingMode.SimilarityThreshold,
 ) {
     init {
@@ -109,5 +112,6 @@ data class RagQueryResult(
     val results: List<RagSearchResult>,
     val rawResultsCount: Int,
     val filteredResultsCount: Int,
+    val rerankedResultsCount: Int,
     val rewrittenQuestion: String? = null,
 )

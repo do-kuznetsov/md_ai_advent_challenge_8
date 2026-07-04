@@ -25,5 +25,10 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)
         }
+
+        jvmMain.dependencies {
+            implementation(libs.onnxruntime)
+            implementation(libs.djl.huggingface.tokenizers)
+        }
     }
 }

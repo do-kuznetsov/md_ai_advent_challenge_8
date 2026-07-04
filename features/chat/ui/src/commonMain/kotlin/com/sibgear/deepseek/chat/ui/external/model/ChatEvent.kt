@@ -32,5 +32,7 @@ sealed interface ChatEvent {
     data class RagTopKAfterFilterChanged(val topK: String) : ChatEvent
     data class RagSimilarityThresholdChanged(val threshold: String) : ChatEvent
     data class RagQueryRewriteEnabledChanged(val isEnabled: Boolean) : ChatEvent
+    data class RagRerankingEnabledChanged(val isEnabled: Boolean) : ChatEvent
+    data class RagRerankerModelDirectoryChanged(val modelDirectory: String) : ChatEvent
     data object SendClicked : ChatEvent
 }
