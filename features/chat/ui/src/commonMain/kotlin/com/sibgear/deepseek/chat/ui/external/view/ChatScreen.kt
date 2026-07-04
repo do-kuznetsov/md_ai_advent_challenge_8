@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -24,7 +25,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -35,7 +38,13 @@ import com.sibgear.deepseek.chat.ui.internal.view.ApiSettingsPanel
 import com.sibgear.deepseek.chat.ui.internal.view.BranchTreePanel
 import com.sibgear.deepseek.chat.ui.internal.view.ChatArea
 import com.sibgear.deepseek.chat.ui.internal.view.PromptInputArea
+import com.sibgear.deepseek.chat.ui.internal.view.RagSettingsPanel
 import com.sibgear.deepseek.chat.ui.internal.view.StickyFactsPanel
+
+enum class ChatSettingsDrawerType {
+    AiModel,
+    Rag,
+}
 
 @Composable
 fun ChatScreen(
@@ -51,12 +60,12 @@ fun ChatScreen(
         BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             val density = LocalDensity.current
             val maxWidthPx = with(density) { maxWidth.toPx() }
-            var isAiModelDrawerExpanded by rememberSaveable { mutableStateOf(false) }
-            var aiModelDrawerWidthFraction by rememberSaveable { mutableStateOf(0.25f) }
-            val drawerWidth = if (isAiModelDrawerExpanded) {
-                maxWidth * aiModelDrawerWidthFraction
+            var activeSettingsDrawer by rememberSaveable { mutableStateOf<ChatSettingsDrawerType?>(null) }
+            var settingsDrawerWidthFraction by rememberSaveable { mutableStateOf(0.25f) }
+            val drawerWidth = if (activeSettingsDrawer != null) {
+                maxWidth * settingsDrawerWidthFraction
             } else {
-                AiModelDrawerTabWidth
+                SettingsDrawerClosedWidth
             }
 
             Row(
@@ -73,15 +82,15 @@ fun ChatScreen(
                 )
 
                 if (showModelDrawer) {
-                    AiModelSettingsDrawer(
+                    ChatSettingsDrawer(
                         state = state,
                         onEvent = onEvent,
-                        isExpanded = isAiModelDrawerExpanded,
-                        onExpandedChange = { isAiModelDrawerExpanded = it },
+                        activeDrawer = activeSettingsDrawer,
+                        onActiveDrawerChanged = { activeSettingsDrawer = it },
                         onResize = { dragDeltaPx ->
                             val deltaFraction = dragDeltaPx / maxWidthPx
-                            aiModelDrawerWidthFraction = (aiModelDrawerWidthFraction - deltaFraction)
-                                .coerceIn(AiModelDrawerMinWidthFraction, AiModelDrawerMaxWidthFraction)
+                            settingsDrawerWidthFraction = (settingsDrawerWidthFraction - deltaFraction)
+                                .coerceIn(SettingsDrawerMinWidthFraction, SettingsDrawerMaxWidthFraction)
                         },
                         modifier = Modifier.width(drawerWidth).fillMaxHeight(),
                     )
@@ -137,25 +146,44 @@ fun ChatPane(
 }
 
 @Composable
-fun AiModelSettingsDrawer(
+fun ChatSettingsDrawer(
     state: ChatViewState,
     onEvent: (ChatEvent) -> Unit,
-    isExpanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
+    activeDrawer: ChatSettingsDrawerType?,
+    onActiveDrawerChanged: (ChatSettingsDrawerType?) -> Unit,
     onResize: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier) {
-        AiModelDrawerTab(
-            isExpanded = isExpanded,
-            onClick = { onExpandedChange(!isExpanded) },
-            modifier = Modifier.width(AiModelDrawerTabWidth).fillMaxHeight(),
-        )
+        Column(
+            modifier = Modifier.width(SettingsDrawerTabWidth).fillMaxHeight(),
+        ) {
+            SettingsDrawerTab(
+                title = "AI модель",
+                isExpanded = activeDrawer == ChatSettingsDrawerType.AiModel,
+                onClick = {
+                    onActiveDrawerChanged(
+                        ChatSettingsDrawerType.AiModel.toggleFrom(activeDrawer),
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+            SettingsDrawerTab(
+                title = "RAG",
+                isExpanded = activeDrawer == ChatSettingsDrawerType.Rag,
+                onClick = {
+                    onActiveDrawerChanged(
+                        ChatSettingsDrawerType.Rag.toggleFrom(activeDrawer),
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+        }
 
-        if (isExpanded) {
+        if (activeDrawer != null) {
             Box(
                 modifier = Modifier
-                    .width(AiModelDrawerResizeHandleWidth)
+                    .width(SettingsDrawerResizeHandleWidth)
                     .fillMaxHeight()
                     .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
                     .draggable(
@@ -165,25 +193,49 @@ fun AiModelSettingsDrawer(
             )
 
             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                ApiSettingsPanel(
-                    state = state,
-                    onEvent = onEvent,
-                    modifier = Modifier.fillMaxHeight(),
-                )
+                when (activeDrawer) {
+                    ChatSettingsDrawerType.AiModel -> {
+                        ApiSettingsPanel(
+                            state = state,
+                            onEvent = onEvent,
+                            modifier = Modifier.fillMaxHeight(),
+                        )
+                    }
+                    ChatSettingsDrawerType.Rag -> {
+                        RagSettingsPanel(
+                            state = state,
+                            onEvent = onEvent,
+                            modifier = Modifier.fillMaxHeight(),
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AiModelDrawerTab(
+private fun SettingsDrawerTab(
+    title: String,
     isExpanded: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val activeBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
+    val backgroundColor = if (isExpanded) {
+        activeBackgroundColor
+    } else {
+        lerp(activeBackgroundColor, Color.Black, 0.22f)
+    }
+    val textColor = if (isExpanded) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+    }
+
     BoxWithConstraints(
         modifier = modifier
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(backgroundColor)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -195,18 +247,24 @@ private fun AiModelDrawerTab(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (isExpanded) "AI модель ↓" else "AI модель ↑",
+                text = if (isExpanded) "$title ↓" else "$title ↑",
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Visible,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = textColor,
                 style = MaterialTheme.typography.labelLarge,
             )
         }
     }
 }
 
-private val AiModelDrawerTabWidth: Dp = 38.dp
-private val AiModelDrawerResizeHandleWidth: Dp = 6.dp
-private const val AiModelDrawerMinWidthFraction = 0.16f
-private const val AiModelDrawerMaxWidthFraction = 0.30f
+private fun ChatSettingsDrawerType.toggleFrom(
+    activeDrawer: ChatSettingsDrawerType?,
+): ChatSettingsDrawerType? =
+    if (activeDrawer == this) null else this
+
+private val SettingsDrawerTabWidth: Dp = 38.dp
+private val SettingsDrawerClosedWidth: Dp = SettingsDrawerTabWidth
+private val SettingsDrawerResizeHandleWidth: Dp = 6.dp
+private const val SettingsDrawerMinWidthFraction = 0.16f
+private const val SettingsDrawerMaxWidthFraction = 0.30f
