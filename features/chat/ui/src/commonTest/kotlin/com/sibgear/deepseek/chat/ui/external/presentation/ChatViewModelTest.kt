@@ -92,6 +92,13 @@ class ChatViewModelTest {
         val request = requireNotNull(chatRepository.lastRequest)
         assertEquals("Что такое KMP?", request.prompt)
         assertTrue(request.systemPrompt.contains("[RAG_CONTEXT]"))
+        assertTrue(request.systemPrompt.contains("Ответ"))
+        assertTrue(request.systemPrompt.contains("Источники"))
+        assertTrue(request.systemPrompt.contains("Цитаты"))
+        assertTrue(request.systemPrompt.contains("Используй только этот контекст"))
+        assertTrue(request.systemPrompt.contains("дословные фрагменты из text"))
+        assertTrue(request.systemPrompt.contains("source | section | chunk_id"))
+        assertTrue(request.systemPrompt.contains("[source=docs/kmp.md section=Intro chunk_id=chunk-1]"))
         assertTrue(request.systemPrompt.contains("source: docs/kmp.md"))
         assertTrue(request.systemPrompt.contains("chunk_id: chunk-1"))
         assertEquals("/tmp/rag", ragRepository.lastIndexDirectory)
@@ -233,7 +240,9 @@ class ChatViewModelTest {
 
         assertEquals(0, chatRepository.callCount)
         assertEquals(ChatRole.Assistant, viewModel.state.messages.last().role)
-        assertTrue(viewModel.state.messages.last().content.contains("Ошибка RAG"))
+        assertTrue(viewModel.state.messages.last().content.contains("Не знаю"))
+        assertTrue(viewModel.state.messages.last().content.contains("Уточните вопрос"))
+        assertTrue(viewModel.state.ragStatus.orEmpty().contains("1->0->0 chunks"))
     }
 
     @Test
