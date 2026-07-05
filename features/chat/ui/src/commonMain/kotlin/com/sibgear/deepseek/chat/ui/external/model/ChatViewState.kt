@@ -50,14 +50,14 @@ data class ChatViewState(
     val maxTokensInput: String = ApiSettings().maxTokens.toString(),
     val isRagEnabled: Boolean = false,
     val ragStrategy: ChunkingStrategyType = ChunkingStrategyType.Structure,
-    val ragIndexDirectory: String = "rag/indexed",
+    val ragIndexDirectory: String = "../rag/indexed",
     val isRagFilteringEnabled: Boolean = false,
     val ragTopKBeforeFilterInput: String = "15",
     val ragTopKAfterFilterInput: String = "5",
     val ragSimilarityThresholdInput: String = "0.7",
     val isRagQueryRewriteEnabled: Boolean = false,
     val isRagRerankingEnabled: Boolean = false,
-    val ragRerankerModelDirectory: String = "rag/models/bge-reranker-v2-m3",
+    val ragRerankerModelDirectory: String = "../rag/models/bge-reranker-v2-m3",
     val ragStatus: String? = null,
 ) {
     val availableModels: List<AiModel>

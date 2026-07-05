@@ -759,8 +759,8 @@ private fun String.withRagContext(results: List<RagSearchResult>): String =
         append("[/RAG_CONTEXT]")
     }
 
-private const val DefaultRagIndexDirectory = "rag/indexed"
-private const val DefaultRagRerankerModelDirectory = "rag/models/bge-reranker-v2-m3"
+private const val DefaultRagIndexDirectory = "../rag/indexed"
+private const val DefaultRagRerankerModelDirectory = "../rag/models/bge-reranker-v2-m3"
 private const val DefaultRagTopKBeforeFilter = 15
 private const val DefaultRagTopKAfterFilter = 5
 private const val DefaultRagSimilarityThreshold = 0.7f
