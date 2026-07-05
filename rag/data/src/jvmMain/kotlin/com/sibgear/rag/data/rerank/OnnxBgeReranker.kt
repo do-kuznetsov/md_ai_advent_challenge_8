@@ -6,6 +6,7 @@ import ai.onnxruntime.OnnxValue
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import com.sibgear.rag.domain.model.RagSearchResult
+import com.sibgear.rag.domain.model.RagSearchResultRerankTextBuilder
 import com.sibgear.rag.domain.repository.RagReranker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,7 +41,7 @@ class OnnxBgeReranker(
                 results.map { result ->
                     val rawScore = rerankerEngine.score(
                         query = question,
-                        document = result.text,
+                        document = RagSearchResultRerankTextBuilder.build(result),
                     )
                     result.copy(
                         rerankRawScore = rawScore,

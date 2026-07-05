@@ -27,15 +27,32 @@ class OnnxBgeRerankerTest {
     @Test
     fun rerankWritesRawAndNormalizedScores() = runTest {
         val modelDirectory = createModelDirectory()
+        val engine = RecordingEngine(rawScore = 2f)
         val reranker = OnnxBgeReranker(
             modelDirectory = modelDirectory.absolutePath,
-            engineFactory = RecordingEngineFactory(rawScore = 2f),
+            engineFactory = RecordingEngineFactory(engine),
         )
 
-        val results = reranker.rerank("question", listOf(result("chunk")))
+        val results = reranker.rerank(
+            "question",
+            listOf(
+                result(
+                    id = "chunk",
+                    source = "migrate/compile_feature-module.md",
+                    title = "compile_feature-module.md",
+                    section = "Типичные ошибки компиляции и способы их устранения",
+                    text = "* использование import ru.tander.omni.util.*",
+                ),
+            ),
+        )
 
         assertEquals(2f, results.single().rerankRawScore)
         assertEquals(sigmoid(2f), results.single().rerankScore)
+        assertEquals("question", engine.lastQuery)
+        assertTrue(engine.lastDocument.orEmpty().contains("# Типичные ошибки компиляции и способы их устранения"))
+        assertTrue(engine.lastDocument.orEmpty().contains("Документ: compile_feature-module.md"))
+        assertTrue(engine.lastDocument.orEmpty().contains("Источник: migrate/compile_feature-module.md"))
+        assertTrue(engine.lastDocument.orEmpty().endsWith("* использование import ru.tander.omni.util.*"))
     }
 
     @Test
@@ -51,32 +68,47 @@ class OnnxBgeRerankerTest {
             File(directory, "tokenizer.json").writeText("test")
         }
 
-    private fun result(id: String): RagSearchResult =
+    private fun result(
+        id: String,
+        source: String = "$id.md",
+        title: String = "$id.md",
+        section: String = "Section",
+        text: String = id,
+    ): RagSearchResult =
         RagSearchResult(
-            source = "$id.md",
-            title = "$id.md",
-            section = "Section",
+            source = source,
+            title = title,
+            section = section,
             chunkId = id,
-            text = id,
+            text = text,
             score = 0.8f,
         )
 }
 
 private class RecordingEngineFactory(
-    private val rawScore: Float = 1f,
+    private val engine: RecordingEngine = RecordingEngine(),
 ) : OnnxBgeRerankerEngineFactory {
     override fun create(
         modelFile: File,
         tokenizerFile: File,
         maxLength: Int,
     ): OnnxBgeRerankerEngine =
-        RecordingEngine(rawScore)
+        engine
 }
 
 private class RecordingEngine(
-    private val rawScore: Float,
+    private val rawScore: Float = 1f,
 ) : OnnxBgeRerankerEngine {
-    override fun score(query: String, document: String): Float = rawScore
+    var lastQuery: String? = null
+        private set
+    var lastDocument: String? = null
+        private set
+
+    override fun score(query: String, document: String): Float {
+        lastQuery = query
+        lastDocument = document
+        return rawScore
+    }
 
     override fun close() = Unit
 }
