@@ -228,6 +228,82 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun ragFollowUpRetrievalUsesTaskMemoryAndKeepsOriginalUserPrompt() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val embeddingProvider = RecordingEmbeddingProvider()
+        val ragRepository = RecordingRagSearchRepository(
+            results = listOf(ragResult("chunk-1", "Нужно заменить Android plugins на KMP plugins.", 0.9f)),
+        )
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            ragQueryInteractor = RagQueryInteractor(embeddingProvider, ragRepository),
+        )
+
+        viewModel.appendLocalMessage(
+            ChatMessage(
+                role = ChatRole.User,
+                content = "Цель: мигрировать feature-module promocodes-list на KMP",
+            ),
+        )
+        viewModel.appendLocalMessage(
+            ChatMessage(
+                role = ChatRole.User,
+                content = "Термин: logic = presentation:logic",
+            ),
+        )
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
+        viewModel.onEvent(ChatEvent.PromptChanged("А plugins какие?"))
+        viewModel.sendPrompt()
+
+        val queryText = requireNotNull(ragRepository.lastQueryText)
+        assertTrue(queryText.contains("question: А plugins какие?"))
+        assertTrue(queryText.contains("task_memory:"))
+        assertTrue(queryText.contains("goal: мигрировать feature-module promocodes-list на KMP"))
+        assertTrue(queryText.contains("logic = presentation:logic"))
+        assertEquals(queryText, embeddingProvider.lastText)
+
+        val request = requireNotNull(chatRepository.lastRequest)
+        assertEquals("А plugins какие?", request.prompt)
+        assertTrue(request.systemPrompt.contains("[TASK_MEMORY]"))
+        assertTrue(request.systemPrompt.contains("goal: мигрировать feature-module promocodes-list на KMP"))
+        assertTrue(request.systemPrompt.contains("[RAG_CONTEXT]"))
+        assertTrue(request.systemPrompt.contains("source | section | chunk_id"))
+        assertEquals("А plugins какие?", viewModel.state.messages.last { it.role == ChatRole.User }.content)
+    }
+
+    @Test
+    fun restoredTaskMemoryIgnoresDiagnosticMessages() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val embeddingProvider = RecordingEmbeddingProvider()
+        val ragRepository = RecordingRagSearchRepository(
+            results = listOf(ragResult("chunk-1", "Контекст по миграции.", 0.9f)),
+        )
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            ragQueryInteractor = RagQueryInteractor(embeddingProvider, ragRepository),
+            initialMessages = listOf(
+                ChatMessage(
+                    role = ChatRole.Assistant,
+                    kind = ChatMessageKind.RagDiagnostic,
+                    content = "Цель: ложная diagnostic цель",
+                ),
+                ChatMessage(
+                    role = ChatRole.User,
+                    content = "Цель: мигрировать checkout feature-module на KMP",
+                ),
+            ),
+        )
+
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
+        viewModel.onEvent(ChatEvent.PromptChanged("Что дальше?"))
+        viewModel.sendPrompt()
+
+        val queryText = requireNotNull(ragRepository.lastQueryText)
+        assertTrue(queryText.contains("мигрировать checkout feature-module на KMP"))
+        assertFalse(queryText.contains("ложная diagnostic цель"))
+    }
+
+    @Test
     fun ragFilterEmptyResultAddsAssistantMessageAndDoesNotCallLlm() = runTest {
         val chatRepository = RecordingChatRepository()
         val ragRepository = RecordingRagSearchRepository(
@@ -276,6 +352,7 @@ class ChatViewModelTest {
         chatRepository: RecordingChatRepository = RecordingChatRepository(),
         ragQueryInteractor: RagQueryInteractor? = null,
         ragRerankerFactory: ((String) -> RagReranker)? = null,
+        initialMessages: List<ChatMessage> = emptyList(),
     ): ChatViewModel =
         ChatViewModel(
             interactor = ChatInteractor(
@@ -289,6 +366,7 @@ class ChatViewModelTest {
                 dispatcher = Dispatchers.Unconfined,
             ),
             coroutineScope = CoroutineScope(Dispatchers.Unconfined),
+            initialMessages = initialMessages,
             ragQueryInteractor = ragQueryInteractor,
             ragRerankerFactory = { modelDirectory: String ->
                 lastRerankerModelDirectory = modelDirectory
@@ -388,6 +466,8 @@ private class RecordingRagSearchRepository(
         private set
     var lastLimit: Int? = null
         private set
+    var lastQueryText: String? = null
+        private set
 
     override suspend fun search(
         indexDirectory: String,
@@ -400,6 +480,7 @@ private class RecordingRagSearchRepository(
         lastIndexDirectory = indexDirectory
         lastStrategy = strategy
         lastLimit = limit
+        lastQueryText = queryText
         return results.take(limit)
     }
 }
