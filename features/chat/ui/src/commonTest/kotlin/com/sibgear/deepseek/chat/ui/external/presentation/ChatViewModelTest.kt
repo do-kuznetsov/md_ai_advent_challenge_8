@@ -54,6 +54,7 @@ class ChatViewModelTest {
             ragQueryInteractor = RagQueryInteractor(embeddingProvider, ragRepository),
         )
 
+        viewModel.onEvent(ChatEvent.RagEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
         viewModel.sendPrompt()
 
@@ -281,6 +282,7 @@ class ChatViewModelTest {
                 repository = RoutingAiRepository(
                     chatRepositories = mapOf(
                         com.sibgear.deepseek.chat.domain.model.AiProvider.DeepSeek to chatRepository,
+                        com.sibgear.deepseek.chat.domain.model.AiProvider.MagnitCopilot to chatRepository,
                     ),
                     modelRepositories = emptyMap(),
                 ),

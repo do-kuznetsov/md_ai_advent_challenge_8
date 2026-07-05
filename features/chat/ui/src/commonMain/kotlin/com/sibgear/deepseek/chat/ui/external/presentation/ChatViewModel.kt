@@ -262,7 +262,7 @@ class ChatViewModel(
                 interactor.loadModels(AiProvider.DeepSeek)
             }.getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
-                ?: listOf(ChatDefaults.DefaultModel)
+                ?: listOf(ChatDefaults.DefaultDeepSeekModel)
 
             state = state.copy(
                 deepSeekModels = deepSeekModels,
@@ -649,7 +649,7 @@ class ChatViewModel(
         val selectedModel = if (state.selectedModel.provider == AiProvider.OpenRouter &&
             openRouterModels.none { it.id == state.selectedModel.id }
         ) {
-            state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel
+            deepSeekFallback(state.deepSeekModels)
         } else {
             state.selectedModel
         }
@@ -667,7 +667,7 @@ class ChatViewModel(
     }
 
     private fun deepSeekFallback(models: List<AiModel>): AiModel =
-        models.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel
+        models.firstOrNull { it.id == ChatDefaults.DefaultDeepSeekModel.id } ?: ChatDefaults.DefaultDeepSeekModel
 
     private fun ChatViewState.withContextPresentation(): ChatViewState =
         copy(
