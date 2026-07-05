@@ -84,6 +84,8 @@ class ChatViewModelTest {
         )
 
         viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagFilteringEnabledChanged(false))
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
         viewModel.onEvent(ChatEvent.RagStrategySelected(ChunkingStrategyType.Fixed))
         viewModel.onEvent(ChatEvent.RagIndexDirectoryChanged("/tmp/rag"))
         viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
@@ -123,6 +125,7 @@ class ChatViewModelTest {
 
         viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
         viewModel.onEvent(ChatEvent.RagFilteringEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
         viewModel.sendPrompt()
 
@@ -209,6 +212,7 @@ class ChatViewModelTest {
         )
 
         viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
         viewModel.onEvent(ChatEvent.RagQueryRewriteEnabledChanged(true))
         viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
         viewModel.sendPrompt()
@@ -235,6 +239,7 @@ class ChatViewModelTest {
 
         viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
         viewModel.onEvent(ChatEvent.RagFilteringEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
         viewModel.sendPrompt()
 
@@ -257,6 +262,7 @@ class ChatViewModelTest {
         )
 
         viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
+        viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
         viewModel.sendPrompt()
 
