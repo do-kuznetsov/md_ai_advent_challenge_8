@@ -43,3 +43,25 @@
 | N3 | Как настроить Crashlytics для ошибок из Kotlin/Native в этом проекте? | Ассистент должен сказать "не знаю" или попросить уточнить источник. | В базе есть iOS/KMP и umbrella, но нет Crashlytics setup. |
 | N4 | Какие правила ProGuard/R8 нужны для KMP feature-module после миграции? | Ассистент должен сказать "не знаю" или не давать конкретные правила без источника. | В документации упоминаются Gradle/Android настройки, но нет готовых ProGuard/R8 правил. |
 | N5 | Как подключить SQLDelight migrations к `commonMain` в этом проекте? | Ассистент должен сказать "не знаю" или попросить релевантную документацию. | В базе есть общие KMP рекомендации, но нет SQLDelight migration guide. |
+
+## Day 25 Long Session Scenario
+
+Сценарий проверяет, что чат удерживает цель, уточнения, ограничения и термины на протяжении длинной сессии, а RAG-ответы продолжают возвращать источники и цитаты.
+
+| # | role | message | expected task memory | expected RAG/source behavior |
+|---:|---|---|---|---|
+| 1 | user | Цель: мигрировать feature-module `promocodes-list` на KMP. | `goal` = мигрировать `promocodes-list` на KMP. | Retrieval должен учитывать migration docs. |
+| 2 | assistant | Описывает общий план миграции и просит уточнить структуру модулей. | Память не меняется. | Ответ с источниками из `migrate/README.md`, `migrate/before_migration_checklist.md`. |
+| 3 | user | У нас модуль состоит из `data`, `domain`, `presentation:logic` и `presentation:ui`. | Добавляется clarified fact о структуре модулей. | Следующий поиск должен учитывать все названия модулей. |
+| 4 | assistant | Объясняет, какие части можно готовить к KMP и где нужна осторожность. | Память не меняется. | Источники: `intro/architectural_principles.md`, `migrate/split_ui_module.md`. |
+| 5 | user | Ограничение: сначала нельзя трогать `presentation:ui`, работаем только с non-presentation модулями. | Добавляется constraint про `presentation:ui` и non-presentation scope. | Retrieval должен смещаться к configure non-presentation docs. |
+| 6 | assistant | Отвечает про настройку non-presentation модулей с учетом ограничения. | Память не меняется. | Источники: `migrate/configure_non_presentation_modules.md`. |
+| 7 | user | Термин: `logic` = `presentation:logic`. | Добавляется term `logic = presentation:logic`. | Follow-up с `logic` должен резолвиться как `presentation:logic`. |
+| 8 | assistant | Подтверждает термин и объясняет роль logic-модуля. | Память не меняется. | Источники: `intro/architectural_principles.md`, `migrate/split_ui_module.md`. |
+| 9 | user | А какие plugins нужны для `data` и `domain` в нашем случае? | Используются goal + module fact + constraint. | Источники: `migrate/configure_non_presentation_modules.md`, section `Использование плагинов для KMP`. |
+| 10 | assistant | Называет `libs.plugins.omni.kmp.mobile` для `data` и `libs.plugins.omni.kmp.general` для остальных. | Память не меняется. | Обязательны источники и цитаты из plugin-секции. |
+| 11 | user | После sync падает `omniProject(":util")` и импорты Java SDK. Что проверять? | Добавляется clarified fact про ошибки sync/compile. | Retrieval должен найти sync troubleshooting и compile troubleshooting. |
+| 12 | assistant | Разделяет Gradle sync проблему и compile проблему, дает действия. | Память не меняется. | Источники: `migrate/sync_project.md`, `migrate/compile_feature-module.md`. |
+| 13 | user | Собери итоговый checklist с учетом цели, ограничения и термина `logic`. | Используются все накопленные goal/facts/constraints/terms. | Retrieval должен захватить acceptance/checklist + configure/compile docs. |
+| 14 | assistant | Дает checklist миграции `promocodes-list` без шагов для `presentation:ui` на первом этапе. | Память не меняется. | Источники: `migrate/acceptance_checklist.md`, `migrate/configure_phase.md`, `migrate/compile_phase.md`. |
+| 15 | user | Какие источники ты использовал и что осталось неясным по нашей задаче? | Используются все накопленные элементы памяти. | Ответ должен перечислить источники и явно назвать неизвестные/неуточненные пункты без галлюцинаций. |

@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
+import com.sibgear.deepseek.chat.domain.interactor.TaskMemoryStateUpdater
 import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageAttachment
@@ -18,6 +19,7 @@ import com.sibgear.deepseek.chat.domain.model.AiToolProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.domain.model.TaskMemoryState
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.deepseek.chat.ui.external.model.ChatViewState
@@ -47,6 +49,7 @@ class ChatViewModel(
     private val toolProvider: AiToolProvider? = null,
     private val ragQueryInteractor: RagQueryInteractor? = null,
     private val ragRerankerFactory: ((String) -> RagReranker)? = null,
+    private val taskMemoryStateUpdater: TaskMemoryStateUpdater = TaskMemoryStateUpdater(),
     private val persistMessage: (suspend (ChatMessage) -> List<ChatMessage>)? = null,
 ) {
     private var allOpenRouterModels: List<AiModel> = emptyList()
@@ -60,6 +63,7 @@ class ChatViewModel(
             stickyFacts = initialStickyFacts,
             branches = initialBranches,
             activeBranchId = initialMessages.lastOrNull { it.branchId != null }?.branchId,
+            taskMemoryState = taskMemoryStateUpdater.replay(initialMessages),
         ),
     )
         private set
@@ -341,6 +345,8 @@ class ChatViewModel(
             },
         )
 
+        val taskMemoryState = taskMemoryStateUpdater.update(state.taskMemoryState, prompt)
+
         coroutineScope.launch {
             state = state.copy(
                 isLoading = true,
@@ -348,12 +354,13 @@ class ChatViewModel(
                 attachment = null,
                 attachmentError = null,
                 messages = state.messages + userMessage,
+                taskMemoryState = taskMemoryState,
             ).withContextPresentation()
 
             try {
                 val messagesBeforeRagCount = state.messages.size
                 val preparedRequest = try {
-                    request.withRagContextIfNeeded(prompt, ragSettings)
+                    request.withRagContextIfNeeded(prompt, ragSettings, taskMemoryState)
                 } catch (exception: CancellationException) {
                     throw exception
                 } catch (exception: RagNoRelevantContextException) {
@@ -447,7 +454,10 @@ class ChatViewModel(
     }
 
     fun appendLocalMessage(message: ChatMessage) {
-        state = state.copy(messages = state.messages + message).withContextPresentation()
+        state = state.copy(
+            messages = state.messages + message,
+            taskMemoryState = state.taskMemoryState.updatedWith(message, taskMemoryStateUpdater),
+        ).withContextPresentation()
     }
 
     fun appendPersistentMessage(
@@ -463,11 +473,18 @@ class ChatViewModel(
 
         coroutineScope.launch {
             try {
-                state = state.copy(messages = persist(message)).withContextPresentation()
+                val persistedMessages = persist(message)
+                state = state.copy(
+                    messages = persistedMessages,
+                    taskMemoryState = taskMemoryStateUpdater.replay(persistedMessages),
+                ).withContextPresentation()
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Throwable) {
-                state = state.copy(messages = state.messages + message).withContextPresentation()
+                state = state.copy(
+                    messages = state.messages + message,
+                    taskMemoryState = state.taskMemoryState.updatedWith(message, taskMemoryStateUpdater),
+                ).withContextPresentation()
             }
             onCompleted?.invoke(state)
         }
@@ -531,6 +548,7 @@ class ChatViewModel(
     private suspend fun AiRequestData.withRagContextIfNeeded(
         originalPrompt: String,
         ragSettings: RagRequestSettings,
+        taskMemoryState: TaskMemoryState,
     ): AiRequestData {
         if (!ragSettings.isEnabled) {
             return this
@@ -539,14 +557,15 @@ class ChatViewModel(
         val ragInteractor = requireNotNull(ragQueryInteractor) {
             "RAG не настроен в приложении."
         }
+        val memoryAwarePrompt = taskMemoryState.toRagQueryText(originalPrompt)
         val rewrittenPrompt = if (ragSettings.isQueryRewriteEnabled) {
-            rewriteRagQuery(originalPrompt).also { rewritten ->
+            rewriteRagQuery(memoryAwarePrompt).also { rewritten ->
                 appendRagDiagnostic(originalPrompt, rewritten)
             }
         } else {
             null
         }
-        val searchQuestion = rewrittenPrompt ?: originalPrompt
+        val searchQuestion = rewrittenPrompt ?: memoryAwarePrompt
         val reranker = if (ragSettings.retrievalConfig.isRerankingEnabled) {
             requireNotNull(ragRerankerFactory) {
                 "RAG reranker не настроен в приложении."
@@ -575,7 +594,7 @@ class ChatViewModel(
         ).withContextPresentation()
 
         return copy(
-            systemPrompt = systemPrompt.withRagContext(result.results),
+            systemPrompt = systemPrompt.withRagContext(result.results, taskMemoryState),
             prompt = originalPrompt,
         )
     }
@@ -745,11 +764,38 @@ private fun List<ChatMessage>.withPreservedLocalMessages(
 
 private fun Boolean.onOff(): String = if (this) "on" else "off"
 
-private fun String.withRagContext(results: List<RagSearchResult>): String =
+private fun String.withRagContext(
+    results: List<RagSearchResult>,
+    taskMemoryState: TaskMemoryState,
+): String =
     buildString {
         append(this@withRagContext)
         if (isNotBlank()) {
             appendLine()
+            appendLine()
+        }
+        if (!taskMemoryState.isEmpty) {
+            appendLine("[TASK_MEMORY]")
+            appendLine("Используй эту память задачи, чтобы понимать follow-up вопросы пользователя.")
+            appendLine("Факты из документации подтверждай только найденными RAG источниками.")
+            taskMemoryState.goal?.takeIf { it.isNotBlank() }?.let {
+                appendLine("goal: $it")
+            }
+            if (taskMemoryState.clarifiedFacts.isNotEmpty()) {
+                appendLine("clarified_facts:")
+                taskMemoryState.clarifiedFacts.forEach { appendLine("- $it") }
+            }
+            if (taskMemoryState.constraints.isNotEmpty()) {
+                appendLine("constraints:")
+                taskMemoryState.constraints.forEach { appendLine("- $it") }
+            }
+            if (taskMemoryState.terms.isNotEmpty()) {
+                appendLine("terms:")
+                taskMemoryState.terms.forEach { (term, meaning) ->
+                    appendLine("- $term = $meaning")
+                }
+            }
+            appendLine("[/TASK_MEMORY]")
             appendLine()
         }
         appendLine("[RAG_CONTEXT]")
@@ -801,6 +847,16 @@ private val RagRewriteSystemPrompt = """
     Не отвечай на вопрос.
     Верни только один переписанный поисковый запрос без пояснений.
 """.trimIndent()
+
+private fun TaskMemoryState.updatedWith(
+    message: ChatMessage,
+    updater: TaskMemoryStateUpdater,
+): TaskMemoryState =
+    if (message.role == ChatRole.User && message.kind == ChatMessageKind.Regular) {
+        updater.update(this, message.content)
+    } else {
+        this
+    }
 
 private fun Set<Int>.toggle(value: Int): Set<Int> =
     if (value in this) this - value else this + value

@@ -8,6 +8,7 @@ import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.DefaultContextManagementMessages
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.domain.model.TaskMemoryState
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildContextUsageLabel
 import com.sibgear.deepseek.chat.ui.internal.mapper.buildPinnedContextMessageIndex
 import com.sibgear.deepseek.chat.ui.internal.model.ChatDefaults
@@ -59,6 +60,7 @@ data class ChatViewState(
     val isRagRerankingEnabled: Boolean = true,
     val ragRerankerModelDirectory: String = "../rag/models/bge-reranker-v2-m3",
     val ragStatus: String? = null,
+    val taskMemoryState: TaskMemoryState = TaskMemoryState(),
 ) {
     val availableModels: List<AiModel>
         get() = openRouterModels + magnitCopilotModels + deepSeekModels
