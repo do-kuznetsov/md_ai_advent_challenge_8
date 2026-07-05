@@ -1,6 +1,7 @@
 package com.sibgear.rag.domain.interactor
 
 import com.sibgear.rag.domain.chunking.ChunkingStrategy
+import com.sibgear.rag.domain.model.DocumentChunkEmbeddingTextBuilder
 import com.sibgear.rag.domain.model.EmbeddedDocumentChunk
 import com.sibgear.rag.domain.model.RagIndexRun
 import com.sibgear.rag.domain.model.RagIndexSummary
@@ -25,7 +26,7 @@ class RagIndexingInteractor(
             val embeddedChunks = chunks.map { chunk ->
                 EmbeddedDocumentChunk(
                     chunk = chunk,
-                    embedding = embeddingProvider.embed(chunk.text),
+                    embedding = embeddingProvider.embed(DocumentChunkEmbeddingTextBuilder.build(chunk)),
                 )
             }
 

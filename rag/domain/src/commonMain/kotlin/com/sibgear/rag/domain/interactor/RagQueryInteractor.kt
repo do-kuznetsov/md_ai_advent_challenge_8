@@ -22,6 +22,7 @@ class RagQueryInteractor(
         val rawResults = searchRepository.search(
             indexDirectory = query.indexDirectory,
             strategy = query.strategy,
+            queryText = query.question,
             queryEmbedding = embedding,
             limit = if (config.isFilteringEnabled || config.isRerankingEnabled) {
                 config.topKBeforeFilter

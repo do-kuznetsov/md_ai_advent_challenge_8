@@ -30,6 +30,7 @@ class SQLiteRagSearchRepositoryTest {
         val results = SQLiteRagSearchRepository().search(
             indexDirectory = indexDirectory.absolutePath,
             strategy = ChunkingStrategyType.Structure,
+            queryText = "",
             queryEmbedding = floatArrayOf(1f, 0f),
             limit = 5,
         )
@@ -55,12 +56,14 @@ class SQLiteRagSearchRepositoryTest {
         val fixed = SQLiteRagSearchRepository().search(
             indexDirectory = indexDirectory.absolutePath,
             strategy = ChunkingStrategyType.Fixed,
+            queryText = "",
             queryEmbedding = floatArrayOf(1f, 0f),
             limit = 5,
         )
         val structure = SQLiteRagSearchRepository().search(
             indexDirectory = indexDirectory.absolutePath,
             strategy = ChunkingStrategyType.Structure,
+            queryText = "",
             queryEmbedding = floatArrayOf(1f, 0f),
             limit = 5,
         )
@@ -77,6 +80,7 @@ class SQLiteRagSearchRepositoryTest {
             SQLiteRagSearchRepository().search(
                 indexDirectory = indexDirectory.absolutePath,
                 strategy = ChunkingStrategyType.Structure,
+                queryText = "",
                 queryEmbedding = floatArrayOf(1f, 0f),
                 limit = 5,
             )
@@ -101,11 +105,83 @@ class SQLiteRagSearchRepositoryTest {
         val results = SQLiteRagSearchRepository().search(
             indexDirectory = indexDirectory.absolutePath,
             strategy = ChunkingStrategyType.Structure,
+            queryText = "",
             queryEmbedding = floatArrayOf(1f, 0f),
             limit = 2,
         )
 
         assertEquals(listOf("first", "second"), results.map { it.chunkId })
+    }
+
+    @Test
+    fun searchAppliesSmallMetadataBoost() = runTest {
+        val indexDirectory = Files.createTempDirectory("rag-search-boost").toFile()
+        createIndex(
+            indexDirectory = indexDirectory,
+            strategy = ChunkingStrategyType.Structure,
+            chunks = listOf(
+                embeddedChunk(
+                    id = "best-vector",
+                    text = "generic module text",
+                    embedding = floatArrayOf(0.99f, 0.1f),
+                    strategy = ChunkingStrategyType.Structure,
+                    section = "Generic",
+                ),
+                embeddedChunk(
+                    id = "matching-section",
+                    text = "compile troubleshooting text",
+                    embedding = floatArrayOf(0.98f, 0.1f),
+                    strategy = ChunkingStrategyType.Structure,
+                    section = "Типичные ошибки компиляции и способы их устранения",
+                ),
+            ),
+        )
+
+        val results = SQLiteRagSearchRepository().search(
+            indexDirectory = indexDirectory.absolutePath,
+            strategy = ChunkingStrategyType.Structure,
+            queryText = "Какие типичные ошибки компиляции описаны?",
+            queryEmbedding = floatArrayOf(1f, 0f),
+            limit = 2,
+        )
+
+        assertEquals(listOf("matching-section", "best-vector"), results.map { it.chunkId })
+        assertTrue(results.first().score > results.last().score)
+    }
+
+    @Test
+    fun searchMatchesRussianSectionFormsInMetadataBoost() = runTest {
+        val indexDirectory = Files.createTempDirectory("rag-search-russian-boost").toFile()
+        createIndex(
+            indexDirectory = indexDirectory,
+            strategy = ChunkingStrategyType.Structure,
+            chunks = listOf(
+                embeddedChunk(
+                    id = "generic",
+                    text = "migration checklist",
+                    embedding = floatArrayOf(0.99f, 0.1f),
+                    strategy = ChunkingStrategyType.Structure,
+                    section = "Checklist готовности Android модуля к портированию на KMP",
+                ),
+                embeddedChunk(
+                    id = "configure-phase",
+                    text = "configuration steps",
+                    embedding = floatArrayOf(0.94f, 0.1f),
+                    strategy = ChunkingStrategyType.Structure,
+                    section = "Фаза конфигурации",
+                ),
+            ),
+        )
+
+        val results = SQLiteRagSearchRepository().search(
+            indexDirectory = indexDirectory.absolutePath,
+            strategy = ChunkingStrategyType.Structure,
+            queryText = "Какие шаги входят в фазу конфигурации миграции?",
+            queryEmbedding = floatArrayOf(1f, 0f),
+            limit = 2,
+        )
+
+        assertEquals("configure-phase", results.first().chunkId)
     }
 
     private suspend fun createIndex(
@@ -146,12 +222,13 @@ class SQLiteRagSearchRepositoryTest {
         text: String,
         embedding: FloatArray,
         strategy: ChunkingStrategyType,
+        section: String = "Section",
     ): EmbeddedDocumentChunk =
         EmbeddedDocumentChunk(
             chunk = DocumentChunk(
                 source = "$id.md",
                 title = "$id.md",
-                section = "Section",
+                section = section,
                 chunkId = id,
                 text = text,
                 strategy = strategy,

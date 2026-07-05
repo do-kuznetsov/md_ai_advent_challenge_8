@@ -13,6 +13,7 @@ class SQLiteRagSearchRepository : RagSearchRepository {
     override suspend fun search(
         indexDirectory: String,
         strategy: ChunkingStrategyType,
+        queryText: String,
         queryEmbedding: FloatArray,
         limit: Int,
     ): List<RagSearchResult> {
@@ -31,7 +32,9 @@ class SQLiteRagSearchRepository : RagSearchRepository {
                     require(embedding.size == queryEmbedding.size) {
                         "RAG embedding dimension mismatch: query=${queryEmbedding.size}, index=${embedding.size}."
                     }
-                    row.toSearchResult(score = cosineSimilarity(queryEmbedding, embedding))
+                    val cosineScore = cosineSimilarity(queryEmbedding, embedding)
+                    val score = (cosineScore + metadataBoost(queryText, row)).coerceAtMost(MaxScore)
+                    row.toSearchResult(score = score)
                 }
                 .sortedByDescending(RagSearchResult::score)
                 .take(limit)
@@ -113,6 +116,109 @@ class SQLiteRagSearchRepository : RagSearchRepository {
             }
 
             return (dot / (sqrt(leftNorm) * sqrt(rightNorm))).toFloat()
+        }
+
+        private const val MaxScore = 1f
+        private const val SectionBoostMax = 0.2f
+        private const val SectionPhraseBoost = 0.04f
+        private const val MetadataBoostPerToken = 0.005f
+        private const val MetadataBoostMax = 0.02f
+        private const val TotalMetadataBoostMax = 0.26f
+        private const val MinimumMetadataTokenLength = 3
+
+        fun metadataBoost(queryText: String, row: RagChunkRow): Float {
+            val queryTokenList = queryText.toSearchTokenList()
+            val queryTokens = queryTokenList.toSet()
+            if (queryTokens.isEmpty()) {
+                return 0f
+            }
+
+            val sectionTokenList = row.section.toSearchTokenList()
+            val sectionTokens = sectionTokenList.toSet()
+            val sectionMatches = sectionTokens.count(queryTokens::contains)
+            val sectionBoost = if (sectionTokens.isEmpty()) {
+                0f
+            } else {
+                val coverage = sectionMatches.toFloat() / sectionTokens.size
+                SectionBoostMax * coverage * coverage
+            }
+            val phraseBoost = if (sectionTokenList.hasAdjacentPairIn(queryTokenList)) {
+                SectionPhraseBoost
+            } else {
+                0f
+            }
+
+            val metadataTokens = "${row.source} ${row.title}".toSearchTokens()
+            val metadataMatchCount = queryTokens.count(metadataTokens::contains)
+            val metadataBoost = (metadataMatchCount * MetadataBoostPerToken).coerceAtMost(MetadataBoostMax)
+
+            return (sectionBoost + phraseBoost + metadataBoost).coerceAtMost(TotalMetadataBoostMax)
+        }
+
+        private fun String.toSearchTokens(): Set<String> =
+            toSearchTokenList().toSet()
+
+        private fun String.toSearchTokenList(): List<String> =
+            lowercase()
+                .split(Regex("[^\\p{L}\\p{Nd}]+"))
+                .asSequence()
+                .map(String::trim)
+                .map { it.normalizeSearchToken() }
+                .filter { it.length >= MinimumMetadataTokenLength }
+                .toList()
+
+        private fun List<String>.hasAdjacentPairIn(other: List<String>): Boolean {
+            if (size < 2 || other.size < 2) {
+                return false
+            }
+            val otherPairs = other.windowed(size = 2).map { it[0] to it[1] }.toSet()
+            return windowed(size = 2).any { (left, right) -> left to right in otherPairs }
+        }
+
+        private fun String.normalizeSearchToken(): String {
+            if (none { it in 'а'..'я' || it == 'ё' }) {
+                return this
+            }
+
+            val endings = listOf(
+                "иями",
+                "ями",
+                "ами",
+                "ого",
+                "ему",
+                "ыми",
+                "ими",
+                "ией",
+                "иях",
+                "ах",
+                "ях",
+                "ии",
+                "ия",
+                "ию",
+                "ие",
+                "ых",
+                "их",
+                "ой",
+                "ый",
+                "ий",
+                "ая",
+                "ую",
+                "ом",
+                "ем",
+                "ам",
+                "ям",
+                "ов",
+                "ев",
+                "а",
+                "у",
+                "ы",
+                "и",
+                "е",
+                "о",
+                "я",
+            )
+            val ending = endings.firstOrNull { endsWith(it) && length - it.length >= MinimumMetadataTokenLength }
+            return if (ending == null) this else dropLast(ending.length)
         }
     }
 }

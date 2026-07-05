@@ -375,6 +375,7 @@ private class RecordingRagSearchRepository(
     override suspend fun search(
         indexDirectory: String,
         strategy: ChunkingStrategyType,
+        queryText: String,
         queryEmbedding: FloatArray,
         limit: Int,
     ): List<RagSearchResult> {
