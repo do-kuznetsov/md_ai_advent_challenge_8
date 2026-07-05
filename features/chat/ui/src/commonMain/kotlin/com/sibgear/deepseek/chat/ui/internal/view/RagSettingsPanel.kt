@@ -34,22 +34,6 @@ internal fun RagSettingsPanel(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                checked = state.isRagEnabled,
-                onCheckedChange = { onEvent(ChatEvent.RagEnabledChanged(it)) },
-            )
-
-            ApiSettingsLabel(
-                text = "RAG",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

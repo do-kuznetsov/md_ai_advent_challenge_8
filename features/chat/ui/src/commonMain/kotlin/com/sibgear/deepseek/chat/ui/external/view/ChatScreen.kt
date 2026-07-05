@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -25,6 +26,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -171,6 +173,8 @@ fun ChatSettingsDrawer(
             SettingsDrawerTab(
                 title = "RAG",
                 isExpanded = activeDrawer == ChatSettingsDrawerType.Rag,
+                checked = state.isRagEnabled,
+                onCheckedChange = { onEvent(ChatEvent.RagEnabledChanged(it)) },
                 onClick = {
                     onActiveDrawerChanged(
                         ChatSettingsDrawerType.Rag.toggleFrom(activeDrawer),
@@ -220,6 +224,8 @@ private fun SettingsDrawerTab(
     isExpanded: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    checked: Boolean? = null,
+    onCheckedChange: ((Boolean) -> Unit)? = null,
 ) {
     val activeBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
     val backgroundColor = if (isExpanded) {
@@ -246,6 +252,14 @@ private fun SettingsDrawerTab(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (checked != null && onCheckedChange != null) {
+                Checkbox(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    modifier = Modifier
+                        .graphicsLayer(scaleX = 0.82f, scaleY = 0.82f, rotationZ = 90f),
+                )
+            }
             Text(
                 text = if (isExpanded) "$title ↓" else "$title ↑",
                 maxLines = 1,

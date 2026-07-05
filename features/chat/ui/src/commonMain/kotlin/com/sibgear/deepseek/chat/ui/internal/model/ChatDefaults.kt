@@ -5,6 +5,13 @@ import com.sibgear.deepseek.chat.domain.model.AiProvider
 
 internal object ChatDefaults {
     val DefaultModel = AiModel(
+        id = "MagnitCopilot",
+        displayName = "MCopilot",
+        provider = AiProvider.MagnitCopilot,
+        contextLength = 196_600,
+    )
+
+    val DefaultDeepSeekModel = AiModel(
         id = "deepseek-v4-flash",
         provider = AiProvider.DeepSeek,
         contextLength = DefaultDeepSeekContextLength,

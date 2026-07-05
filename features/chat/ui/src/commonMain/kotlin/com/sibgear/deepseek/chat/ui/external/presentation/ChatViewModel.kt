@@ -262,7 +262,7 @@ class ChatViewModel(
                 interactor.loadModels(AiProvider.DeepSeek)
             }.getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
-                ?: listOf(ChatDefaults.DefaultModel)
+                ?: listOf(ChatDefaults.DefaultDeepSeekModel)
 
             state = state.copy(
                 deepSeekModels = deepSeekModels,
@@ -356,6 +356,17 @@ class ChatViewModel(
                     request.withRagContextIfNeeded(prompt, ragSettings)
                 } catch (exception: CancellationException) {
                     throw exception
+                } catch (exception: RagNoRelevantContextException) {
+                    state = state.copy(
+                        isLoading = false,
+                        messages = state.messages + ChatMessage(
+                            role = ChatRole.Assistant,
+                            content = exception.message ?: RagNoRelevantContextMessage,
+                        ),
+                        ragStatus = exception.ragStatus,
+                    ).withContextPresentation()
+                    onCompleted?.invoke(state)
+                    return@launch
                 } catch (exception: Throwable) {
                     state = state.copy(
                         isLoading = false,
@@ -553,8 +564,10 @@ class ChatViewModel(
             ),
             reranker = reranker,
         )
-        require(result.results.isNotEmpty()) {
-            "релевантные чанки не найдены."
+        if (result.results.isEmpty()) {
+            throw RagNoRelevantContextException(
+                ragStatus = result.toStatus(ragSettings),
+            )
         }
 
         state = state.copy(
@@ -636,7 +649,7 @@ class ChatViewModel(
         val selectedModel = if (state.selectedModel.provider == AiProvider.OpenRouter &&
             openRouterModels.none { it.id == state.selectedModel.id }
         ) {
-            state.deepSeekModels.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel
+            deepSeekFallback(state.deepSeekModels)
         } else {
             state.selectedModel
         }
@@ -654,7 +667,7 @@ class ChatViewModel(
     }
 
     private fun deepSeekFallback(models: List<AiModel>): AiModel =
-        models.firstOrNull { it.id == ChatDefaults.DefaultModel.id } ?: ChatDefaults.DefaultModel
+        models.firstOrNull { it.id == ChatDefaults.DefaultDeepSeekModel.id } ?: ChatDefaults.DefaultDeepSeekModel
 
     private fun ChatViewState.withContextPresentation(): ChatViewState =
         copy(
@@ -740,12 +753,16 @@ private fun String.withRagContext(results: List<RagSearchResult>): String =
             appendLine()
         }
         appendLine("[RAG_CONTEXT]")
-        appendLine("Используй этот контекст для ответа на вопрос пользователя.")
-        appendLine("Если контекст не содержит ответа, явно скажи об этом.")
-        appendLine("В ответе укажи использованные источники по source/title/section/chunk_id.")
+        appendLine("Используй только этот контекст для ответа на вопрос пользователя.")
+        appendLine("Не используй внешние знания для фактов из документации.")
+        appendLine("Ответ всегда верни в трех секциях: Ответ, Источники, Цитаты.")
+        appendLine("В секции Источники перечисли использованные источники в формате: source | section | chunk_id.")
+        appendLine("В секции Цитаты приведи дословные фрагменты из text найденных чанков.")
+        appendLine("Если контекст не содержит ответа, напиши: Не знаю. Уточните вопрос.")
         results.forEachIndexed { index, result ->
             appendLine()
             appendLine("Chunk ${index + 1}")
+            appendLine("[source=${result.source} section=${result.section} chunk_id=${result.chunkId}]")
             appendLine("source: ${result.source}")
             appendLine("title: ${result.title}")
             appendLine("section: ${result.section}")
@@ -759,6 +776,13 @@ private fun String.withRagContext(results: List<RagSearchResult>): String =
         append("[/RAG_CONTEXT]")
     }
 
+private class RagNoRelevantContextException(
+    val ragStatus: String,
+) : IllegalStateException(RagNoRelevantContextMessage)
+
+private const val RagNoRelevantContextMessage =
+    "Не знаю. В индексе не найден достаточно релевантный контекст. " +
+        "Уточните вопрос или снизьте порог релевантности."
 private const val DefaultRagIndexDirectory = "../rag/indexed"
 private const val DefaultRagRerankerModelDirectory = "../rag/models/bge-reranker-v2-m3"
 private const val DefaultRagTopKBeforeFilter = 15
