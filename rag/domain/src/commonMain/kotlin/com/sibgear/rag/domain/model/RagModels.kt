@@ -76,10 +76,42 @@ data class RagSearchResult(
     val chunkId: String,
     val text: String,
     val score: Float,
+    val rerankScore: Float? = null,
+    val rerankRawScore: Float? = null,
 )
+
+enum class RagResultProcessingMode {
+    SimilarityThreshold,
+    ModelReranker,
+}
+
+data class RagRetrievalConfig(
+    val topKBeforeFilter: Int = 15,
+    val topKAfterFilter: Int = 5,
+    val similarityThreshold: Float = 0.7f,
+    val isFilteringEnabled: Boolean = false,
+    val isRerankingEnabled: Boolean = false,
+    val processingMode: RagResultProcessingMode = RagResultProcessingMode.SimilarityThreshold,
+) {
+    init {
+        require(topKBeforeFilter > 0) { "topKBeforeFilter must be positive." }
+        require(topKAfterFilter > 0) { "topKAfterFilter must be positive." }
+        require(similarityThreshold in 0f..1f) { "similarityThreshold must be between 0 and 1." }
+    }
+}
 
 data class RagQuery(
     val strategy: ChunkingStrategyType,
     val indexDirectory: String,
     val question: String,
+    val retrievalConfig: RagRetrievalConfig = RagRetrievalConfig(),
+    val rewrittenQuestion: String? = null,
+)
+
+data class RagQueryResult(
+    val results: List<RagSearchResult>,
+    val rawResultsCount: Int,
+    val filteredResultsCount: Int,
+    val rerankedResultsCount: Int,
+    val rewrittenQuestion: String? = null,
 )

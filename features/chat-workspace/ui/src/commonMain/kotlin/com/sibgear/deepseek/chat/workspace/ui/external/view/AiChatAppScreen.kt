@@ -37,7 +37,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sibgear.deepseek.chat.domain.model.TaskStageResultStatus
 import com.sibgear.deepseek.chat.domain.model.TaskState
-import com.sibgear.deepseek.chat.ui.external.view.AiModelSettingsDrawer
+import com.sibgear.deepseek.chat.ui.external.view.ChatSettingsDrawer
+import com.sibgear.deepseek.chat.ui.external.view.ChatSettingsDrawerType
 import com.sibgear.deepseek.chat.ui.external.view.ChatPane
 import com.sibgear.deepseek.chat.ui.external.view.ChatScreen
 import com.sibgear.deepseek.chat.workspace.ui.external.model.AiChatAppEvent
@@ -134,17 +135,17 @@ private fun TaskStateMachineChatScreen(
 ) {
     val taskSession = tab.taskSession ?: return
     var chatSplitFraction by rememberSaveable { mutableFloatStateOf(DefaultTaskChatSplitFraction) }
-    var isAiModelDrawerExpanded by rememberSaveable { mutableStateOf(false) }
-    var aiModelDrawerWidthFraction by rememberSaveable { mutableFloatStateOf(DefaultAiModelDrawerWidthFraction) }
+    var activeSettingsDrawer by rememberSaveable { mutableStateOf<ChatSettingsDrawerType?>(null) }
+    var settingsDrawerWidthFraction by rememberSaveable { mutableFloatStateOf(DefaultSettingsDrawerWidthFraction) }
     val density = LocalDensity.current
 
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             val maxWidthPx = with(density) { maxWidth.toPx() }
-            val drawerWidth = if (isAiModelDrawerExpanded) {
-                maxWidth * aiModelDrawerWidthFraction
+            val drawerWidth = if (activeSettingsDrawer != null) {
+                maxWidth * settingsDrawerWidthFraction
             } else {
-                AiModelDrawerTabWidth
+                SettingsDrawerClosedWidth
             }
 
             Row(
@@ -238,15 +239,15 @@ private fun TaskStateMachineChatScreen(
                     }
                 }
 
-                AiModelSettingsDrawer(
+                ChatSettingsDrawer(
                     state = tab.viewModel.state,
                     onEvent = { onEvent(AiChatAppEvent.ActiveChatEvent(it)) },
-                    isExpanded = isAiModelDrawerExpanded,
-                    onExpandedChange = { isAiModelDrawerExpanded = it },
+                    activeDrawer = activeSettingsDrawer,
+                    onActiveDrawerChanged = { activeSettingsDrawer = it },
                     onResize = { dragDeltaPx ->
                         val deltaFraction = dragDeltaPx / maxWidthPx
-                        aiModelDrawerWidthFraction = (aiModelDrawerWidthFraction - deltaFraction)
-                            .coerceIn(AiModelDrawerMinWidthFraction, AiModelDrawerMaxWidthFraction)
+                        settingsDrawerWidthFraction = (settingsDrawerWidthFraction - deltaFraction)
+                            .coerceIn(SettingsDrawerMinWidthFraction, SettingsDrawerMaxWidthFraction)
                     },
                     modifier = Modifier.width(drawerWidth).fillMaxHeight(),
                 )
@@ -382,10 +383,10 @@ private const val MaxTabsWidthFraction = 0.45f
 private const val DefaultTaskChatSplitFraction = 0.52f
 private const val MinTaskChatSplitFraction = 0.30f
 private const val MaxTaskChatSplitFraction = 0.75f
-private const val DefaultAiModelDrawerWidthFraction = 0.25f
-private const val AiModelDrawerMinWidthFraction = 0.16f
-private const val AiModelDrawerMaxWidthFraction = 0.30f
+private const val DefaultSettingsDrawerWidthFraction = 0.25f
+private const val SettingsDrawerMinWidthFraction = 0.16f
+private const val SettingsDrawerMaxWidthFraction = 0.30f
 private val TaskChatSplitHandleWidth: Dp = 6.dp
-private val AiModelDrawerTabWidth: Dp = 38.dp
+private val SettingsDrawerClosedWidth: Dp = 38.dp
 private val FocusedChatPaneBorderWidth: Dp = 2.dp
 private val FocusedChatPaneCornerRadius: Dp = 8.dp

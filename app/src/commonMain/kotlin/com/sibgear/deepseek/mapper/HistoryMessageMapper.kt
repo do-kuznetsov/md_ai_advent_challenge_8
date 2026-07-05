@@ -110,6 +110,7 @@ private fun HistoryMessageKind.toChatMessageKind(): ChatMessageKind =
         HistoryMessageKind.Regular -> ChatMessageKind.Regular
         HistoryMessageKind.CompressionSummary -> ChatMessageKind.CompressionSummary
         HistoryMessageKind.TaskStateEvent -> ChatMessageKind.TaskStateEvent
+        HistoryMessageKind.RagDiagnostic -> ChatMessageKind.RagDiagnostic
     }
 
 private fun ChatMessageKind.toHistoryMessageKind(): HistoryMessageKind =
@@ -117,6 +118,7 @@ private fun ChatMessageKind.toHistoryMessageKind(): HistoryMessageKind =
         ChatMessageKind.Regular -> HistoryMessageKind.Regular
         ChatMessageKind.CompressionSummary -> HistoryMessageKind.CompressionSummary
         ChatMessageKind.TaskStateEvent -> HistoryMessageKind.TaskStateEvent
+        ChatMessageKind.RagDiagnostic -> HistoryMessageKind.RagDiagnostic
     }
 
 private fun HistoryMessageFooter.toChatMessageFooter(): ChatMessageFooter =

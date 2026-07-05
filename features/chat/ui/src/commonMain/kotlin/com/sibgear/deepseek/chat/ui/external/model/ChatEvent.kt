@@ -27,5 +27,12 @@ sealed interface ChatEvent {
     data class RagEnabledChanged(val isEnabled: Boolean) : ChatEvent
     data class RagStrategySelected(val strategy: ChunkingStrategyType) : ChatEvent
     data class RagIndexDirectoryChanged(val indexDirectory: String) : ChatEvent
+    data class RagFilteringEnabledChanged(val isEnabled: Boolean) : ChatEvent
+    data class RagTopKBeforeFilterChanged(val topK: String) : ChatEvent
+    data class RagTopKAfterFilterChanged(val topK: String) : ChatEvent
+    data class RagSimilarityThresholdChanged(val threshold: String) : ChatEvent
+    data class RagQueryRewriteEnabledChanged(val isEnabled: Boolean) : ChatEvent
+    data class RagRerankingEnabledChanged(val isEnabled: Boolean) : ChatEvent
+    data class RagRerankerModelDirectoryChanged(val modelDirectory: String) : ChatEvent
     data object SendClicked : ChatEvent
 }

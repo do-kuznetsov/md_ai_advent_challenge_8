@@ -21,6 +21,7 @@ enum class ChatMessageKind {
     Regular,
     CompressionSummary,
     TaskStateEvent,
+    RagDiagnostic,
 }
 
 data class ChatMessageFooter(

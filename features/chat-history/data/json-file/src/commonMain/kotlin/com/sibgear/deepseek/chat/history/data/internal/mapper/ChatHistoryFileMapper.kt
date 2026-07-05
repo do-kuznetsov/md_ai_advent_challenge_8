@@ -170,12 +170,14 @@ private fun HistoryMessageKind.toDto(): HistoryMessageKindDto =
         HistoryMessageKind.Regular -> HistoryMessageKindDto.Regular
         HistoryMessageKind.CompressionSummary -> HistoryMessageKindDto.CompressionSummary
         HistoryMessageKind.TaskStateEvent -> HistoryMessageKindDto.TaskStateEvent
+        HistoryMessageKind.RagDiagnostic -> HistoryMessageKindDto.RagDiagnostic
     }
 
 private fun String.toHistoryMessageKind(): HistoryMessageKind =
     when (this) {
         HistoryMessageKindDto.CompressionSummary.value -> HistoryMessageKind.CompressionSummary
         HistoryMessageKindDto.TaskStateEvent.value -> HistoryMessageKind.TaskStateEvent
+        HistoryMessageKindDto.RagDiagnostic.value -> HistoryMessageKind.RagDiagnostic
         else -> HistoryMessageKind.Regular
     }
 

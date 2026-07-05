@@ -30,6 +30,7 @@ kotlin {
 }
 
 tasks.withType<JavaExec>().configureEach {
+    workingDir = rootProject.projectDir
     standardInput = System.`in`
     jvmArgs("-Dkotlin-logging.logStartupMessage=false")
 }
