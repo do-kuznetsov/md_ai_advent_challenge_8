@@ -2,11 +2,14 @@ package com.sibgear.deepseek.chat.ui.external.presentation
 
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
+import com.sibgear.deepseek.chat.domain.model.AiModel
+import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
+import com.sibgear.deepseek.chat.domain.repository.AiModelsRepository
 import com.sibgear.deepseek.chat.domain.repository.RoutingAiRepository
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.rag.domain.interactor.RagQueryInteractor
@@ -42,6 +45,57 @@ class ChatViewModelTest {
         viewModel.onEvent(ChatEvent.SystemPromptChanged("changed"))
 
         assertEquals("system", viewModel.state.systemPrompt)
+    }
+
+    @Test
+    fun loadModelsAddsOllamaModelsToState() = runTest {
+        val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+        val viewModel = chatViewModel(
+            modelRepositories = mapOf(
+                AiProvider.Ollama to FakeModelsRepository(listOf(ollamaModel)),
+            ),
+        )
+
+        viewModel.loadModels()
+
+        assertEquals(listOf(ollamaModel), viewModel.state.ollamaModels)
+        assertEquals("Ollama: 1 моделей", viewModel.state.ollamaModelsStatus)
+    }
+
+    @Test
+    fun sendPromptUsesSelectedOllamaModel() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val viewModel = chatViewModel(chatRepository = chatRepository)
+        val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+
+        viewModel.onEvent(ChatEvent.ModelSelected(ollamaModel))
+        viewModel.onEvent(ChatEvent.RagEnabledChanged(false))
+        viewModel.onEvent(ChatEvent.PromptChanged("Привет"))
+        viewModel.sendPrompt()
+
+        assertEquals(ollamaModel, chatRepository.lastRequest?.model)
+    }
+
+    @Test
+    fun syncRequestSettingsCopiesOllamaModelsAndStatus() {
+        val source = chatViewModel()
+        val target = chatViewModel()
+        val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+
+        source.onEvent(ChatEvent.ModelSelected(ollamaModel))
+        source.loadModels()
+        source.syncRequestSettingsFrom(
+            source.state.copy(
+                ollamaModels = listOf(ollamaModel),
+                ollamaModelsStatus = "Ollama: 1 моделей",
+                selectedModel = ollamaModel,
+            ),
+        )
+        target.syncRequestSettingsFrom(source.state)
+
+        assertEquals(listOf(ollamaModel), target.state.ollamaModels)
+        assertEquals("Ollama: 1 моделей", target.state.ollamaModelsStatus)
+        assertEquals(ollamaModel, target.state.selectedModel)
     }
 
     @Test
@@ -350,6 +404,7 @@ class ChatViewModelTest {
 
     private fun chatViewModel(
         chatRepository: RecordingChatRepository = RecordingChatRepository(),
+        modelRepositories: Map<AiProvider, AiModelsRepository> = emptyMap(),
         ragQueryInteractor: RagQueryInteractor? = null,
         ragRerankerFactory: ((String) -> RagReranker)? = null,
         initialMessages: List<ChatMessage> = emptyList(),
@@ -358,10 +413,11 @@ class ChatViewModelTest {
             interactor = ChatInteractor(
                 repository = RoutingAiRepository(
                     chatRepositories = mapOf(
-                        com.sibgear.deepseek.chat.domain.model.AiProvider.DeepSeek to chatRepository,
-                        com.sibgear.deepseek.chat.domain.model.AiProvider.MagnitCopilot to chatRepository,
+                        AiProvider.DeepSeek to chatRepository,
+                        AiProvider.MagnitCopilot to chatRepository,
+                        AiProvider.Ollama to chatRepository,
                     ),
-                    modelRepositories = emptyMap(),
+                    modelRepositories = modelRepositories,
                 ),
                 dispatcher = Dispatchers.Unconfined,
             ),
@@ -418,6 +474,12 @@ private class RecordingChatRepository(
             ),
         )
     }
+}
+
+private class FakeModelsRepository(
+    private val models: List<AiModel>,
+) : AiModelsRepository {
+    override suspend fun loadModels(): List<AiModel> = models
 }
 
 private class RecordingEmbeddingProvider(

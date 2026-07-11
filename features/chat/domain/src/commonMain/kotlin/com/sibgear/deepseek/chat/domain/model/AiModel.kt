@@ -4,6 +4,7 @@ enum class AiProvider {
     DeepSeek,
     OpenRouter,
     MagnitCopilot,
+    Ollama,
 }
 
 data class AiModel(

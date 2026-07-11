@@ -21,6 +21,7 @@ include(
     ":features:chat:domain",
     ":features:chat:data:deepseek",
     ":features:chat:data:magnit",
+    ":features:chat:data:ollama",
     ":features:chat:data:openrouter",
     ":features:chat:ui",
     ":features:assistant-memory:domain",

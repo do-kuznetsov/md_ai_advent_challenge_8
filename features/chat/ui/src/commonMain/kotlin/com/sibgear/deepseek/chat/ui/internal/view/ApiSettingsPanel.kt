@@ -68,6 +68,13 @@ internal fun ApiSettingsPanel(
                 onEvent = onEvent,
             )
 
+            state.ollamaModelsStatus?.let { status ->
+                ApiSettingsLabel(
+                    text = status,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             state.openRouterModelsStatus?.let { status ->
                 ApiSettingsLabel(
                     text = status,
@@ -157,6 +164,17 @@ private fun ModelSelector(
                 onEvent(ChatEvent.ModelMenuExpandedChanged(false))
             },
         ) {
+            state.ollamaModels.forEach { model ->
+                DropdownMenuItem(
+                    text = { Text(model.displayName) },
+                    onClick = { onEvent(ChatEvent.ModelSelected(model)) },
+                )
+            }
+
+            if (state.ollamaModels.isNotEmpty()) {
+                HorizontalDivider()
+            }
+
             state.openRouterModels.forEach { model ->
                 DropdownMenuItem(
                     text = { Text(model.displayName) },

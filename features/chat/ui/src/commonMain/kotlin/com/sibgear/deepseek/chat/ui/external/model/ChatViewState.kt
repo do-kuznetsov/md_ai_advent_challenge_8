@@ -21,10 +21,12 @@ data class ChatViewState(
     val attachment: PromptAttachment? = null,
     val attachmentError: String? = null,
     val selectedModel: AiModel = ChatDefaults.DefaultModel,
+    val ollamaModels: List<AiModel> = emptyList(),
     val openRouterModels: List<AiModel> = emptyList(),
     val magnitCopilotModels: List<AiModel> = emptyList(),
     val deepSeekModels: List<AiModel> = listOf(ChatDefaults.DefaultDeepSeekModel),
     val modelFilter: String = "free",
+    val ollamaModelsStatus: String? = null,
     val openRouterModelsStatus: String? = null,
     val magnitCopilotModelsStatus: String? = null,
     val messages: List<ChatMessage> = emptyList(),
@@ -63,7 +65,7 @@ data class ChatViewState(
     val taskMemoryState: TaskMemoryState = TaskMemoryState(),
 ) {
     val availableModels: List<AiModel>
-        get() = openRouterModels + magnitCopilotModels + deepSeekModels
+        get() = ollamaModels + openRouterModels + magnitCopilotModels + deepSeekModels
 
     val isSendEnabled: Boolean
         get() = prompt.isNotBlank() && !isLoading
