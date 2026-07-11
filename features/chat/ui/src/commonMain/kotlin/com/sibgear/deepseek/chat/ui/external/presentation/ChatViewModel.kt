@@ -258,6 +258,7 @@ class ChatViewModel(
     fun loadModels() {
         coroutineScope.launch {
             state = state.copy(
+                ollamaModelsStatus = "Ollama: загрузка моделей...",
                 magnitCopilotModelsStatus = "MCopilot: загрузка моделей...",
                 openRouterModelsStatus = "OpenRouter: загрузка моделей...",
             )
@@ -278,6 +279,44 @@ class ChatViewModel(
                     state.selectedModel
                 },
             ).withContextPresentation()
+
+            val ollamaModels = runCatching {
+                interactor.loadModels(AiProvider.Ollama)
+            }.getOrElse { exception ->
+                state = state.copy(
+                    ollamaModels = emptyList(),
+                    selectedModel = if (state.selectedModel.provider == AiProvider.Ollama) {
+                        deepSeekFallback(state.deepSeekModels)
+                    } else {
+                        state.selectedModel
+                    },
+                    ollamaModelsStatus = "Ollama: ${exception.message ?: "ошибка загрузки моделей"}",
+                ).withContextPresentation()
+                emptyList()
+            }
+            if (ollamaModels.isNotEmpty()) {
+                state = state.copy(
+                    ollamaModels = ollamaModels,
+                    selectedModel = if (state.selectedModel.provider == AiProvider.Ollama &&
+                        ollamaModels.none { it.id == state.selectedModel.id }
+                    ) {
+                        deepSeekFallback(state.deepSeekModels)
+                    } else {
+                        state.selectedModel
+                    },
+                    ollamaModelsStatus = "Ollama: ${ollamaModels.size} моделей",
+                ).withContextPresentation()
+            } else if (state.ollamaModelsStatus == "Ollama: загрузка моделей...") {
+                state = state.copy(
+                    ollamaModels = emptyList(),
+                    selectedModel = if (state.selectedModel.provider == AiProvider.Ollama) {
+                        deepSeekFallback(state.deepSeekModels)
+                    } else {
+                        state.selectedModel
+                    },
+                    ollamaModelsStatus = "Ollama: нет моделей",
+                ).withContextPresentation()
+            }
 
             val magnitCopilotModels = runCatching {
                 interactor.loadModels(AiProvider.MagnitCopilot)
@@ -493,10 +532,14 @@ class ChatViewModel(
     fun syncRequestSettingsFrom(source: ChatViewState) {
         state = state.copy(
             selectedModel = source.selectedModel,
+            ollamaModels = source.ollamaModels,
             openRouterModels = source.openRouterModels,
+            magnitCopilotModels = source.magnitCopilotModels,
             deepSeekModels = source.deepSeekModels,
             modelFilter = source.modelFilter,
+            ollamaModelsStatus = source.ollamaModelsStatus,
             openRouterModelsStatus = source.openRouterModelsStatus,
+            magnitCopilotModelsStatus = source.magnitCopilotModelsStatus,
             contextManagementMode = source.contextManagementMode,
             summaryIntervalInput = source.summaryIntervalInput,
             slidingWindowMessagesInput = source.slidingWindowMessagesInput,

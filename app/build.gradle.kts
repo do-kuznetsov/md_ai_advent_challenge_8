@@ -21,6 +21,7 @@ kotlin {
             implementation(project(":features:chat:domain"))
             implementation(project(":features:chat:data:deepseek"))
             implementation(project(":features:chat:data:magnit"))
+            implementation(project(":features:chat:data:ollama"))
             implementation(project(":features:chat:data:openrouter"))
             implementation(project(":features:chat:ui"))
             implementation(project(":features:chat-history:data:json-file"))

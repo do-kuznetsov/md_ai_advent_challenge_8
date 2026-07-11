@@ -71,6 +71,25 @@ class RoutingAiRepositoryTest {
     }
 
     @Test
+    fun routesOllamaRequestToOllamaRepository() = runTest {
+        val deepSeekRepository = RecordingChatRepository()
+        val ollamaRepository = RecordingChatRepository()
+        val routingRepository = RoutingAiRepository(
+            chatRepositories = mapOf(
+                AiProvider.DeepSeek to deepSeekRepository,
+                AiProvider.Ollama to ollamaRepository,
+            ),
+            modelRepositories = emptyMap(),
+        )
+        val request = request(AiProvider.Ollama)
+
+        routingRepository.sendMessage(request)
+
+        assertEquals(null, deepSeekRepository.lastRequest)
+        assertEquals(request, ollamaRepository.lastRequest)
+    }
+
+    @Test
     fun loadsModelsThroughProviderModelsRepository() = runTest {
         val model = AiModel(id = "openrouter/test", provider = AiProvider.OpenRouter)
         val routingRepository = RoutingAiRepository(

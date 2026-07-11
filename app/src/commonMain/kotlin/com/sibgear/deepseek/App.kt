@@ -16,6 +16,8 @@ import com.sibgear.deepseek.chat.data.deepseek.external.service.DeepSeekAssistan
 import com.sibgear.deepseek.chat.data.magnit.external.repository.MagnitCopilotChatRepository
 import com.sibgear.deepseek.chat.data.magnit.external.repository.MagnitCopilotModelsRepository
 import com.sibgear.deepseek.chat.data.magnit.external.service.MagnitCopilotAssistantProfileService
+import com.sibgear.deepseek.chat.data.ollama.external.repository.OllamaChatRepository
+import com.sibgear.deepseek.chat.data.ollama.external.repository.OllamaModelsRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterChatRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.repository.OpenRouterModelsRepository
 import com.sibgear.deepseek.chat.data.openrouter.external.service.OpenRouterAssistantProfileService
@@ -207,6 +209,10 @@ fun App() {
                         historyInteractor = historyInteractor,
                         memoryInteractor = memoryInteractor,
                     ),
+                    AiProvider.Ollama to OllamaChatRepository(
+                        historyInteractor = historyInteractor,
+                        memoryInteractor = memoryInteractor,
+                    ),
                 ),
                 modelRepositories = mapOf(
                     AiProvider.DeepSeek to DeepSeekModelsRepository(),
@@ -214,6 +220,7 @@ fun App() {
                     AiProvider.OpenRouter to OpenRouterModelsRepository(
                         apiKey = BuildConfig.OPENROUTER_AI_KEY,
                     ),
+                    AiProvider.Ollama to OllamaModelsRepository(),
                 ),
             )
             val interactor = ChatInteractor(
