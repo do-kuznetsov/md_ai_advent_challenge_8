@@ -22,6 +22,10 @@ sealed interface ChatEvent {
     data class ModelMenuExpandedChanged(val isExpanded: Boolean) : ChatEvent
     data class TemperatureChanged(val temperature: Float) : ChatEvent
     data class MaxTokensChanged(val maxTokens: String) : ChatEvent
+    data class NumCtxChanged(val numCtx: String) : ChatEvent
+    data class TopPChanged(val topP: String) : ChatEvent
+    data class SeedChanged(val seed: String) : ChatEvent
+    data class RepeatPenaltyChanged(val repeatPenalty: String) : ChatEvent
     data class StopWordChanged(val stopWord: String) : ChatEvent
     data class ApiControlChanged(val isEnabled: Boolean) : ChatEvent
     data class RagEnabledChanged(val isEnabled: Boolean) : ChatEvent

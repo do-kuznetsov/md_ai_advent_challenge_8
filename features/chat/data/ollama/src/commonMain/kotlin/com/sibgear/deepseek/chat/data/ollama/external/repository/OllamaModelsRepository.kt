@@ -64,7 +64,15 @@ class OllamaModelsRepository(
                         details?.quantizationLevel,
                     ).joinToString(" / "),
                     contextLength = show.contextLength(),
-                    supportedParameters = listOf("temperature", "num_predict", "stop"),
+                    supportedParameters = listOf(
+                        "temperature",
+                        "num_predict",
+                        "num_ctx",
+                        "top_p",
+                        "seed",
+                        "repeat_penalty",
+                        "stop",
+                    ),
                 )
             }
     }

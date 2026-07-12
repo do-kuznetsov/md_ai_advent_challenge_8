@@ -211,6 +211,46 @@ class ChatViewModel(
                 )
             }
 
+            is ChatEvent.NumCtxChanged -> {
+                val digitsOnly = event.numCtx.filter { it.isDigit() }
+                state = state.copy(
+                    numCtxInput = digitsOnly,
+                    apiSettings = state.apiSettings.copy(
+                        numCtx = digitsOnly.toIntOrNull() ?: 0,
+                    ),
+                )
+            }
+
+            is ChatEvent.TopPChanged -> {
+                val normalized = event.topP.normalizedDecimalInput()
+                state = state.copy(
+                    topPInput = normalized,
+                    apiSettings = state.apiSettings.copy(
+                        topP = normalized.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0f,
+                    ),
+                )
+            }
+
+            is ChatEvent.SeedChanged -> {
+                val digitsOnly = event.seed.filter { it.isDigit() }
+                state = state.copy(
+                    seedInput = digitsOnly,
+                    apiSettings = state.apiSettings.copy(
+                        seed = digitsOnly.toIntOrNull() ?: 0,
+                    ),
+                )
+            }
+
+            is ChatEvent.RepeatPenaltyChanged -> {
+                val normalized = event.repeatPenalty.normalizedDecimalInput()
+                state = state.copy(
+                    repeatPenaltyInput = normalized,
+                    apiSettings = state.apiSettings.copy(
+                        repeatPenalty = normalized.toFloatOrNull()?.coerceAtLeast(0f) ?: 0f,
+                    ),
+                )
+            }
+
             is ChatEvent.ModelFilterChanged -> {
                 state = state.copy(modelFilter = event.filter)
                 applyOpenRouterFilter()
@@ -286,7 +326,10 @@ class ChatViewModel(
                 state = state.copy(
                     ollamaModels = emptyList(),
                     selectedModel = if (state.selectedModel.provider == AiProvider.Ollama) {
-                        deepSeekFallback(state.deepSeekModels)
+                        preferredDefaultModel(
+                            ollamaModels = emptyList(),
+                            magnitCopilotModels = state.magnitCopilotModels,
+                        )
                     } else {
                         state.selectedModel
                     },
@@ -297,12 +340,16 @@ class ChatViewModel(
             if (ollamaModels.isNotEmpty()) {
                 state = state.copy(
                     ollamaModels = ollamaModels,
-                    selectedModel = if (state.selectedModel.provider == AiProvider.Ollama &&
-                        ollamaModels.none { it.id == state.selectedModel.id }
-                    ) {
-                        deepSeekFallback(state.deepSeekModels)
-                    } else {
-                        state.selectedModel
+                    selectedModel = when {
+                        state.selectedModel.isDefaultModel() -> ollamaModels.first()
+                        state.selectedModel.provider == AiProvider.Ollama &&
+                            ollamaModels.none { it.id == state.selectedModel.id } -> {
+                            preferredDefaultModel(
+                                ollamaModels = ollamaModels,
+                                magnitCopilotModels = state.magnitCopilotModels,
+                            )
+                        }
+                        else -> state.selectedModel
                     },
                     ollamaModelsStatus = "Ollama: ${ollamaModels.size} моделей",
                 ).withContextPresentation()
@@ -310,7 +357,10 @@ class ChatViewModel(
                 state = state.copy(
                     ollamaModels = emptyList(),
                     selectedModel = if (state.selectedModel.provider == AiProvider.Ollama) {
-                        deepSeekFallback(state.deepSeekModels)
+                        preferredDefaultModel(
+                            ollamaModels = emptyList(),
+                            magnitCopilotModels = state.magnitCopilotModels,
+                        )
                     } else {
                         state.selectedModel
                     },
@@ -326,7 +376,10 @@ class ChatViewModel(
                 selectedModel = if (state.selectedModel.provider == AiProvider.MagnitCopilot &&
                     magnitCopilotModels.none { it.id == state.selectedModel.id }
                 ) {
-                    deepSeekFallback(state.deepSeekModels)
+                    preferredDefaultModel(
+                        ollamaModels = state.ollamaModels,
+                        magnitCopilotModels = magnitCopilotModels,
+                    )
                 } else {
                     state.selectedModel
                 },
@@ -546,6 +599,10 @@ class ChatViewModel(
             stickyFactsWindowInput = source.stickyFactsWindowInput,
             apiSettings = source.apiSettings,
             maxTokensInput = source.maxTokensInput,
+            numCtxInput = source.numCtxInput,
+            topPInput = source.topPInput,
+            seedInput = source.seedInput,
+            repeatPenaltyInput = source.repeatPenaltyInput,
             isRagEnabled = source.isRagEnabled,
             ragStrategy = source.ragStrategy,
             ragIndexDirectory = source.ragIndexDirectory,
@@ -731,6 +788,17 @@ class ChatViewModel(
     private fun deepSeekFallback(models: List<AiModel>): AiModel =
         models.firstOrNull { it.id == ChatDefaults.DefaultDeepSeekModel.id } ?: ChatDefaults.DefaultDeepSeekModel
 
+    private fun preferredDefaultModel(
+        ollamaModels: List<AiModel>,
+        magnitCopilotModels: List<AiModel>,
+    ): AiModel =
+        ollamaModels.firstOrNull()
+            ?: magnitCopilotModels.firstOrNull()
+            ?: ChatDefaults.DefaultModel
+
+    private fun AiModel.isDefaultModel(): Boolean =
+        provider == ChatDefaults.DefaultModel.provider && id == ChatDefaults.DefaultModel.id
+
     private fun ChatViewState.withContextPresentation(): ChatViewState =
         copy(
             contextUsageLabel = buildContextUsageLabel(messages, selectedModel),
@@ -877,6 +945,21 @@ private const val DefaultRagRerankerModelDirectory = "../rag/models/bge-reranker
 private const val DefaultRagTopKBeforeFilter = 15
 private const val DefaultRagTopKAfterFilter = 5
 private const val DefaultRagSimilarityThreshold = 0.7f
+
+private fun String.normalizedDecimalInput(): String {
+    var hasSeparator = false
+    return buildString {
+        this@normalizedDecimalInput.forEach { char ->
+            when {
+                char.isDigit() -> append(char)
+                (char == '.' || char == ',') && !hasSeparator -> {
+                    append('.')
+                    hasSeparator = true
+                }
+            }
+        }
+    }
+}
 
 private val RagRewriteApiSettings = ApiSettings(
     temperature = 0f,

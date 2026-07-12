@@ -33,6 +33,10 @@ class OllamaChatMapperTest {
             apiSettings = ApiSettings(
                 temperature = 0.7f,
                 maxTokens = 128,
+                numCtx = 4096,
+                topP = 0.9f,
+                seed = 7,
+                repeatPenalty = 1.1f,
                 stopWord = "STOP",
                 isApiControlEnabled = true,
             ),
@@ -42,6 +46,10 @@ class OllamaChatMapperTest {
 
         assertEquals(0.7f, apiRequest.options?.temperature)
         assertEquals(128, apiRequest.options?.numPredict)
+        assertEquals(4096, apiRequest.options?.numCtx)
+        assertEquals(0.9f, apiRequest.options?.topP)
+        assertEquals(7, apiRequest.options?.seed)
+        assertEquals(1.1f, apiRequest.options?.repeatPenalty)
         assertEquals(listOf("STOP"), apiRequest.options?.stop)
     }
 

@@ -216,6 +216,10 @@ private fun ApiSettings.toOllamaOptions(): OllamaChatOptions? {
     return OllamaChatOptions(
         temperature = temperature.coerceIn(0f, 1f),
         numPredict = maxTokens.takeIf { it > 0 },
+        numCtx = numCtx.takeIf { it > 0 },
+        topP = topP.coerceIn(0f, 1f),
+        seed = seed,
+        repeatPenalty = repeatPenalty.takeIf { it > 0f },
         stop = stop,
     )
 }
