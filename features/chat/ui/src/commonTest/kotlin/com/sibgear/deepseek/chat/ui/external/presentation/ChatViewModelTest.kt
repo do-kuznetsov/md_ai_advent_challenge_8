@@ -9,6 +9,7 @@ import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
 import com.sibgear.deepseek.chat.domain.model.StreamingChatDeltaType
 import com.sibgear.deepseek.chat.domain.repository.AiModelsRepository
@@ -73,6 +74,28 @@ class ChatViewModelTest {
         val viewModel = chatViewModel()
 
         assertFalse(viewModel.state.isRagEnabled)
+    }
+
+    @Test
+    fun initialAttachmentIsSentWithFirstPromptAndThenCleared() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val attachment = PromptAttachment(
+            fileName = "photo_cloud_reviews_200.txt",
+            sizeBytes = 12,
+            content = "review corpus",
+        )
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            initialAttachment = attachment,
+        )
+
+        assertEquals(attachment, viewModel.state.attachment)
+
+        viewModel.onEvent(ChatEvent.PromptChanged("Проанализируй отзывы"))
+        viewModel.sendPrompt()
+
+        assertEquals(attachment, chatRepository.lastRequest?.attachment)
+        assertEquals(null, viewModel.state.attachment)
     }
 
     @Test
@@ -579,6 +602,7 @@ class ChatViewModelTest {
         ragQueryInteractor: RagQueryInteractor? = null,
         ragRerankerFactory: ((String) -> RagReranker)? = null,
         initialMessages: List<ChatMessage> = emptyList(),
+        initialAttachment: PromptAttachment? = null,
     ): ChatViewModel =
         ChatViewModel(
             interactor = ChatInteractor(
@@ -594,6 +618,7 @@ class ChatViewModelTest {
             ),
             coroutineScope = CoroutineScope(Dispatchers.Unconfined),
             initialMessages = initialMessages,
+            initialAttachment = initialAttachment,
             ragQueryInteractor = ragQueryInteractor,
             ragRerankerFactory = { modelDirectory: String ->
                 lastRerankerModelDirectory = modelDirectory

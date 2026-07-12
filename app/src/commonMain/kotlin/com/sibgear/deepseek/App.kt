@@ -24,6 +24,7 @@ import com.sibgear.deepseek.chat.data.openrouter.external.service.OpenRouterAssi
 import com.sibgear.deepseek.chat.domain.interactor.ChatInteractor
 import com.sibgear.deepseek.chat.domain.model.CompositeAiToolProvider
 import com.sibgear.deepseek.chat.domain.model.AiProvider
+import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.TaskSessionSnapshot
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.repository.RoutingAiRepository
@@ -63,6 +64,7 @@ import com.sibgear.rag.data.embedding.OllamaEmbeddingProvider
 import com.sibgear.rag.data.rerank.OnnxBgeReranker
 import com.sibgear.rag.data.sqlite.SQLiteRagSearchRepository
 import com.sibgear.rag.domain.interactor.RagQueryInteractor
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
@@ -158,6 +160,7 @@ fun App() {
         }
         factory
     }
+    val defaultFirstPromptAttachment = remember { loadDefaultFirstPromptAttachment() }
 
     val viewModel = remember(scope, workspaceStorage, toolProvider, ragQueryInteractor, ragRerankerFactory) {
         fun createChatViewModel(
@@ -236,6 +239,9 @@ fun App() {
                 initialBranches = restoredBranches.toChatBranches(),
                 initialSystemPrompt = initialSystemPrompt,
                 initialPrompt = initialPrompt,
+                initialAttachment = defaultFirstPromptAttachment.takeIf {
+                    !useTaskStageHistory && restoredMessages.isEmpty()
+                },
                 isSystemPromptReadOnly = isSystemPromptReadOnly,
                 toolProvider = toolProvider,
                 ragQueryInteractor = ragQueryInteractor,
@@ -559,8 +565,24 @@ private fun List<HistoryMessage>.toTabTitle(): String {
         .ifBlank { ChatTab.NewTitle }
 }
 
+private fun loadDefaultFirstPromptAttachment(): PromptAttachment? {
+    val file = File(DefaultFirstPromptAttachmentPath)
+    if (!file.isFile) {
+        return null
+    }
+    return runCatching {
+        PromptAttachment(
+            fileName = file.name,
+            sizeBytes = file.length(),
+            content = file.readText(),
+        )
+    }.getOrNull()
+}
+
 private fun Int.toTaskStageChatId(stage: TaskState): Int =
     this * TaskStageChatIdMultiplier + stage.ordinal + 1
 
 private const val MaxTabTitleWords = 5
 private const val TaskStageChatIdMultiplier = 10
+private const val DefaultFirstPromptAttachmentPath =
+    "/Users/do_kuznetsov/repos/SibGear/md_ai_advent_challenge_8/questions/local-llm/photo_cloud_reviews_200.txt"
