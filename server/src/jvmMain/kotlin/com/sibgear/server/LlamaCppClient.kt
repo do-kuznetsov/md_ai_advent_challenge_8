@@ -6,6 +6,7 @@ import com.sibgear.server.protocol.ServerApiSettings
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.post
 import io.ktor.client.request.preparePost
@@ -90,8 +91,8 @@ class LlamaCppClient(
             )
             timeout {
                 connectTimeoutMillis = 30_000
-                requestTimeoutMillis = 0
-                socketTimeoutMillis = 0
+                requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
             }
         }.execute { response ->
             if (!response.status.isSuccess()) {

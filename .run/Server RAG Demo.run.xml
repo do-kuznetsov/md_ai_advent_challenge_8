@@ -1,0 +1,36 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Server RAG Demo" type="GradleRunConfiguration" factoryName="Gradle">
+    <ExternalSystemSettings>
+      <option name="env">
+        <map>
+          <entry key="LLAMA_BASE_URL" value="http://127.0.0.1:8081" />
+          <entry key="LLAMA_CONTEXT_SIZE" value="32768" />
+          <entry key="LLAMA_MODEL_ID" value="qwen3-1.7b" />
+          <entry key="RAG_INDEX_DIR" value="rag/indexed" />
+          <entry key="EMBEDDING_MODEL_DIR" value="rag/models/nomic-embed-text" />
+          <entry key="RERANKER_MODEL_DIR" value="rag/models/bge-reranker-v2-m3" />
+          <entry key="SERVER_HOST" value="127.0.0.1" />
+          <entry key="SERVER_PORT" value="18080" />
+        </map>
+      </option>
+      <option name="executionName" />
+      <option name="externalProjectPath" value="$PROJECT_DIR$" />
+      <option name="externalSystemIdString" value="GRADLE" />
+      <option name="scriptParameters" value="" />
+      <option name="taskDescriptions">
+        <list />
+      </option>
+      <option name="taskNames">
+        <list>
+          <option value=":server:jvmRun" />
+        </list>
+      </option>
+      <option name="vmOptions" />
+    </ExternalSystemSettings>
+    <ExternalSystemDebugServerProcess>true</ExternalSystemDebugServerProcess>
+    <ExternalSystemReattachDebugProcess>true</ExternalSystemReattachDebugProcess>
+    <DebugAllEnabled>false</DebugAllEnabled>
+    <RunAsTest>false</RunAsTest>
+    <method v="2" />
+  </configuration>
+</component>
