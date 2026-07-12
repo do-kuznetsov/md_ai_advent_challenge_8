@@ -2,7 +2,11 @@
 
 package com.sibgear.server.ui
 
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,8 +18,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material3.Button
@@ -36,11 +42,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeViewport
@@ -56,6 +69,8 @@ import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.MessageEvent
 import org.w3c.dom.WebSocket
+
+private const val BottomScrollThresholdPx = 24
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
@@ -208,16 +223,84 @@ private fun ChatArea(
     messages: List<UiMessage>,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
+    val listState = rememberLazyListState()
+    val bottomAnchorIndex = messages.size
+    val lastMessageContent = messages.lastOrNull()?.content
+    val lastMessageThinking = messages.lastOrNull()?.thinking
+    var isPinnedToBottom by remember { mutableStateOf(true) }
+    var isAutoScrolling by remember { mutableStateOf(false) }
+    var isUserScrollInProgress by remember { mutableStateOf(false) }
+
+    LaunchedEffect(listState, bottomAnchorIndex) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { isScrollInProgress ->
+                if (isScrollInProgress && !isAutoScrolling) {
+                    isUserScrollInProgress = true
+                }
+                if (!isScrollInProgress && isUserScrollInProgress) {
+                    isPinnedToBottom = listState.isAtBottom(bottomAnchorIndex)
+                    isUserScrollInProgress = false
+                }
+                if (!isScrollInProgress && !isAutoScrolling && listState.isAtBottom(bottomAnchorIndex)) {
+                    isPinnedToBottom = true
+                }
+            }
+    }
+
+    LaunchedEffect(messages.size, lastMessageContent, lastMessageThinking, bottomAnchorIndex) {
+        if (isPinnedToBottom && !isUserScrollInProgress) {
+            isAutoScrolling = true
+            try {
+                listState.scrollToItem(bottomAnchorIndex)
+            } finally {
+                isAutoScrolling = false
+            }
+        }
+    }
+
+    Box(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(messages) { message ->
-            ChatBubble(message)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            messages.forEachIndexed { index, message ->
+                item(key = "message-$index") {
+                    ChatBubble(message)
+                }
+            }
+
+            item(key = "bottom-anchor") {
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp))
+            }
         }
+
+        VerticalScrollbar(
+            adapter = rememberScrollbarAdapter(listState),
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(8.dp),
+        )
     }
+}
+
+private fun LazyListState.isAtBottom(
+    bottomAnchorIndex: Int,
+    thresholdPx: Int = BottomScrollThresholdPx,
+): Boolean {
+    val visibleItems = layoutInfo.visibleItemsInfo
+    if (visibleItems.isEmpty()) {
+        return true
+    }
+
+    val bottomAnchor = visibleItems.lastOrNull { it.index == bottomAnchorIndex }
+    if (bottomAnchor == null) {
+        return false
+    }
+
+    return bottomAnchor.offset + bottomAnchor.size <= layoutInfo.viewportEndOffset + thresholdPx
 }
 
 @Composable
@@ -250,18 +333,22 @@ private fun ChatBubble(message: UiMessage) {
                         color = Color(0xFF5F6368),
                         style = MaterialTheme.typography.labelSmall,
                     )
-                    Text(
-                        text = message.thinking,
-                        color = Color(0xFF5F6368),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    SelectionContainer {
+                        Text(
+                            text = message.thinking,
+                            color = Color(0xFF5F6368),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
-            Text(
-                text = message.content,
-                color = Color(0xFF202124),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            SelectionContainer {
+                Text(
+                    text = message.content,
+                    color = Color(0xFF202124),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }
@@ -303,7 +390,17 @@ private fun PromptInput(
         OutlinedTextField(
             value = prompt,
             onValueChange = onPromptChanged,
-            modifier = Modifier.weight(1f).height(132.dp),
+            modifier = Modifier
+                .weight(1f)
+                .height(132.dp)
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && !event.isShiftPressed) {
+                        onSend()
+                        true
+                    } else {
+                        false
+                    }
+                },
             minLines = 3,
             maxLines = 4,
             enabled = !isLoading,
@@ -334,89 +431,110 @@ private fun SettingsPanel(
     onRagSettingsChanged: (ServerRagSettings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    val scrollState = rememberScrollState()
+
+    Box(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("AI модель", style = MaterialTheme.typography.titleSmall)
-        Text("temperature: ${apiSettings.temperature}", style = MaterialTheme.typography.labelSmall)
-        Slider(
-            value = apiSettings.temperature,
-            onValueChange = { onApiSettingsChanged(apiSettings.copy(temperature = it)) },
-            valueRange = 0f..1f,
-        )
-        NumberField("max_tokens", apiSettings.maxTokens.toString()) {
-            onApiSettingsChanged(apiSettings.copy(maxTokens = it.toIntOrNull() ?: apiSettings.maxTokens))
-        }
-        NumberField("num_ctx", apiSettings.numCtx.toString()) {
-            onApiSettingsChanged(apiSettings.copy(numCtx = it.toIntOrNull() ?: apiSettings.numCtx))
-        }
-        NumberField("top_p", apiSettings.topP.toString()) {
-            onApiSettingsChanged(apiSettings.copy(topP = it.toFloatOrNull() ?: apiSettings.topP))
-        }
-        NumberField("seed", apiSettings.seed.toString()) {
-            onApiSettingsChanged(apiSettings.copy(seed = it.toIntOrNull() ?: apiSettings.seed))
-        }
-        NumberField("repeat_penalty", apiSettings.repeatPenalty.toString()) {
-            onApiSettingsChanged(apiSettings.copy(repeatPenalty = it.toFloatOrNull() ?: apiSettings.repeatPenalty))
-        }
-        OutlinedTextField(
-            value = apiSettings.stopWord,
-            onValueChange = { onApiSettingsChanged(apiSettings.copy(stopWord = it)) },
-            label = { Text("stop-слово") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-
-        HorizontalDivider()
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = ragSettings.isEnabled,
-                onCheckedChange = { onRagSettingsChanged(ragSettings.copy(isEnabled = it)) },
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(end = 12.dp)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("LLM params:", style = MaterialTheme.typography.titleSmall)
+            Text("temperature: ${apiSettings.temperature}", style = MaterialTheme.typography.labelSmall)
+            Slider(
+                value = apiSettings.temperature,
+                onValueChange = { onApiSettingsChanged(apiSettings.copy(temperature = it)) },
+                valueRange = 0f..1f,
             )
-            Text("RAG", style = MaterialTheme.typography.titleSmall)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StrategyButton(
-                text = "fixed",
-                selected = ragSettings.strategy == ServerRagStrategy.Fixed,
-                enabled = ragSettings.isEnabled,
-                onClick = { onRagSettingsChanged(ragSettings.copy(strategy = ServerRagStrategy.Fixed)) },
-                modifier = Modifier.weight(1f),
-            )
-            StrategyButton(
-                text = "structure",
-                selected = ragSettings.strategy == ServerRagStrategy.Structure,
-                enabled = ragSettings.isEnabled,
-                onClick = { onRagSettingsChanged(ragSettings.copy(strategy = ServerRagStrategy.Structure)) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Toggle("rewrite", ragSettings.isQueryRewriteEnabled, ragSettings.isEnabled) {
-            onRagSettingsChanged(ragSettings.copy(isQueryRewriteEnabled = it))
-        }
-        Toggle("filter", ragSettings.isFilteringEnabled, ragSettings.isEnabled) {
-            onRagSettingsChanged(ragSettings.copy(isFilteringEnabled = it))
-        }
-        Toggle("rerank", ragSettings.isRerankingEnabled, ragSettings.isEnabled) {
-            onRagSettingsChanged(ragSettings.copy(isRerankingEnabled = it))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            NumberField("before", ragSettings.topKBeforeFilter.toString(), Modifier.weight(1f)) {
-                onRagSettingsChanged(ragSettings.copy(topKBeforeFilter = it.toIntOrNull() ?: ragSettings.topKBeforeFilter))
+            NumberField("max_tokens", apiSettings.maxTokens.toString()) {
+                onApiSettingsChanged(apiSettings.copy(maxTokens = it.toIntOrNull() ?: apiSettings.maxTokens))
             }
-            NumberField("after", ragSettings.topKAfterFilter.toString(), Modifier.weight(1f)) {
-                onRagSettingsChanged(ragSettings.copy(topKAfterFilter = it.toIntOrNull() ?: ragSettings.topKAfterFilter))
+            NumberField("num_ctx", apiSettings.numCtx.toString()) {
+                onApiSettingsChanged(apiSettings.copy(numCtx = it.toIntOrNull() ?: apiSettings.numCtx))
             }
-            NumberField("threshold", ragSettings.similarityThreshold.toString(), Modifier.weight(1f)) {
-                onRagSettingsChanged(
-                    ragSettings.copy(similarityThreshold = it.toFloatOrNull() ?: ragSettings.similarityThreshold),
+            NumberField("top_p", apiSettings.topP.toString()) {
+                onApiSettingsChanged(apiSettings.copy(topP = it.toFloatOrNull() ?: apiSettings.topP))
+            }
+            NumberField("seed", apiSettings.seed.toString()) {
+                onApiSettingsChanged(apiSettings.copy(seed = it.toIntOrNull() ?: apiSettings.seed))
+            }
+            NumberField("repeat_penalty", apiSettings.repeatPenalty.toString()) {
+                onApiSettingsChanged(apiSettings.copy(repeatPenalty = it.toFloatOrNull() ?: apiSettings.repeatPenalty))
+            }
+            OutlinedTextField(
+                value = apiSettings.stopWord,
+                onValueChange = { onApiSettingsChanged(apiSettings.copy(stopWord = it)) },
+                label = { Text("stop-слово") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+
+            HorizontalDivider()
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = ragSettings.isEnabled,
+                    onCheckedChange = { onRagSettingsChanged(ragSettings.copy(isEnabled = it)) },
+                )
+                Text("RAG", style = MaterialTheme.typography.titleSmall)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StrategyButton(
+                    text = "fixed",
+                    selected = ragSettings.strategy == ServerRagStrategy.Fixed,
+                    enabled = ragSettings.isEnabled,
+                    onClick = { onRagSettingsChanged(ragSettings.copy(strategy = ServerRagStrategy.Fixed)) },
+                    modifier = Modifier.weight(1f),
+                )
+                StrategyButton(
+                    text = "structure",
+                    selected = ragSettings.strategy == ServerRagStrategy.Structure,
+                    enabled = ragSettings.isEnabled,
+                    onClick = { onRagSettingsChanged(ragSettings.copy(strategy = ServerRagStrategy.Structure)) },
+                    modifier = Modifier.weight(1f),
                 )
             }
+            Toggle("rewrite", ragSettings.isQueryRewriteEnabled, ragSettings.isEnabled) {
+                onRagSettingsChanged(ragSettings.copy(isQueryRewriteEnabled = it))
+            }
+            Toggle("filter", ragSettings.isFilteringEnabled, ragSettings.isEnabled) {
+                onRagSettingsChanged(ragSettings.copy(isFilteringEnabled = it))
+            }
+            Toggle("rerank", ragSettings.isRerankingEnabled, ragSettings.isEnabled) {
+                onRagSettingsChanged(ragSettings.copy(isRerankingEnabled = it))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NumberField("before", ragSettings.topKBeforeFilter.toString(), Modifier.weight(1f)) {
+                    onRagSettingsChanged(
+                        ragSettings.copy(topKBeforeFilter = it.toIntOrNull() ?: ragSettings.topKBeforeFilter),
+                    )
+                }
+                NumberField("after", ragSettings.topKAfterFilter.toString(), Modifier.weight(1f)) {
+                    onRagSettingsChanged(
+                        ragSettings.copy(topKAfterFilter = it.toIntOrNull() ?: ragSettings.topKAfterFilter),
+                    )
+                }
+                NumberField("threshold", ragSettings.similarityThreshold.toString(), Modifier.weight(1f)) {
+                    onRagSettingsChanged(
+                        ragSettings.copy(similarityThreshold = it.toFloatOrNull() ?: ragSettings.similarityThreshold),
+                    )
+                }
+            }
         }
+
+        VerticalScrollbar(
+            adapter = rememberScrollbarAdapter(scrollState),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(8.dp),
+            )
     }
 }
 
