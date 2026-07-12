@@ -6,6 +6,7 @@ import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatRole
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
 
 class RoutingAiRepository(
     private val chatRepositories: Map<AiProvider, AiChatRepository>,
@@ -23,6 +24,18 @@ class RoutingAiRepository(
             )
 
         return repository.sendMessage(request)
+    }
+
+    suspend fun sendStreamingMessage(
+        request: AiRequestData,
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): AgentResponse {
+        val repository = chatRepositories[request.model.provider]
+        if (repository !is StreamingAiChatRepository) {
+            return sendMessage(request)
+        }
+
+        return repository.sendStreamingMessage(request, onDelta)
     }
 
     suspend fun loadModels(provider: AiProvider): List<AiModel> =

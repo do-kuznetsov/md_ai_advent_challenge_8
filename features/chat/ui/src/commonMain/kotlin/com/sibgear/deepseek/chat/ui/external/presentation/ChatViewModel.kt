@@ -19,6 +19,8 @@ import com.sibgear.deepseek.chat.domain.model.AiToolProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDeltaType
 import com.sibgear.deepseek.chat.domain.model.TaskMemoryState
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
@@ -36,6 +38,7 @@ import com.sibgear.rag.domain.repository.RagReranker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ChatViewModel(
     private val interactor: ChatInteractor,
@@ -481,7 +484,11 @@ class ChatViewModel(
                 val ragDiagnostics = state.messages
                     .drop(messagesBeforeRagCount)
                     .filter { it.kind == ChatMessageKind.RagDiagnostic }
-                sendRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
+                if (preparedRequest.model.provider == AiProvider.Ollama) {
+                    sendStreamingRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
+                } else {
+                    sendRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
+                }
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -758,6 +765,70 @@ class ChatViewModel(
             branchingStatus = response.activeBranchId?.let { "branch: $it" },
         ).withContextPresentation()
         onCompleted?.invoke(state)
+    }
+
+    private suspend fun sendStreamingRequestAndUpdateState(
+        request: AiRequestData,
+        onCompleted: ((ChatViewState) -> Unit)?,
+        preservedLocalMessages: List<ChatMessage> = emptyList(),
+    ) {
+        val streamingSourceLabel = "Ollama / ${request.model.displayName}"
+        val streamingMessage = ChatMessage(
+            role = ChatRole.Assistant,
+            content = "",
+            thinkingContent = "",
+            sourceLabel = streamingSourceLabel,
+        )
+        state = state.copy(
+            messages = state.messages + streamingMessage,
+        ).withContextPresentation()
+
+        val response = interactor.sendStreamingMessage(request) { delta ->
+            withContext(coroutineScope.coroutineContext) {
+                appendStreamingDelta(delta, streamingSourceLabel)
+            }
+        }
+        state = state.copy(
+            isLoading = false,
+            messages = response.messages.withPreservedLocalMessages(preservedLocalMessages),
+            stickyFacts = response.stickyFacts,
+            stickyFactsStatus = response.stickyFacts
+                .takeIf { it.isNotEmpty() }
+                ?.let { "facts: ${it.size}" },
+            branches = response.branches,
+            activeBranchId = response.activeBranchId,
+            branchingStatus = response.activeBranchId?.let { "branch: $it" },
+        ).withContextPresentation()
+        onCompleted?.invoke(state)
+    }
+
+    private fun appendStreamingDelta(
+        delta: StreamingChatDelta,
+        sourceLabel: String,
+    ) {
+        val index = state.messages.indexOfLast {
+            it.role == ChatRole.Assistant &&
+                it.kind == ChatMessageKind.Regular &&
+                it.sourceLabel == sourceLabel &&
+                it.footer == null
+        }
+        if (index == -1) {
+            return
+        }
+
+        val updatedMessage = when (delta.type) {
+            StreamingChatDeltaType.Thinking -> state.messages[index].copy(
+                thinkingContent = state.messages[index].thinkingContent.orEmpty() + delta.text,
+            )
+            StreamingChatDeltaType.Content -> state.messages[index].copy(
+                content = state.messages[index].content + delta.text,
+            )
+        }
+        state = state.copy(
+            messages = state.messages.toMutableList().also { messages ->
+                messages[index] = updatedMessage
+            },
+        ).withContextPresentation()
     }
 
     private fun applyOpenRouterFilter() {

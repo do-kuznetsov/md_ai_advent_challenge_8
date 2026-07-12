@@ -35,6 +35,7 @@ internal fun AiRequestData.toOllamaChatRequest(
     contextMessages: List<ContextMessage>,
     effectiveSystemPrompt: String = systemPrompt,
     servicePrompt: String? = null,
+    stream: Boolean = false,
 ): OllamaChatRequest {
     val trimmedSystemPrompt = effectiveSystemPrompt.trim()
     return OllamaChatRequest(
@@ -50,7 +51,8 @@ internal fun AiRequestData.toOllamaChatRequest(
                 add(OllamaChatMessage(role = "user", content = prompt))
             }
         },
-        stream = false,
+        stream = stream,
+        think = stream.takeIf { it },
         options = apiSettings.toOllamaOptions(),
     )
 }
@@ -75,12 +77,14 @@ internal fun AiRequestData.toOllamaAssistantHistoryMessage(
     content: String,
     responseTimeMs: Long,
     response: OllamaChatResponse? = null,
+    thinkingContent: String? = null,
 ): HistoryMessage {
     val promptTokens = response?.promptEvalCount
     val completionTokens = response?.evalCount
     return HistoryMessage(
         role = HistoryRole.Assistant,
         content = content,
+        thinkingContent = thinkingContent?.takeIf { it.isNotBlank() },
         sourceLabel = "Ollama / ${model.displayName}",
         footer = HistoryMessageFooter(
             responseTimeMs = responseTimeMs,
@@ -147,6 +151,7 @@ private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        thinkingContent = thinkingContent,
         branchId = branchId,
         kind = kind.toChatMessageKind(),
         apiContent = apiContent,

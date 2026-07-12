@@ -40,6 +40,7 @@ class SqldelightChatHistoryRepositoryTest {
         val message = HistoryMessage(
             role = HistoryRole.Assistant,
             content = "stored",
+            thinkingContent = "thinking before stored",
             branchId = 2,
             kind = HistoryMessageKind.CompressionSummary,
             apiContent = "stored api content",

@@ -93,6 +93,7 @@ private fun HistoryMessage.toDto(): HistoryMessageDto =
     HistoryMessageDto(
         role = role.toDto().value,
         content = content,
+        thinkingContent = thinkingContent,
         branchId = branchId,
         kind = kind.toDto().value,
         apiContent = apiContent,
@@ -149,6 +150,7 @@ private fun HistoryMessageDto.toDomain(): HistoryMessage? {
     return HistoryMessage(
         role = domainRole,
         content = content,
+        thinkingContent = thinkingContent,
         branchId = branchId,
         kind = kind.toHistoryMessageKind(),
         apiContent = apiContent,

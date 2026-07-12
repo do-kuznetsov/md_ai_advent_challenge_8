@@ -45,13 +45,15 @@ internal data class OllamaChatRequest(
     val model: String,
     val messages: List<OllamaChatMessage>,
     val stream: Boolean = false,
+    val think: Boolean? = null,
     val options: OllamaChatOptions? = null,
 )
 
 @Serializable
 internal data class OllamaChatMessage(
-    val role: String,
-    val content: String,
+    val role: String = "",
+    val content: String = "",
+    val thinking: String? = null,
 )
 
 @Serializable

@@ -9,9 +9,11 @@ import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
-import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDeltaType
 import com.sibgear.deepseek.chat.domain.repository.AiModelsRepository
 import com.sibgear.deepseek.chat.domain.repository.RoutingAiRepository
+import com.sibgear.deepseek.chat.domain.repository.StreamingAiChatRepository
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.rag.domain.interactor.RagQueryInteractor
 import com.sibgear.rag.domain.model.ChunkingStrategyType
@@ -183,6 +185,44 @@ class ChatViewModelTest {
         viewModel.sendPrompt()
 
         assertEquals(ollamaModel, chatRepository.lastRequest?.model)
+    }
+
+    @Test
+    fun sendPromptStreamsOllamaThinkingAndFinalContent() = runTest {
+        val chatRepository = RecordingChatRepository(
+            streamingDeltas = listOf(
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, "Думаю"),
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, " над отзывами."),
+                StreamingChatDelta(StreamingChatDeltaType.Content, "Готовый отчёт."),
+            ),
+        )
+        val viewModel = chatViewModel(chatRepository = chatRepository)
+        val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+
+        viewModel.onEvent(ChatEvent.ModelSelected(ollamaModel))
+        viewModel.onEvent(ChatEvent.PromptChanged("Проанализируй отзывы"))
+        viewModel.sendPrompt()
+
+        assertEquals(1, chatRepository.streamingCallCount)
+        assertEquals("Готовый отчёт.", viewModel.state.messages.last().content)
+        assertEquals("Думаю над отзывами.", viewModel.state.messages.last().thinkingContent)
+    }
+
+    @Test
+    fun sendSyntheticPromptKeepsNonStreamingBehaviorForOllama() = runTest {
+        val chatRepository = RecordingChatRepository(
+            streamingDeltas = listOf(
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, "Не должно стримиться."),
+            ),
+        )
+        val viewModel = chatViewModel(chatRepository = chatRepository)
+        val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+
+        viewModel.onEvent(ChatEvent.ModelSelected(ollamaModel))
+        viewModel.sendSyntheticPrompt("service prompt")
+
+        assertEquals(0, chatRepository.streamingCallCount)
+        assertEquals(1, chatRepository.callCount)
     }
 
     @Test
@@ -580,8 +620,11 @@ class ChatViewModelTest {
 
 private class RecordingChatRepository(
     private val rewriteResponse: String = "rewritten query",
-) : AiChatRepository {
+    private val streamingDeltas: List<StreamingChatDelta> = emptyList(),
+) : StreamingAiChatRepository {
     var callCount: Int = 0
+        private set
+    var streamingCallCount: Int = 0
         private set
     var lastRequest: AiRequestData? = null
         private set
@@ -602,6 +645,37 @@ private class RecordingChatRepository(
             messages = listOf(
                 ChatMessage(role = ChatRole.User, content = request.prompt),
                 ChatMessage(role = ChatRole.Assistant, content = "ok"),
+            ),
+        )
+    }
+
+    override suspend fun sendStreamingMessage(
+        request: AiRequestData,
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): AgentResponse {
+        streamingCallCount += 1
+        lastRequest = request
+        requests += request
+
+        val thinking = StringBuilder()
+        val content = StringBuilder()
+        streamingDeltas.forEach { delta ->
+            onDelta(delta)
+            when (delta.type) {
+                StreamingChatDeltaType.Thinking -> thinking.append(delta.text)
+                StreamingChatDeltaType.Content -> content.append(delta.text)
+            }
+        }
+
+        return AgentResponse(
+            messages = listOf(
+                ChatMessage(role = ChatRole.User, content = request.prompt),
+                ChatMessage(
+                    role = ChatRole.Assistant,
+                    content = content.toString().ifBlank { "ok" },
+                    thinkingContent = thinking.toString().takeIf { it.isNotBlank() },
+                    sourceLabel = "Ollama / ${request.model.displayName}",
+                ),
             ),
         )
     }

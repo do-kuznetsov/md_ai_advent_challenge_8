@@ -3,6 +3,7 @@ package com.sibgear.deepseek.chat.domain.model
 data class ChatMessage(
     val role: ChatRole,
     val content: String,
+    val thinkingContent: String? = null,
     val branchId: Int? = null,
     val kind: ChatMessageKind = ChatMessageKind.Regular,
     val apiContent: String? = null,

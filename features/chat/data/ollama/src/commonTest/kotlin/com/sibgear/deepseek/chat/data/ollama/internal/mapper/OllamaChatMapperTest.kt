@@ -22,9 +22,23 @@ class OllamaChatMapperTest {
 
         assertEquals("qwen3:8b", apiRequest.model)
         assertEquals(false, apiRequest.stream)
+        assertNull(apiRequest.think)
         assertEquals(listOf("system", "user"), apiRequest.messages.map { it.role })
         assertEquals(listOf("system", "hello"), apiRequest.messages.map { it.content })
         assertNull(apiRequest.options)
+    }
+
+    @Test
+    fun streamingRequestEnablesThinking() {
+        val request = request(apiSettings = ApiSettings())
+
+        val apiRequest = request.toOllamaChatRequest(
+            contextMessages = emptyList(),
+            stream = true,
+        )
+
+        assertEquals(true, apiRequest.stream)
+        assertEquals(true, apiRequest.think)
     }
 
     @Test
