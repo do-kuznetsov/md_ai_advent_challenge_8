@@ -19,6 +19,8 @@ import com.sibgear.deepseek.chat.domain.model.AiToolProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
 import com.sibgear.deepseek.chat.domain.model.PromptAttachment
 import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDeltaType
 import com.sibgear.deepseek.chat.domain.model.TaskMemoryState
 import com.sibgear.deepseek.chat.domain.model.userApiContent
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
@@ -36,6 +38,7 @@ import com.sibgear.rag.domain.repository.RagReranker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ChatViewModel(
     private val interactor: ChatInteractor,
@@ -45,6 +48,7 @@ class ChatViewModel(
     initialBranches: List<ChatBranch> = emptyList(),
     initialSystemPrompt: String = "",
     initialPrompt: String = "",
+    initialAttachment: PromptAttachment? = null,
     isSystemPromptReadOnly: Boolean = false,
     private val toolProvider: AiToolProvider? = null,
     private val ragQueryInteractor: RagQueryInteractor? = null,
@@ -59,6 +63,7 @@ class ChatViewModel(
             systemPrompt = initialSystemPrompt,
             isSystemPromptReadOnly = isSystemPromptReadOnly,
             prompt = initialPrompt,
+            attachment = initialAttachment,
             messages = initialMessages,
             stickyFacts = initialStickyFacts,
             branches = initialBranches,
@@ -211,6 +216,46 @@ class ChatViewModel(
                 )
             }
 
+            is ChatEvent.NumCtxChanged -> {
+                val digitsOnly = event.numCtx.filter { it.isDigit() }
+                state = state.copy(
+                    numCtxInput = digitsOnly,
+                    apiSettings = state.apiSettings.copy(
+                        numCtx = digitsOnly.toIntOrNull() ?: 0,
+                    ),
+                )
+            }
+
+            is ChatEvent.TopPChanged -> {
+                val normalized = event.topP.normalizedDecimalInput()
+                state = state.copy(
+                    topPInput = normalized,
+                    apiSettings = state.apiSettings.copy(
+                        topP = normalized.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0f,
+                    ),
+                )
+            }
+
+            is ChatEvent.SeedChanged -> {
+                val digitsOnly = event.seed.filter { it.isDigit() }
+                state = state.copy(
+                    seedInput = digitsOnly,
+                    apiSettings = state.apiSettings.copy(
+                        seed = digitsOnly.toIntOrNull() ?: 0,
+                    ),
+                )
+            }
+
+            is ChatEvent.RepeatPenaltyChanged -> {
+                val normalized = event.repeatPenalty.normalizedDecimalInput()
+                state = state.copy(
+                    repeatPenaltyInput = normalized,
+                    apiSettings = state.apiSettings.copy(
+                        repeatPenalty = normalized.toFloatOrNull()?.coerceAtLeast(0f) ?: 0f,
+                    ),
+                )
+            }
+
             is ChatEvent.ModelFilterChanged -> {
                 state = state.copy(modelFilter = event.filter)
                 applyOpenRouterFilter()
@@ -286,7 +331,10 @@ class ChatViewModel(
                 state = state.copy(
                     ollamaModels = emptyList(),
                     selectedModel = if (state.selectedModel.provider == AiProvider.Ollama) {
-                        deepSeekFallback(state.deepSeekModels)
+                        preferredDefaultModel(
+                            ollamaModels = emptyList(),
+                            magnitCopilotModels = state.magnitCopilotModels,
+                        )
                     } else {
                         state.selectedModel
                     },
@@ -297,12 +345,16 @@ class ChatViewModel(
             if (ollamaModels.isNotEmpty()) {
                 state = state.copy(
                     ollamaModels = ollamaModels,
-                    selectedModel = if (state.selectedModel.provider == AiProvider.Ollama &&
-                        ollamaModels.none { it.id == state.selectedModel.id }
-                    ) {
-                        deepSeekFallback(state.deepSeekModels)
-                    } else {
-                        state.selectedModel
+                    selectedModel = when {
+                        state.selectedModel.isDefaultModel() -> ollamaModels.first()
+                        state.selectedModel.provider == AiProvider.Ollama &&
+                            ollamaModels.none { it.id == state.selectedModel.id } -> {
+                            preferredDefaultModel(
+                                ollamaModels = ollamaModels,
+                                magnitCopilotModels = state.magnitCopilotModels,
+                            )
+                        }
+                        else -> state.selectedModel
                     },
                     ollamaModelsStatus = "Ollama: ${ollamaModels.size} моделей",
                 ).withContextPresentation()
@@ -310,7 +362,10 @@ class ChatViewModel(
                 state = state.copy(
                     ollamaModels = emptyList(),
                     selectedModel = if (state.selectedModel.provider == AiProvider.Ollama) {
-                        deepSeekFallback(state.deepSeekModels)
+                        preferredDefaultModel(
+                            ollamaModels = emptyList(),
+                            magnitCopilotModels = state.magnitCopilotModels,
+                        )
                     } else {
                         state.selectedModel
                     },
@@ -326,7 +381,10 @@ class ChatViewModel(
                 selectedModel = if (state.selectedModel.provider == AiProvider.MagnitCopilot &&
                     magnitCopilotModels.none { it.id == state.selectedModel.id }
                 ) {
-                    deepSeekFallback(state.deepSeekModels)
+                    preferredDefaultModel(
+                        ollamaModels = state.ollamaModels,
+                        magnitCopilotModels = magnitCopilotModels,
+                    )
                 } else {
                     state.selectedModel
                 },
@@ -428,7 +486,11 @@ class ChatViewModel(
                 val ragDiagnostics = state.messages
                     .drop(messagesBeforeRagCount)
                     .filter { it.kind == ChatMessageKind.RagDiagnostic }
-                sendRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
+                if (preparedRequest.model.provider == AiProvider.Ollama) {
+                    sendStreamingRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
+                } else {
+                    sendRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
+                }
             } catch (exception: CancellationException) {
                 state = state.copy(isLoading = false)
                 throw exception
@@ -546,6 +608,10 @@ class ChatViewModel(
             stickyFactsWindowInput = source.stickyFactsWindowInput,
             apiSettings = source.apiSettings,
             maxTokensInput = source.maxTokensInput,
+            numCtxInput = source.numCtxInput,
+            topPInput = source.topPInput,
+            seedInput = source.seedInput,
+            repeatPenaltyInput = source.repeatPenaltyInput,
             isRagEnabled = source.isRagEnabled,
             ragStrategy = source.ragStrategy,
             ragIndexDirectory = source.ragIndexDirectory,
@@ -703,6 +769,70 @@ class ChatViewModel(
         onCompleted?.invoke(state)
     }
 
+    private suspend fun sendStreamingRequestAndUpdateState(
+        request: AiRequestData,
+        onCompleted: ((ChatViewState) -> Unit)?,
+        preservedLocalMessages: List<ChatMessage> = emptyList(),
+    ) {
+        val streamingSourceLabel = "Ollama / ${request.model.displayName}"
+        val streamingMessage = ChatMessage(
+            role = ChatRole.Assistant,
+            content = "",
+            thinkingContent = "",
+            sourceLabel = streamingSourceLabel,
+        )
+        state = state.copy(
+            messages = state.messages + streamingMessage,
+        ).withContextPresentation()
+
+        val response = interactor.sendStreamingMessage(request) { delta ->
+            withContext(coroutineScope.coroutineContext) {
+                appendStreamingDelta(delta, streamingSourceLabel)
+            }
+        }
+        state = state.copy(
+            isLoading = false,
+            messages = response.messages.withPreservedLocalMessages(preservedLocalMessages),
+            stickyFacts = response.stickyFacts,
+            stickyFactsStatus = response.stickyFacts
+                .takeIf { it.isNotEmpty() }
+                ?.let { "facts: ${it.size}" },
+            branches = response.branches,
+            activeBranchId = response.activeBranchId,
+            branchingStatus = response.activeBranchId?.let { "branch: $it" },
+        ).withContextPresentation()
+        onCompleted?.invoke(state)
+    }
+
+    private fun appendStreamingDelta(
+        delta: StreamingChatDelta,
+        sourceLabel: String,
+    ) {
+        val index = state.messages.indexOfLast {
+            it.role == ChatRole.Assistant &&
+                it.kind == ChatMessageKind.Regular &&
+                it.sourceLabel == sourceLabel &&
+                it.footer == null
+        }
+        if (index == -1) {
+            return
+        }
+
+        val updatedMessage = when (delta.type) {
+            StreamingChatDeltaType.Thinking -> state.messages[index].copy(
+                thinkingContent = state.messages[index].thinkingContent.orEmpty() + delta.text,
+            )
+            StreamingChatDeltaType.Content -> state.messages[index].copy(
+                content = state.messages[index].content + delta.text,
+            )
+        }
+        state = state.copy(
+            messages = state.messages.toMutableList().also { messages ->
+                messages[index] = updatedMessage
+            },
+        ).withContextPresentation()
+    }
+
     private fun applyOpenRouterFilter() {
         val openRouterModels = selectOpenRouterModels(
             models = allOpenRouterModels,
@@ -730,6 +860,17 @@ class ChatViewModel(
 
     private fun deepSeekFallback(models: List<AiModel>): AiModel =
         models.firstOrNull { it.id == ChatDefaults.DefaultDeepSeekModel.id } ?: ChatDefaults.DefaultDeepSeekModel
+
+    private fun preferredDefaultModel(
+        ollamaModels: List<AiModel>,
+        magnitCopilotModels: List<AiModel>,
+    ): AiModel =
+        ollamaModels.firstOrNull()
+            ?: magnitCopilotModels.firstOrNull()
+            ?: ChatDefaults.DefaultModel
+
+    private fun AiModel.isDefaultModel(): Boolean =
+        provider == ChatDefaults.DefaultModel.provider && id == ChatDefaults.DefaultModel.id
 
     private fun ChatViewState.withContextPresentation(): ChatViewState =
         copy(
@@ -877,6 +1018,21 @@ private const val DefaultRagRerankerModelDirectory = "../rag/models/bge-reranker
 private const val DefaultRagTopKBeforeFilter = 15
 private const val DefaultRagTopKAfterFilter = 5
 private const val DefaultRagSimilarityThreshold = 0.7f
+
+private fun String.normalizedDecimalInput(): String {
+    var hasSeparator = false
+    return buildString {
+        this@normalizedDecimalInput.forEach { char ->
+            when {
+                char.isDigit() -> append(char)
+                (char == '.' || char == ',') && !hasSeparator -> {
+                    append('.')
+                    hasSeparator = true
+                }
+            }
+        }
+    }
+}
 
 private val RagRewriteApiSettings = ApiSettings(
     temperature = 0f,

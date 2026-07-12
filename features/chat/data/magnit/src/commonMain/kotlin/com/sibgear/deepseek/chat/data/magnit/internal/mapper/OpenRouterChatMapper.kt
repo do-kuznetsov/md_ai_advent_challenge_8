@@ -224,6 +224,7 @@ private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        thinkingContent = thinkingContent,
         branchId = branchId,
         kind = kind.toChatMessageKind(),
         apiContent = apiContent,

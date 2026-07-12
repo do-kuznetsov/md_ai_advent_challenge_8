@@ -22,9 +22,23 @@ class OllamaChatMapperTest {
 
         assertEquals("qwen3:8b", apiRequest.model)
         assertEquals(false, apiRequest.stream)
+        assertNull(apiRequest.think)
         assertEquals(listOf("system", "user"), apiRequest.messages.map { it.role })
         assertEquals(listOf("system", "hello"), apiRequest.messages.map { it.content })
         assertNull(apiRequest.options)
+    }
+
+    @Test
+    fun streamingRequestEnablesThinking() {
+        val request = request(apiSettings = ApiSettings())
+
+        val apiRequest = request.toOllamaChatRequest(
+            contextMessages = emptyList(),
+            stream = true,
+        )
+
+        assertEquals(true, apiRequest.stream)
+        assertEquals(true, apiRequest.think)
     }
 
     @Test
@@ -33,6 +47,10 @@ class OllamaChatMapperTest {
             apiSettings = ApiSettings(
                 temperature = 0.7f,
                 maxTokens = 128,
+                numCtx = 4096,
+                topP = 0.9f,
+                seed = 7,
+                repeatPenalty = 1.1f,
                 stopWord = "STOP",
                 isApiControlEnabled = true,
             ),
@@ -42,6 +60,10 @@ class OllamaChatMapperTest {
 
         assertEquals(0.7f, apiRequest.options?.temperature)
         assertEquals(128, apiRequest.options?.numPredict)
+        assertEquals(4096, apiRequest.options?.numCtx)
+        assertEquals(0.9f, apiRequest.options?.topP)
+        assertEquals(7, apiRequest.options?.seed)
+        assertEquals(1.1f, apiRequest.options?.repeatPenalty)
         assertEquals(listOf("STOP"), apiRequest.options?.stop)
     }
 

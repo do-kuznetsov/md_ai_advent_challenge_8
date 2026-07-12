@@ -64,7 +64,15 @@ class OllamaModelsRepository(
                         details?.quantizationLevel,
                     ).joinToString(" / "),
                     contextLength = show.contextLength(),
-                    supportedParameters = listOf("temperature", "num_predict", "stop"),
+                    supportedParameters = listOf(
+                        "temperature",
+                        "num_predict",
+                        "num_ctx",
+                        "top_p",
+                        "seed",
+                        "repeat_penalty",
+                        "stop",
+                    ),
                 )
             }
     }
@@ -106,8 +114,8 @@ class OllamaModelsRepository(
 }
 
 internal const val DefaultOllamaBaseUrl = "http://localhost:11434"
-internal const val ConnectTimeoutMillis = 5_000L
-internal const val ModelsRequestTimeoutMillis = 30_000L
+internal const val ConnectTimeoutMillis = 10_000L
+internal const val ModelsRequestTimeoutMillis = 60_000L
 
 internal fun ollamaJson(): Json =
     Json {
@@ -128,4 +136,4 @@ internal fun defaultOllamaHttpClient(): HttpClient =
         }
     }
 
-internal const val DefaultRequestTimeoutMillis = 300_000L
+internal const val DefaultRequestTimeoutMillis = 600_000L

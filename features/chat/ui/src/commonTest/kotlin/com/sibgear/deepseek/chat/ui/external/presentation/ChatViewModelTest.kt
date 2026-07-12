@@ -5,12 +5,16 @@ import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiModel
 import com.sibgear.deepseek.chat.domain.model.AiProvider
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.ApiSettings
 import com.sibgear.deepseek.chat.domain.model.ChatMessage
 import com.sibgear.deepseek.chat.domain.model.ChatMessageKind
 import com.sibgear.deepseek.chat.domain.model.ChatRole
-import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
+import com.sibgear.deepseek.chat.domain.model.PromptAttachment
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDeltaType
 import com.sibgear.deepseek.chat.domain.repository.AiModelsRepository
 import com.sibgear.deepseek.chat.domain.repository.RoutingAiRepository
+import com.sibgear.deepseek.chat.domain.repository.StreamingAiChatRepository
 import com.sibgear.deepseek.chat.ui.external.model.ChatEvent
 import com.sibgear.rag.domain.interactor.RagQueryInteractor
 import com.sibgear.rag.domain.model.ChunkingStrategyType
@@ -48,6 +52,72 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun apiSettingsUseOptimizedLocalLlmDefaults() {
+        val viewModel = chatViewModel()
+
+        assertEquals(0.1f, viewModel.state.apiSettings.temperature)
+        assertEquals(2500, viewModel.state.apiSettings.maxTokens)
+        assertEquals("2500", viewModel.state.maxTokensInput)
+        assertEquals(32768, viewModel.state.apiSettings.numCtx)
+        assertEquals("32768", viewModel.state.numCtxInput)
+        assertEquals(0.85f, viewModel.state.apiSettings.topP)
+        assertEquals("0.85", viewModel.state.topPInput)
+        assertEquals(42, viewModel.state.apiSettings.seed)
+        assertEquals("42", viewModel.state.seedInput)
+        assertEquals(1.05f, viewModel.state.apiSettings.repeatPenalty)
+        assertEquals("1.05", viewModel.state.repeatPenaltyInput)
+        assertEquals("", viewModel.state.apiSettings.stopWord)
+    }
+
+    @Test
+    fun ragIsDisabledByDefault() {
+        val viewModel = chatViewModel()
+
+        assertFalse(viewModel.state.isRagEnabled)
+    }
+
+    @Test
+    fun initialAttachmentIsSentWithFirstPromptAndThenCleared() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val attachment = PromptAttachment(
+            fileName = "photo_cloud_reviews_200.txt",
+            sizeBytes = 12,
+            content = "review corpus",
+        )
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            initialAttachment = attachment,
+        )
+
+        assertEquals(attachment, viewModel.state.attachment)
+
+        viewModel.onEvent(ChatEvent.PromptChanged("Проанализируй отзывы"))
+        viewModel.sendPrompt()
+
+        assertEquals(attachment, chatRepository.lastRequest?.attachment)
+        assertEquals(null, viewModel.state.attachment)
+    }
+
+    @Test
+    fun ollamaApiOptionEventsUpdateSettingsAndInputs() {
+        val viewModel = chatViewModel()
+
+        viewModel.onEvent(ChatEvent.NumCtxChanged("16 384"))
+        viewModel.onEvent(ChatEvent.TopPChanged("0,9"))
+        viewModel.onEvent(ChatEvent.SeedChanged("7"))
+        viewModel.onEvent(ChatEvent.RepeatPenaltyChanged("1,10"))
+
+        assertEquals(16384, viewModel.state.apiSettings.numCtx)
+        assertEquals("16384", viewModel.state.numCtxInput)
+        assertEquals(0.9f, viewModel.state.apiSettings.topP)
+        assertEquals("0.9", viewModel.state.topPInput)
+        assertEquals(7, viewModel.state.apiSettings.seed)
+        assertEquals("7", viewModel.state.seedInput)
+        assertEquals(1.10f, viewModel.state.apiSettings.repeatPenalty)
+        assertEquals("1.10", viewModel.state.repeatPenaltyInput)
+    }
+
+    @Test
     fun loadModelsAddsOllamaModelsToState() = runTest {
         val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
         val viewModel = chatViewModel(
@@ -63,13 +133,77 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun loadModelsSelectsFirstOllamaModelWhenDefaultModelWasSelected() = runTest {
+        val firstOllamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+        val secondOllamaModel = AiModel(id = "mistral:7b", provider = AiProvider.Ollama)
+        val magnitCopilotModel = AiModel(id = "mcp-chat", provider = AiProvider.MagnitCopilot)
+        val viewModel = chatViewModel(
+            modelRepositories = mapOf(
+                AiProvider.Ollama to FakeModelsRepository(listOf(firstOllamaModel, secondOllamaModel)),
+                AiProvider.MagnitCopilot to FakeModelsRepository(listOf(magnitCopilotModel)),
+            ),
+        )
+
+        viewModel.loadModels()
+
+        assertEquals(firstOllamaModel, viewModel.state.selectedModel)
+    }
+
+    @Test
+    fun loadModelsSelectsMagnitCopilotWhenNoLocalModelsAreInstalled() = runTest {
+        val magnitCopilotModel = AiModel(id = "mcp-chat", provider = AiProvider.MagnitCopilot)
+        val viewModel = chatViewModel(
+            modelRepositories = mapOf(
+                AiProvider.Ollama to FakeModelsRepository(emptyList()),
+                AiProvider.MagnitCopilot to FakeModelsRepository(listOf(magnitCopilotModel)),
+            ),
+        )
+
+        viewModel.loadModels()
+
+        assertEquals(magnitCopilotModel, viewModel.state.selectedModel)
+    }
+
+    @Test
+    fun loadModelsFallsBackFromMissingOllamaModelToFirstAvailableOllamaModel() = runTest {
+        val missingOllamaModel = AiModel(id = "old-local:latest", provider = AiProvider.Ollama)
+        val availableOllamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+        val viewModel = chatViewModel(
+            modelRepositories = mapOf(
+                AiProvider.Ollama to FakeModelsRepository(listOf(availableOllamaModel)),
+            ),
+        )
+
+        viewModel.onEvent(ChatEvent.ModelSelected(missingOllamaModel))
+        viewModel.loadModels()
+
+        assertEquals(availableOllamaModel, viewModel.state.selectedModel)
+    }
+
+    @Test
+    fun loadModelsFallsBackFromMissingOllamaModelToMagnitCopilotWhenNoLocalModelsRemain() = runTest {
+        val missingOllamaModel = AiModel(id = "old-local:latest", provider = AiProvider.Ollama)
+        val magnitCopilotModel = AiModel(id = "mcp-chat", provider = AiProvider.MagnitCopilot)
+        val viewModel = chatViewModel(
+            modelRepositories = mapOf(
+                AiProvider.Ollama to FakeModelsRepository(emptyList()),
+                AiProvider.MagnitCopilot to FakeModelsRepository(listOf(magnitCopilotModel)),
+            ),
+        )
+
+        viewModel.onEvent(ChatEvent.ModelSelected(missingOllamaModel))
+        viewModel.loadModels()
+
+        assertEquals(magnitCopilotModel, viewModel.state.selectedModel)
+    }
+
+    @Test
     fun sendPromptUsesSelectedOllamaModel() = runTest {
         val chatRepository = RecordingChatRepository()
         val viewModel = chatViewModel(chatRepository = chatRepository)
         val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
 
         viewModel.onEvent(ChatEvent.ModelSelected(ollamaModel))
-        viewModel.onEvent(ChatEvent.RagEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("Привет"))
         viewModel.sendPrompt()
 
@@ -77,10 +211,57 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sendPromptStreamsOllamaThinkingAndFinalContent() = runTest {
+        val chatRepository = RecordingChatRepository(
+            streamingDeltas = listOf(
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, "Думаю"),
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, " над отзывами."),
+                StreamingChatDelta(StreamingChatDeltaType.Content, "Готовый отчёт."),
+            ),
+        )
+        val viewModel = chatViewModel(chatRepository = chatRepository)
+        val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+
+        viewModel.onEvent(ChatEvent.ModelSelected(ollamaModel))
+        viewModel.onEvent(ChatEvent.PromptChanged("Проанализируй отзывы"))
+        viewModel.sendPrompt()
+
+        assertEquals(1, chatRepository.streamingCallCount)
+        assertEquals("Готовый отчёт.", viewModel.state.messages.last().content)
+        assertEquals("Думаю над отзывами.", viewModel.state.messages.last().thinkingContent)
+    }
+
+    @Test
+    fun sendSyntheticPromptKeepsNonStreamingBehaviorForOllama() = runTest {
+        val chatRepository = RecordingChatRepository(
+            streamingDeltas = listOf(
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, "Не должно стримиться."),
+            ),
+        )
+        val viewModel = chatViewModel(chatRepository = chatRepository)
+        val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+
+        viewModel.onEvent(ChatEvent.ModelSelected(ollamaModel))
+        viewModel.sendSyntheticPrompt("service prompt")
+
+        assertEquals(0, chatRepository.streamingCallCount)
+        assertEquals(1, chatRepository.callCount)
+    }
+
+    @Test
     fun syncRequestSettingsCopiesOllamaModelsAndStatus() {
         val source = chatViewModel()
         val target = chatViewModel()
         val ollamaModel = AiModel(id = "qwen3:8b", provider = AiProvider.Ollama)
+        val apiSettings = ApiSettings(
+            temperature = 0.4f,
+            maxTokens = 1500,
+            numCtx = 8192,
+            topP = 0.9f,
+            seed = 99,
+            repeatPenalty = 1.1f,
+            isApiControlEnabled = true,
+        )
 
         source.onEvent(ChatEvent.ModelSelected(ollamaModel))
         source.loadModels()
@@ -89,6 +270,12 @@ class ChatViewModelTest {
                 ollamaModels = listOf(ollamaModel),
                 ollamaModelsStatus = "Ollama: 1 моделей",
                 selectedModel = ollamaModel,
+                apiSettings = apiSettings,
+                maxTokensInput = "1500",
+                numCtxInput = "8192",
+                topPInput = "0.9",
+                seedInput = "99",
+                repeatPenaltyInput = "1.1",
             ),
         )
         target.syncRequestSettingsFrom(source.state)
@@ -96,10 +283,16 @@ class ChatViewModelTest {
         assertEquals(listOf(ollamaModel), target.state.ollamaModels)
         assertEquals("Ollama: 1 моделей", target.state.ollamaModelsStatus)
         assertEquals(ollamaModel, target.state.selectedModel)
+        assertEquals(apiSettings, target.state.apiSettings)
+        assertEquals("1500", target.state.maxTokensInput)
+        assertEquals("8192", target.state.numCtxInput)
+        assertEquals("0.9", target.state.topPInput)
+        assertEquals("99", target.state.seedInput)
+        assertEquals("1.1", target.state.repeatPenaltyInput)
     }
 
     @Test
-    fun ragDisabledDoesNotCallRetrieval() = runTest {
+    fun ragDisabledByDefaultDoesNotCallRetrieval() = runTest {
         val chatRepository = RecordingChatRepository()
         val embeddingProvider = RecordingEmbeddingProvider()
         val ragRepository = RecordingRagSearchRepository()
@@ -108,7 +301,6 @@ class ChatViewModelTest {
             ragQueryInteractor = RagQueryInteractor(embeddingProvider, ragRepository),
         )
 
-        viewModel.onEvent(ChatEvent.RagEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("Что такое KMP?"))
         viewModel.sendPrompt()
 
@@ -305,6 +497,7 @@ class ChatViewModelTest {
                 content = "Термин: logic = presentation:logic",
             ),
         )
+        viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
         viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("А plugins какие?"))
         viewModel.sendPrompt()
@@ -348,6 +541,7 @@ class ChatViewModelTest {
             ),
         )
 
+        viewModel.onEvent(ChatEvent.RagEnabledChanged(true))
         viewModel.onEvent(ChatEvent.RagRerankingEnabledChanged(false))
         viewModel.onEvent(ChatEvent.PromptChanged("Что дальше?"))
         viewModel.sendPrompt()
@@ -408,6 +602,7 @@ class ChatViewModelTest {
         ragQueryInteractor: RagQueryInteractor? = null,
         ragRerankerFactory: ((String) -> RagReranker)? = null,
         initialMessages: List<ChatMessage> = emptyList(),
+        initialAttachment: PromptAttachment? = null,
     ): ChatViewModel =
         ChatViewModel(
             interactor = ChatInteractor(
@@ -423,6 +618,7 @@ class ChatViewModelTest {
             ),
             coroutineScope = CoroutineScope(Dispatchers.Unconfined),
             initialMessages = initialMessages,
+            initialAttachment = initialAttachment,
             ragQueryInteractor = ragQueryInteractor,
             ragRerankerFactory = { modelDirectory: String ->
                 lastRerankerModelDirectory = modelDirectory
@@ -449,8 +645,11 @@ class ChatViewModelTest {
 
 private class RecordingChatRepository(
     private val rewriteResponse: String = "rewritten query",
-) : AiChatRepository {
+    private val streamingDeltas: List<StreamingChatDelta> = emptyList(),
+) : StreamingAiChatRepository {
     var callCount: Int = 0
+        private set
+    var streamingCallCount: Int = 0
         private set
     var lastRequest: AiRequestData? = null
         private set
@@ -471,6 +670,37 @@ private class RecordingChatRepository(
             messages = listOf(
                 ChatMessage(role = ChatRole.User, content = request.prompt),
                 ChatMessage(role = ChatRole.Assistant, content = "ok"),
+            ),
+        )
+    }
+
+    override suspend fun sendStreamingMessage(
+        request: AiRequestData,
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): AgentResponse {
+        streamingCallCount += 1
+        lastRequest = request
+        requests += request
+
+        val thinking = StringBuilder()
+        val content = StringBuilder()
+        streamingDeltas.forEach { delta ->
+            onDelta(delta)
+            when (delta.type) {
+                StreamingChatDeltaType.Thinking -> thinking.append(delta.text)
+                StreamingChatDeltaType.Content -> content.append(delta.text)
+            }
+        }
+
+        return AgentResponse(
+            messages = listOf(
+                ChatMessage(role = ChatRole.User, content = request.prompt),
+                ChatMessage(
+                    role = ChatRole.Assistant,
+                    content = content.toString().ifBlank { "ok" },
+                    thinkingContent = thinking.toString().takeIf { it.isNotBlank() },
+                    sourceLabel = "Ollama / ${request.model.displayName}",
+                ),
             ),
         )
     }

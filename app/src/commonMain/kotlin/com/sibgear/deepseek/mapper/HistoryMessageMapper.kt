@@ -71,6 +71,7 @@ private fun HistoryMessage.toChatMessage(): ChatMessage =
     ChatMessage(
         role = role.toChatRole(),
         content = content,
+        thinkingContent = thinkingContent,
         branchId = branchId,
         kind = kind.toChatMessageKind(),
         apiContent = apiContent,
@@ -84,6 +85,7 @@ private fun ChatMessage.toHistoryMessage(): HistoryMessage =
     HistoryMessage(
         role = role.toHistoryRole(),
         content = content,
+        thinkingContent = thinkingContent,
         branchId = branchId,
         kind = kind.toHistoryMessageKind(),
         apiContent = apiContent,

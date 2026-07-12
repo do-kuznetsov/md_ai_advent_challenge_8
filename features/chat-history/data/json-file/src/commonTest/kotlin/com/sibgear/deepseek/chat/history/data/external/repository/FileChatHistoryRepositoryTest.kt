@@ -56,6 +56,7 @@ class FileChatHistoryRepositoryTest {
         val second = HistoryMessage(
             role = HistoryRole.Assistant,
             content = "hi",
+            thinkingContent = "thinking before hi",
             kind = HistoryMessageKind.CompressionSummary,
             sourceLabel = "OpenRouter / test",
             footer = HistoryMessageFooter(

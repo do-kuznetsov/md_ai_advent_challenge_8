@@ -45,13 +45,15 @@ internal data class OllamaChatRequest(
     val model: String,
     val messages: List<OllamaChatMessage>,
     val stream: Boolean = false,
+    val think: Boolean? = null,
     val options: OllamaChatOptions? = null,
 )
 
 @Serializable
 internal data class OllamaChatMessage(
-    val role: String,
-    val content: String,
+    val role: String = "",
+    val content: String = "",
+    val thinking: String? = null,
 )
 
 @Serializable
@@ -59,6 +61,13 @@ internal data class OllamaChatOptions(
     val temperature: Float? = null,
     @SerialName("num_predict")
     val numPredict: Int? = null,
+    @SerialName("num_ctx")
+    val numCtx: Int? = null,
+    @SerialName("top_p")
+    val topP: Float? = null,
+    val seed: Int? = null,
+    @SerialName("repeat_penalty")
+    val repeatPenalty: Float? = null,
     val stop: List<String>? = null,
 )
 

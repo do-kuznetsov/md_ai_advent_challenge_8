@@ -61,6 +61,18 @@ class OllamaModelsRepositoryTest {
         assertEquals("qwen3:8b", models.single().id)
         assertEquals(AiProvider.Ollama, models.single().provider)
         assertEquals(40960, models.single().contextLength)
+        assertEquals(
+            listOf(
+                "temperature",
+                "num_predict",
+                "num_ctx",
+                "top_p",
+                "seed",
+                "repeat_penalty",
+                "stop",
+            ),
+            models.single().supportedParameters,
+        )
     }
 }
 

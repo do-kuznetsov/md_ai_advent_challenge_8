@@ -62,7 +62,7 @@ fun ChatScreen(
         BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             val density = LocalDensity.current
             val maxWidthPx = with(density) { maxWidth.toPx() }
-            var activeSettingsDrawer by rememberSaveable { mutableStateOf<ChatSettingsDrawerType?>(null) }
+            var activeSettingsDrawer by rememberSaveable { mutableStateOf<ChatSettingsDrawerType?>(ChatSettingsDrawerType.AiModel) }
             var settingsDrawerWidthFraction by rememberSaveable { mutableStateOf(0.25f) }
             val drawerWidth = if (activeSettingsDrawer != null) {
                 maxWidth * settingsDrawerWidthFraction

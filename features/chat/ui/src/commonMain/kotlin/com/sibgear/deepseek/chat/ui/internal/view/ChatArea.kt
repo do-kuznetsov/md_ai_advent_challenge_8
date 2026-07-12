@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +20,7 @@ import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
@@ -31,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +54,7 @@ private val UserMessageColor = Color(0xFFDDF7DF)
 private val AssistantMessageColor = Color(0xFFEDE1FF)
 private val SystemPromptMessageColor = Color(0xFFD8ECFF)
 private val TaskStateEventMessageColor = Color(0xFFE7EEF8)
+private const val BottomScrollThresholdPx = 24
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -64,15 +68,41 @@ internal fun ChatArea(
 ) {
     val listState = rememberLazyListState()
     val systemPrompt = leadingSystemPrompt?.takeIf { it.isNotBlank() }
+    val lastMessageContent = messages.lastOrNull()?.content
+    val lastMessageThinkingContent = messages.lastOrNull()?.thinkingContent
+    val bottomAnchorIndex = bottomAnchorIndex(
+        messages = messages,
+        hasSystemPrompt = systemPrompt != null,
+        pinnedContextMessageIndex = pinnedContextMessageIndex,
+    )
+    var isPinnedToBottom by remember { mutableStateOf(true) }
+    var isAutoScrolling by remember { mutableStateOf(false) }
+    var isUserScrollInProgress by remember { mutableStateOf(false) }
 
-    LaunchedEffect(messages.size, systemPrompt) {
-        val lastItemIndex = when {
-            messages.isNotEmpty() -> messages.lastIndex + if (systemPrompt != null) 1 else 0
-            systemPrompt != null -> 0
-            else -> null
-        }
-        if (lastItemIndex != null) {
-            listState.animateScrollToItem(lastItemIndex)
+    LaunchedEffect(listState, bottomAnchorIndex) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { isScrollInProgress ->
+                if (isScrollInProgress && !isAutoScrolling) {
+                    isUserScrollInProgress = true
+                }
+                if (!isScrollInProgress && isUserScrollInProgress) {
+                    isPinnedToBottom = listState.isAtBottom(bottomAnchorIndex)
+                    isUserScrollInProgress = false
+                }
+                if (!isScrollInProgress && !isAutoScrolling && listState.isAtBottom(bottomAnchorIndex)) {
+                    isPinnedToBottom = true
+                }
+            }
+    }
+
+    LaunchedEffect(messages.size, systemPrompt, lastMessageContent, lastMessageThinkingContent, bottomAnchorIndex) {
+        if (isPinnedToBottom && !isUserScrollInProgress) {
+            isAutoScrolling = true
+            try {
+                listState.scrollToItem(bottomAnchorIndex)
+            } finally {
+                isAutoScrolling = false
+            }
         }
     }
 
@@ -118,6 +148,10 @@ internal fun ChatArea(
                     }
                 }
             }
+
+            item(key = "bottom-anchor") {
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp))
+            }
         }
 
         VerticalScrollbar(
@@ -125,6 +159,33 @@ internal fun ChatArea(
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(8.dp),
         )
     }
+}
+
+private fun bottomAnchorIndex(
+    messages: List<ChatMessage>,
+    hasSystemPrompt: Boolean,
+    pinnedContextMessageIndex: Int?,
+): Int {
+    val systemPromptItems = if (hasSystemPrompt) 1 else 0
+    val pinnedHeaderItems = if (pinnedContextMessageIndex != null && pinnedContextMessageIndex in messages.indices) 1 else 0
+    return systemPromptItems + messages.size + pinnedHeaderItems
+}
+
+private fun LazyListState.isAtBottom(
+    bottomAnchorIndex: Int,
+    thresholdPx: Int = BottomScrollThresholdPx,
+): Boolean {
+    val visibleItems = layoutInfo.visibleItemsInfo
+    if (visibleItems.isEmpty()) {
+        return true
+    }
+
+    val bottomAnchor = visibleItems.lastOrNull { it.index == bottomAnchorIndex }
+    if (bottomAnchor == null) {
+        return false
+    }
+
+    return bottomAnchor.offset + bottomAnchor.size <= layoutInfo.viewportEndOffset + thresholdPx
 }
 
 @Composable
@@ -271,6 +332,15 @@ private fun ChatBubble(
                     )
                 }
 
+                message.thinkingContent
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { thinking ->
+                        ThinkingBlock(
+                            thinking = thinking,
+                            isFinalAnswerVisible = message.content.isNotBlank(),
+                        )
+                    }
+
                 Text(
                     text = message.content,
                     modifier = if (isCompressionSummary && onCompressionToggle != null) {
@@ -332,6 +402,36 @@ private fun ChatBubble(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ThinkingBlock(
+    thinking: String,
+    isFinalAnswerVisible: Boolean,
+) {
+    var isExpanded by remember(thinking, isFinalAnswerVisible) { mutableStateOf(!isFinalAnswerVisible) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFE7E0EC), RoundedCornerShape(6.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = if (isExpanded) "thinking · свернуть" else "thinking · развернуть",
+            modifier = Modifier.clickable { isExpanded = !isExpanded },
+            color = Color(0xFF5F6368),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        if (isExpanded) {
+            Text(
+                text = thinking,
+                color = Color(0xFF5F6368),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

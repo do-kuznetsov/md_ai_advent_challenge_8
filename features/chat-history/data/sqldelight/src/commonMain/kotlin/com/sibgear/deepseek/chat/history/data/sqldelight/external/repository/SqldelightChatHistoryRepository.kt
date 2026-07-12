@@ -201,32 +201,33 @@ class SqldelightChatHistoryRepository(
     private fun java.sql.PreparedStatement.bind(message: HistoryMessage) {
         setString(1, message.role.databaseValue)
         setString(2, message.content)
-        setString(3, message.kind.databaseValue)
-        message.branchId?.let { setLong(4, it.toLong()) } ?: setObject(4, null)
-        setString(5, message.apiContent)
+        setString(3, message.thinkingContent)
+        setString(4, message.kind.databaseValue)
+        message.branchId?.let { setLong(5, it.toLong()) } ?: setObject(5, null)
+        setString(6, message.apiContent)
         message.attachment?.let { attachment ->
-            setString(6, attachment.fileName)
-            setLong(7, attachment.sizeBytes)
+            setString(7, attachment.fileName)
+            setLong(8, attachment.sizeBytes)
         } ?: run {
-            setObject(6, null)
             setObject(7, null)
+            setObject(8, null)
         }
-        setString(8, message.memory?.toJson(json))
-        setString(9, message.sourceLabel)
+        setString(9, message.memory?.toJson(json))
+        setString(10, message.sourceLabel)
         message.footer?.let { footer ->
-            setLong(10, footer.responseTimeMs)
-            footer.promptTokens?.let { setLong(11, it.toLong()) } ?: setObject(11, null)
-            footer.completionTokens?.let { setLong(12, it.toLong()) } ?: setObject(12, null)
-            footer.totalTokens?.let { setLong(13, it.toLong()) } ?: setObject(13, null)
-            footer.cost?.let { setDouble(14, it) } ?: setObject(14, null)
-            setLong(15, footer.retryCount.toLong())
+            setLong(11, footer.responseTimeMs)
+            footer.promptTokens?.let { setLong(12, it.toLong()) } ?: setObject(12, null)
+            footer.completionTokens?.let { setLong(13, it.toLong()) } ?: setObject(13, null)
+            footer.totalTokens?.let { setLong(14, it.toLong()) } ?: setObject(14, null)
+            footer.cost?.let { setDouble(15, it) } ?: setObject(15, null)
+            setLong(16, footer.retryCount.toLong())
         } ?: run {
-            setObject(10, null)
             setObject(11, null)
             setObject(12, null)
             setObject(13, null)
             setObject(14, null)
             setObject(15, null)
+            setObject(16, null)
         }
     }
 
@@ -234,6 +235,7 @@ class SqldelightChatHistoryRepository(
         HistoryMessage(
             role = getString("role").toHistoryRole(),
             content = getString("content"),
+            thinkingContent = getString("thinking_content"),
             branchId = getNullableLong("branch_id")?.toInt(),
             kind = getString("kind").toHistoryMessageKind(),
             apiContent = getString("api_content"),
@@ -327,6 +329,7 @@ internal fun createTableSql(tableName: String): String =
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
+        thinking_content TEXT,
         kind TEXT NOT NULL DEFAULT 'regular',
         branch_id INTEGER,
         api_content TEXT,
@@ -367,6 +370,7 @@ internal fun insertSql(tableName: String): String =
     INSERT INTO $tableName(
         role,
         content,
+        thinking_content,
         kind,
         branch_id,
         api_content,
@@ -381,7 +385,7 @@ internal fun insertSql(tableName: String): String =
         cost,
         retry_count
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """.trimIndent()
 
 internal fun selectAllSql(tableName: String): String =
@@ -443,6 +447,7 @@ private data class MissingColumn(
 
 private val MissingColumns = listOf(
     MissingColumn("kind", "TEXT DEFAULT 'regular'"),
+    MissingColumn("thinking_content", "TEXT"),
     MissingColumn("branch_id", "INTEGER"),
     MissingColumn("api_content", "TEXT"),
     MissingColumn("attachment_file_name", "TEXT"),

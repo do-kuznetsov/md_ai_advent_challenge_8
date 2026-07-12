@@ -43,6 +43,7 @@ internal data class HistoryBranchDto(
 internal data class HistoryMessageDto(
     val role: String,
     val content: String,
+    val thinkingContent: String? = null,
     val branchId: Int? = null,
     val kind: String = HistoryMessageKindDto.Regular.value,
     val apiContent: String? = null,
