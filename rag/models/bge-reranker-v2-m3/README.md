@@ -1,6 +1,6 @@
 # BGE Reranker v2 M3 ONNX assets
 
-Place local ONNX reranker files here:
+Place local ONNX reranker files here: https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/tree/main
 
 1. Download `tokenizer.json`:
    https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/resolve/main/tokenizer.json

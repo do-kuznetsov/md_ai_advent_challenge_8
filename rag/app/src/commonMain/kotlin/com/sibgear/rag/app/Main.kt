@@ -10,6 +10,7 @@ import com.sibgear.rag.domain.model.ChunkingConfig
 import com.sibgear.rag.domain.model.ChunkingStrategyType
 import com.sibgear.rag.domain.model.RagIndexRun
 import com.sibgear.rag.domain.model.RagIndexSummary
+import com.sibgear.rag.domain.repository.EmbeddingProvider
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import kotlin.system.exitProcess
@@ -41,10 +42,7 @@ fun main(args: Array<String>) = runBlocking {
     val scanner = FileDocumentScanner()
     val strategies = options.strategy.toStrategies()
 
-    OllamaEmbeddingProvider(
-        model = options.model,
-        baseUrl = options.ollamaUrl,
-    ).use { embeddingProvider ->
+    options.createEmbeddingProvider().use { embeddingProvider ->
         val summaries = strategies.map { strategy ->
             val databaseFile = outputDirectory.resolve("rag-${strategy.cliName}.sqlite")
             val chunkingStrategy = when (strategy) {
@@ -96,7 +94,12 @@ private fun printUsage() {
         "./gradlew -q :rag:app:jvmRun --args='" +
             "--input ./docs --output ./rag-output --strategy both " +
             "--chunk-size 500 --overlap 50 --model nomic-embed-text " +
-            "--ollama-url http://localhost:11434'",
+            "--embedding-backend ollama --ollama-url http://localhost:11434'",
+    )
+    println(
+        "./gradlew -q :rag:app:jvmRun --args='" +
+            "--input ./docs --output ./rag-output --strategy both " +
+            "--embedding-backend onnx --embedding-model-dir ./rag/models/nomic-embed-text'",
     )
 }
 
@@ -108,7 +111,22 @@ private data class CliOptions(
     val overlap: Int,
     val model: String,
     val ollamaUrl: String,
+    val embeddingBackend: EmbeddingBackend,
+    val embeddingModelDirectory: String,
 ) {
+    fun createEmbeddingProvider(): AutoCloseableEmbeddingProvider =
+        when (embeddingBackend) {
+            EmbeddingBackend.Ollama -> AutoCloseableEmbeddingProvider(
+                OllamaEmbeddingProvider(
+                    model = model,
+                    baseUrl = ollamaUrl,
+                ),
+            )
+            EmbeddingBackend.Onnx -> AutoCloseableEmbeddingProvider(
+                createOnnxEmbeddingProvider(embeddingModelDirectory),
+            )
+        }
+
     companion object {
         fun parse(args: Array<String>): Result<CliOptions> =
             runCatching {
@@ -125,6 +143,8 @@ private data class CliOptions(
                     overlap = overlap,
                     model = values["--model"] ?: "nomic-embed-text",
                     ollamaUrl = values["--ollama-url"] ?: "http://localhost:11434",
+                    embeddingBackend = EmbeddingBackend.from(values["--embedding-backend"] ?: "ollama"),
+                    embeddingModelDirectory = values["--embedding-model-dir"] ?: "rag/models/nomic-embed-text",
                 )
             }
 
@@ -145,6 +165,40 @@ private data class CliOptions(
             }
             return result
         }
+    }
+}
+
+private class AutoCloseableEmbeddingProvider(
+    private val delegate: EmbeddingProvider,
+) : EmbeddingProvider,
+    AutoCloseable {
+    override suspend fun embed(text: String): FloatArray =
+        delegate.embed(text)
+
+    override fun close() {
+        (delegate as? AutoCloseable)?.close()
+    }
+}
+
+@Suppress("UNCHECKED_CAST")
+private fun createOnnxEmbeddingProvider(modelDirectory: String): EmbeddingProvider {
+    val clazz = Class.forName("com.sibgear.rag.data.embedding.OnnxNomicEmbeddingProvider")
+    val constructor = clazz.getConstructor(String::class.java)
+    return constructor.newInstance(modelDirectory) as EmbeddingProvider
+}
+
+private enum class EmbeddingBackend {
+    Ollama,
+    Onnx,
+    ;
+
+    companion object {
+        fun from(raw: String): EmbeddingBackend =
+            when (raw.lowercase()) {
+                "ollama" -> Ollama
+                "onnx" -> Onnx
+                else -> error("--embedding-backend должен быть ollama или onnx.")
+            }
     }
 }
 

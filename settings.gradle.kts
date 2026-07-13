@@ -39,4 +39,5 @@ include(
     ":rag:domain",
     ":rag:data",
     ":rag:app",
+    ":server",
 )

@@ -39,5 +39,6 @@ local.properties
 kotlin-js-store/
 
 rag/indexed/
-rag/models/**/*.onnx
-rag/models/**/*.json
+**/models/**/*.gguf
+**/models/**/*.onnx
+**/models/**/*.json
