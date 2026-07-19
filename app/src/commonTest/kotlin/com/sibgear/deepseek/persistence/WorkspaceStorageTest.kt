@@ -9,6 +9,7 @@ import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
+import com.sibgear.deepseek.settings.ui.external.model.McpHeaderUiModel
 import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import java.io.File
 import java.nio.file.Files
@@ -203,6 +204,16 @@ class WorkspaceStorageTest {
                     name = "node_repl",
                     url = "https://mcp.example.com/mcp",
                     isEnabled = true,
+                    headers = listOf(
+                        McpHeaderUiModel(
+                            name = "X-Atlassian-Jira-Url",
+                            value = "https://jira.example.com",
+                        ),
+                        McpHeaderUiModel(
+                            name = "X-Atlassian-Jira-Personal-Token",
+                            value = "jira-token",
+                        ),
+                    ),
                 ),
             ),
         )
@@ -220,6 +231,50 @@ class WorkspaceStorageTest {
                     name = "node_repl",
                     url = "https://mcp.example.com/mcp",
                     isEnabled = true,
+                    headers = listOf(
+                        McpHeaderUiModel(
+                            name = "X-Atlassian-Jira-Url",
+                            value = "https://jira.example.com",
+                        ),
+                        McpHeaderUiModel(
+                            name = "X-Atlassian-Jira-Personal-Token",
+                            value = "jira-token",
+                        ),
+                    ),
+                ),
+            ),
+            WorkspaceStorage(baseDir).loadMcpServers(),
+        )
+    }
+
+    @Test
+    fun oldMcpServersStorageWithoutHeadersLoadsEmptyHeaders() {
+        val baseDir = tempBaseDir()
+        baseDir.mkdirs()
+        File(baseDir, "mcp-servers.json").writeText(
+            """
+            {
+              "version": 1,
+              "servers": [
+                {
+                  "id": 1,
+                  "name": "old",
+                  "url": "https://mcp.example.com/mcp",
+                  "enabled": true
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            listOf(
+                McpServerUiModel(
+                    id = 1,
+                    name = "old",
+                    url = "https://mcp.example.com/mcp",
+                    isEnabled = true,
+                    headers = emptyList(),
                 ),
             ),
             WorkspaceStorage(baseDir).loadMcpServers(),

@@ -172,6 +172,54 @@ class McpAiToolProviderTest {
     }
 
     @Test
+    fun configuredHeadersAreSentToMcpRequests() = runTest {
+        val capturedHeaders = mutableListOf<String?>()
+        var requestIndex = 0
+        val httpClient = HttpClient(
+            MockEngine { request ->
+                requestIndex += 1
+                capturedHeaders += request.headers["X-Atlassian-Jira-Personal-Token"]
+                val method = request.body.jsonRpcMethod()
+                respond(
+                    content = when (method) {
+                        "initialize" -> initializeResponse()
+                        "notifications/initialized" -> invalidInitializedNotificationResponse()
+                        "tools/list" -> toolsListResponse()
+                        else -> error("Unexpected method $method")
+                    },
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            },
+        ) {
+            install(SSE)
+        }
+        val provider = McpAiToolProvider(
+            loadServers = {
+                listOf(
+                    McpServerConnection(
+                        id = 1,
+                        name = "jira",
+                        url = "https://ai-config.example/mcp",
+                        isEnabled = true,
+                        headers = mapOf("X-Atlassian-Jira-Personal-Token" to "secret-token"),
+                    ),
+                )
+            },
+            sessionFactory = DefaultMcpRemoteSessionFactory(
+                httpClient = httpClient,
+                primaryDiscoveryTimeout = 100.milliseconds,
+            ),
+        )
+
+        val catalog = provider.availableTools()
+
+        assertEquals(listOf("jira__get_local_time"), catalog.tools.map { it.name })
+        assertEquals(true, capturedHeaders.isNotEmpty())
+        assertEquals(true, capturedHeaders.all { it == "secret-token" })
+    }
+
+    @Test
     fun successfulFactorySessionIsUsedWithoutFallback() = runTest {
         val session = FakeRemoteSession(
             tools = listOf(

@@ -51,6 +51,7 @@ data class McpServerConnection(
     val name: String,
     val url: String,
     val isEnabled: Boolean,
+    val headers: Map<String, String> = emptyMap(),
 )
 
 class McpAiToolProvider internal constructor(
@@ -188,6 +189,7 @@ internal class DefaultMcpRemoteSessionFactory(
             PostOnlyJsonRpcMcpClient(
                 httpClient = httpClient,
                 url = server.url,
+                customHeaders = server.headers,
             ).connect()
         }.getOrElse { fallbackError ->
             if (fallbackError is CancellationException && fallbackError !is TimeoutCancellationException) throw fallbackError
@@ -210,6 +212,11 @@ internal class DefaultMcpRemoteSessionFactory(
             val transport = StreamableHttpClientTransport(
                 client = httpClient,
                 url = server.url,
+                requestBuilder = {
+                    server.headers.forEach { (name, value) ->
+                        header(name, value)
+                    }
+                },
             )
             client.connect(transport)
             SdkMcpRemoteSession(
@@ -263,6 +270,7 @@ private class SdkMcpRemoteSession(
 private class PostOnlyJsonRpcMcpClient(
     private val httpClient: HttpClient,
     private val url: String,
+    private val customHeaders: Map<String, String>,
 ) {
     private var nextRequestId = 1
     private var protocolVersion: String? = null
@@ -380,6 +388,9 @@ private class PostOnlyJsonRpcMcpClient(
             accept(ContentType.Application.Json)
             accept(ContentType.Text.EventStream)
             header(HttpHeaders.ContentType, ContentType.Application.Json)
+            customHeaders.forEach { (name, value) ->
+                header(name, value)
+            }
             if (sendSessionHeaders) {
                 protocolVersion?.let { header(McpProtocolVersionHeader, it) }
                 sessionId?.let { header(McpSessionIdHeader, it) }

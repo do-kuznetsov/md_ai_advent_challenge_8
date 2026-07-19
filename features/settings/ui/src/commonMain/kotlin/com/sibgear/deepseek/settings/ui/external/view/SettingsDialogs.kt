@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -33,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.sibgear.deepseek.settings.ui.external.model.McpHeaderUiModel
 import com.sibgear.deepseek.settings.ui.external.model.McpServerDraft
 import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
@@ -106,6 +109,10 @@ fun SettingsDialogs(
             onDismissRequest = { onEvent(SettingsEvent.McpServerFormClosed) },
             onNameChanged = { onEvent(SettingsEvent.McpServerDraftNameChanged(it)) },
             onUrlChanged = { onEvent(SettingsEvent.McpServerDraftUrlChanged(it)) },
+            onHeaderAdded = { onEvent(SettingsEvent.McpServerHeaderAdded) },
+            onHeaderRemoved = { onEvent(SettingsEvent.McpServerHeaderRemoved(it)) },
+            onHeaderNameChanged = { index, text -> onEvent(SettingsEvent.McpServerHeaderNameChanged(index, text)) },
+            onHeaderValueChanged = { index, text -> onEvent(SettingsEvent.McpServerHeaderValueChanged(index, text)) },
             onSaveClicked = { onEvent(SettingsEvent.McpServerSaved) },
             onUninstallClicked = { onEvent(SettingsEvent.McpServerUninstalled) },
         )
@@ -295,6 +302,10 @@ private fun McpServerFormDialog(
     onDismissRequest: () -> Unit,
     onNameChanged: (String) -> Unit,
     onUrlChanged: (String) -> Unit,
+    onHeaderAdded: () -> Unit,
+    onHeaderRemoved: (Int) -> Unit,
+    onHeaderNameChanged: (Int, String) -> Unit,
+    onHeaderValueChanged: (Int, String) -> Unit,
     onSaveClicked: () -> Unit,
     onUninstallClicked: () -> Unit,
 ) {
@@ -306,7 +317,9 @@ private fun McpServerFormDialog(
             shadowElevation = 8.dp,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 McpServerFormHeader(
@@ -338,6 +351,14 @@ private fun McpServerFormDialog(
                     onValueChange = onUrlChanged,
                 )
 
+                McpHeadersBlock(
+                    headers = draft.headers,
+                    onHeaderAdded = onHeaderAdded,
+                    onHeaderRemoved = onHeaderRemoved,
+                    onHeaderNameChanged = onHeaderNameChanged,
+                    onHeaderValueChanged = onHeaderValueChanged,
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -355,6 +376,78 @@ private fun McpServerFormDialog(
                         Text("Сохранить")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun McpHeadersBlock(
+    headers: List<McpHeaderUiModel>,
+    onHeaderAdded: () -> Unit,
+    onHeaderRemoved: (Int) -> Unit,
+    onHeaderNameChanged: (Int, String) -> Unit,
+    onHeaderValueChanged: (Int, String) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 2.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Headers",
+                style = MaterialTheme.typography.titleSmall,
+            )
+
+            headers.forEachIndexed { index, header ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = header.name,
+                        onValueChange = { onHeaderNameChanged(index, it) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        placeholder = { Text("Header name") },
+                    )
+
+                    OutlinedTextField(
+                        value = header.value,
+                        onValueChange = { onHeaderValueChanged(index, it) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        placeholder = { Text("Header value") },
+                    )
+
+                    IconButton(onClick = { onHeaderRemoved(index) }) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Удалить header",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = onHeaderAdded,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "Add header",
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
         }
     }
