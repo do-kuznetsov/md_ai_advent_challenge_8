@@ -20,7 +20,7 @@ class AiReviewService(
         val pullNumber = payload.pullRequest.number
         val headSha = payload.pullRequest.head.sha
         val marker = reviewMarker(ownerRepo.fullName, pullNumber, headSha)
-        if (githubClient.listPullRequestReviews(ownerRepo, pullNumber).any { marker in it.body }) {
+        if (githubClient.listPullRequestReviews(ownerRepo, pullNumber).any { it.isCompletedAiReview(marker) }) {
             return ReviewRunResult.Duplicate
         }
 
@@ -132,7 +132,7 @@ class AiReviewService(
             appendLine()
             appendLine("**Вердикт:** нужно доработать")
             appendLine()
-            appendLine("Автоматическое ревью не удалось завершить.")
+            appendLine(FailedReviewText)
             appendLine()
             appendLine("Ошибка: `${error.message ?: error::class.simpleName ?: "unknown"}`")
             if (deliveryId.isNotBlank()) {
@@ -148,6 +148,11 @@ fun reviewMarker(
     headSha: String,
 ): String =
     "<!-- ai-review:$repoFullName#$pullNumber:$headSha -->"
+
+private const val FailedReviewText = "Автоматическое ревью не удалось завершить."
+
+private fun GitHubReview.isCompletedAiReview(marker: String): Boolean =
+    marker in body && FailedReviewText !in body
 
 private fun List<GitHubReviewComment>.toFallbackSection(): String {
     val comments = this

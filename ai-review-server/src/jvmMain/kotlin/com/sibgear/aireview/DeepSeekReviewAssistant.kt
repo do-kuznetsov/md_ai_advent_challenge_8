@@ -26,6 +26,32 @@ class DeepSeekReviewAssistant(
     private val apiBaseUrl = config.deepSeekBaseUrl.trimEnd('/')
 
     override suspend fun review(context: PullRequestReviewContext): AiReviewResult {
+        val prompt = context.toReviewPrompt(config.maxPromptChars)
+        val firstContent = requestReview(
+            systemPrompt = ReviewSystemPrompt,
+            userPrompt = prompt,
+            thinkingEnabled = true,
+        )
+        runCatching { return firstContent.toAiReviewResult() }
+
+        val retryInstruction = """
+            The previous response could not be parsed.
+            Return exactly one valid JSON object matching the schema from the system message.
+            Do not wrap it in Markdown. Do not include prose before or after the JSON.
+        """.trimIndent()
+        val retryContent = requestReview(
+            systemPrompt = "$ReviewSystemPrompt\n$retryInstruction",
+            userPrompt = prompt,
+            thinkingEnabled = false,
+        )
+        return retryContent.toAiReviewResult()
+    }
+
+    private suspend fun requestReview(
+        systemPrompt: String,
+        userPrompt: String,
+        thinkingEnabled: Boolean,
+    ): String {
         val response = client.post("$apiBaseUrl/chat/completions") {
             bearerAuth(config.deepSeekApiKey)
             contentType(ContentType.Application.Json)
@@ -33,12 +59,13 @@ class DeepSeekReviewAssistant(
                 DeepSeekChatCompletionRequest(
                     model = config.deepSeekModel,
                     messages = listOf(
-                        DeepSeekApiMessage(role = "system", content = ReviewSystemPrompt),
-                        DeepSeekApiMessage(role = "user", content = context.toReviewPrompt(config.maxPromptChars)),
+                        DeepSeekApiMessage(role = "system", content = systemPrompt),
+                        DeepSeekApiMessage(role = "user", content = userPrompt),
                     ),
-                    thinking = DeepSeekThinking(type = "enabled"),
-                    reasoningEffort = "high",
-                    maxTokens = 4096,
+                    thinking = DeepSeekThinking(type = if (thinkingEnabled) "enabled" else "disabled"),
+                    reasoningEffort = if (thinkingEnabled) "high" else null,
+                    responseFormat = DeepSeekResponseFormat(type = "json_object"),
+                    maxTokens = 8192,
                     stream = false,
                 ),
             )
@@ -52,29 +79,83 @@ class DeepSeekReviewAssistant(
             ?.message
             ?.content
             .orEmpty()
-        return content.toAiReviewResult()
+        return content
     }
 }
 
 private fun String.toAiReviewResult(): AiReviewResult {
-    val jsonText = extractJsonObject()
-    val dto = AiReviewJson.decodeFromString<AiReviewResultDto>(jsonText)
-    return dto.toDomain()
+    val errors = mutableListOf<String>()
+    extractJsonObjectCandidates().forEach { jsonText ->
+        val result = runCatching {
+            AiReviewJson.decodeFromString<AiReviewResultDto>(jsonText).toDomain()
+        }
+        result.onSuccess { return it }
+        result.exceptionOrNull()?.message?.let(errors::add)
+    }
+    val detail = errors.firstOrNull()
+    error(
+        buildString {
+            append("DeepSeek response does not contain parseable JSON object.")
+            if (!detail.isNullOrBlank()) {
+                append(" Parser error: ")
+                append(detail.take(240))
+            }
+        },
+    )
 }
 
-private fun String.extractJsonObject(): String {
-    val fenced = Regex("```(?:json)?\\s*([\\s\\S]*?)```")
-        .find(this)
-        ?.groupValues
-        ?.getOrNull(1)
-        ?.trim()
-    if (!fenced.isNullOrBlank()) {
-        return fenced
+internal fun String.extractAiReviewJsonObject(): String =
+    extractJsonObjectCandidates().firstOrNull()
+        ?: error("DeepSeek response does not contain JSON object.")
+
+private fun String.extractJsonObjectCandidates(): List<String> {
+    val fencedCandidates = Regex("```(?:json)?\\s*([\\s\\S]*?)```")
+        .findAll(this)
+        .flatMap { it.groupValues.getOrNull(1).orEmpty().balancedJsonObjects() }
+    return (fencedCandidates + balancedJsonObjects())
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .toList()
+}
+
+private fun String.balancedJsonObjects(): Sequence<String> = sequence {
+    var start = -1
+    var depth = 0
+    var inString = false
+    var escaped = false
+
+    for (index in indices) {
+        val char = this@balancedJsonObjects[index]
+        if (start < 0) {
+            if (char == '{') {
+                start = index
+                depth = 1
+            }
+            continue
+        }
+
+        if (inString) {
+            when {
+                escaped -> escaped = false
+                char == '\\' -> escaped = true
+                char == '"' -> inString = false
+            }
+            continue
+        }
+
+        when (char) {
+            '"' -> inString = true
+            '{' -> depth += 1
+            '}' -> {
+                depth -= 1
+                if (depth == 0) {
+                    yield(substring(start, index + 1))
+                    start = -1
+                }
+            }
+        }
     }
-    val start = indexOf('{')
-    val end = lastIndexOf('}')
-    require(start >= 0 && end > start) { "DeepSeek response does not contain JSON object." }
-    return substring(start, end + 1)
 }
 
 private fun PullRequestReviewContext.toReviewPrompt(maxChars: Int): String {
@@ -129,7 +210,9 @@ private data class DeepSeekChatCompletionRequest(
     val messages: List<DeepSeekApiMessage>,
     val thinking: DeepSeekThinking,
     @SerialName("reasoning_effort")
-    val reasoningEffort: String,
+    val reasoningEffort: String?,
+    @SerialName("response_format")
+    val responseFormat: DeepSeekResponseFormat,
     @SerialName("max_tokens")
     val maxTokens: Int,
     val stream: Boolean,
@@ -143,6 +226,11 @@ private data class DeepSeekApiMessage(
 
 @Serializable
 private data class DeepSeekThinking(
+    val type: String,
+)
+
+@Serializable
+private data class DeepSeekResponseFormat(
     val type: String,
 )
 

@@ -4,10 +4,17 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.http.headersOf
+import io.ktor.http.content.OutgoingContent
 import io.ktor.server.testing.testApplication
+import io.ktor.serialization.kotlinx.json.json
 import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -148,7 +155,11 @@ class AiReviewServerTest {
             reviews = listOf(
                 GitHubReview(
                     id = 1,
-                    body = reviewMarker("owner/repo", 7, "abc123"),
+                    body = """
+                        ${reviewMarker("owner/repo", 7, "abc123")}
+                        ## AI Review
+                        Ревью завершено.
+                    """.trimIndent(),
                 ),
             ),
         )
@@ -161,6 +172,31 @@ class AiReviewServerTest {
 
         assertIs<ReviewRunResult.Duplicate>(result)
         assertEquals(0, githubClient.createdReviews.size)
+    }
+
+    @Test
+    fun serviceDoesNotSkipFailedReviewForSameHeadSha() = runTest {
+        val githubClient = FakeGitHubClient(
+            reviews = listOf(
+                GitHubReview(
+                    id = 1,
+                    body = """
+                        ${reviewMarker("owner/repo", 7, "abc123")}
+                        ## AI Review
+                        Автоматическое ревью не удалось завершить.
+                    """.trimIndent(),
+                ),
+            ),
+        )
+        val service = fakeService(githubClient)
+
+        val result = service.reviewPullRequest(
+            payload = AiReviewJson.decodeFromString(pullRequestPayload()),
+            deliveryId = "delivery",
+        )
+
+        assertIs<ReviewRunResult.Published>(result)
+        assertEquals(1, githubClient.createdReviews.size)
     }
 
     @Test
@@ -200,6 +236,58 @@ class AiReviewServerTest {
 
         assertEquals(1, validated.inlineComments.size)
         assertEquals(2, validated.fallbackNotes.size)
+    }
+
+    @Test
+    fun deepSeekAssistantRequestsJsonOutputAndParsesFencedJson() = runTest {
+        var requestBody = ""
+        val client = io.ktor.client.HttpClient(
+            MockEngine { request ->
+                requestBody = request.body.requestText()
+                respond(
+                    content = """
+                    {
+                      "choices": [
+                        {
+                          "message": {
+                            "content": "```json\n{\"verdict\":\"ok_to_merge\",\"summary\":\"LGTM\",\"bugs\":[],\"architecture_problems\":[],\"recommendations\":[],\"findings\":[]}\n```"
+                          }
+                        }
+                      ]
+                    }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            },
+        ) {
+            install(ContentNegotiation) {
+                json(AiReviewJson)
+            }
+        }
+        val assistant = DeepSeekReviewAssistant(testConfig(), client)
+
+        val result = assistant.review(testReviewContext())
+
+        assertEquals("ok_to_merge", result.verdict)
+        assertTrue(requestBody.contains(""""response_format":{"type":"json_object"}"""))
+        assertTrue(requestBody.contains(""""thinking":{"type":"enabled"}"""))
+    }
+
+    @Test
+    fun jsonExtractorKeepsNestedBracesInsideStrings() {
+        val response = """
+            Explanation before JSON.
+            ```json
+            {"summary":"Uses braces like {value} in text","findings":[{"body":"Fix {placeholder}"}]}
+            ```
+            Explanation after JSON.
+        """.trimIndent()
+
+        val json = response.extractAiReviewJsonObject()
+
+        assertTrue(json.startsWith("{\"summary\""))
+        assertTrue(json.contains("Fix {placeholder}"))
     }
 
     @Test
@@ -258,6 +346,35 @@ class AiReviewServerTest {
           }
         }
         """.trimIndent()
+
+    private fun testReviewContext(): PullRequestReviewContext =
+        PullRequestReviewContext(
+            ownerRepo = OwnerRepo("owner", "repo"),
+            number = 7,
+            title = "Fix app",
+            body = "PR body",
+            headSha = "abc123",
+            baseSha = "def456",
+            changedFiles = listOf(
+                GitHubChangedFile(
+                    filename = "src/App.kt",
+                    status = "modified",
+                    additions = 1,
+                    deletions = 0,
+                    changes = 1,
+                    patch = "@@ -9,0 +10,1 @@\n+println(next)",
+                ),
+            ),
+            diff = """
+                diff --git a/src/App.kt b/src/App.kt
+                index 111..222 100644
+                --- a/src/App.kt
+                +++ b/src/App.kt
+                @@ -9,0 +10,1 @@
+                +println(next)
+            """.trimIndent(),
+            ragChunks = emptyList(),
+        )
 }
 
 private class FakeGitHubClient(
@@ -323,3 +440,6 @@ private fun ByteArray.signature(secret: String): String {
     mac.init(SecretKeySpec(secret.encodeToByteArray(), "HmacSHA256"))
     return "sha256=" + mac.doFinal(this).joinToString(separator = "") { "%02x".format(it) }
 }
+
+private fun Any.requestText(): String =
+    ((this as? OutgoingContent.ByteArrayContent)?.bytes()?.decodeToString()).orEmpty()
