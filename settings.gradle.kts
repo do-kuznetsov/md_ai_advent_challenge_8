@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "md-ai-advent-challenge-8"
 
 include(
+    ":ai-review-server",
     ":app",
     ":features:chat:domain",
     ":features:chat:data:deepseek",
