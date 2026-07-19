@@ -882,10 +882,9 @@ class AiChatAppViewModelTaskModeTest {
             return ChatViewModel(
                 interactor = ChatInteractor(
                     repository = RoutingAiRepository(
-                        chatRepositories = mapOf(
-                            com.sibgear.deepseek.chat.domain.model.AiProvider.DeepSeek to
-                                FakeAiChatRepository(history, assistantResponse),
-                        ),
+                        chatRepositories = com.sibgear.deepseek.chat.domain.model.AiProvider.entries.associateWith {
+                            FakeAiChatRepository(history, assistantResponse)
+                        },
                         modelRepositories = emptyMap(),
                     ),
                     dispatcher = dispatcher,
@@ -902,7 +901,7 @@ class AiChatAppViewModelTaskModeTest {
         }
 
         return AiChatAppViewModel(
-            createChatViewModel = { _, _, systemPrompt ->
+            createChatViewModel = { _, _, systemPrompt, _ ->
                 chatViewModel(systemPrompt = systemPrompt)
             },
             createTaskStageChatViewModel = { _, _, systemPrompt, initialPrompt ->

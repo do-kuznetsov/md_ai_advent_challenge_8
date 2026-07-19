@@ -41,6 +41,7 @@ class AiChatAppViewModel(
         tabNumber: Int,
         storageType: ChatStorageType,
         systemPrompt: String,
+        projectPath: String,
     ) -> ChatViewModel,
     private val createTaskStageChatViewModel: (
         chatId: Int,
@@ -59,6 +60,7 @@ class AiChatAppViewModel(
     initialTabNumbers: List<Int> = emptyList(),
     initialTaskSessionsByTab: Map<Int, TaskSessionSnapshot> = emptyMap(),
     initialSystemPromptsByTab: Map<Int, String> = emptyMap(),
+    initialProjectPathsByTab: Map<Int, String> = emptyMap(),
     initialActiveTabNumber: Int? = null,
     initialNextTabNumber: Int? = null,
     initialStorageType: ChatStorageType = ChatStorageType.Json,
@@ -78,6 +80,7 @@ class AiChatAppViewModel(
         .ifEmpty { listOf(1) }
     private val initialTaskSnapshots = initialTaskSessionsByTab
     private val initialSystemPrompts = initialSystemPromptsByTab
+    private val initialProjectPaths = initialProjectPathsByTab
     private var nextTabNumber = maxOf(
         initialNextTabNumber ?: ((initialNumbers.maxOrNull() ?: 0) + 1),
         (initialNumbers.maxOrNull() ?: 0) + 1,
@@ -90,6 +93,7 @@ class AiChatAppViewModel(
             storageType = initialStorageType,
             taskSnapshotsByTab = initialTaskSnapshots,
             systemPromptsByTab = initialSystemPrompts,
+            projectPathsByTab = initialProjectPaths,
         ),
     )
         private set
@@ -131,6 +135,7 @@ class AiChatAppViewModel(
         storageType: ChatStorageType,
         taskSnapshotsByTab: Map<Int, TaskSessionSnapshot>,
         systemPromptsByTab: Map<Int, String>,
+        projectPathsByTab: Map<Int, String>,
     ): AiChatAppViewState {
         val tabs = tabNumbers.map { tabNumber ->
             createTab(
@@ -138,6 +143,7 @@ class AiChatAppViewModel(
                 storageType = storageType,
                 taskSnapshot = taskSnapshotsByTab[tabNumber],
                 systemPrompt = systemPromptsByTab[tabNumber].orEmpty(),
+                projectPath = projectPathsByTab[tabNumber].orEmpty(),
             )
         }
         return AiChatAppViewState(
@@ -161,8 +167,9 @@ class AiChatAppViewModel(
         storageType: ChatStorageType,
         taskSnapshot: TaskSessionSnapshot? = null,
         systemPrompt: String = "",
+        projectPath: String = "",
     ): ChatTab {
-        val viewModel = createChatViewModel(number, storageType, systemPrompt)
+        val viewModel = createChatViewModel(number, storageType, systemPrompt, projectPath)
         viewModel.loadModels()
 
         return ChatTab(
@@ -286,7 +293,7 @@ class AiChatAppViewModel(
                     focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
                 }
                 activeViewModel.onEvent(event)
-                if (event is ChatEvent.SystemPromptChanged) {
+                if (event is ChatEvent.SystemPromptChanged || event is ChatEvent.ProjectPathChanged) {
                     notifyWorkspaceChanged()
                 }
             }
@@ -334,6 +341,7 @@ class AiChatAppViewModel(
         val taskSession = activeTab.taskSession
         if (taskSession?.context == null) {
             focusTaskChat(activeTab.number, TaskChatFocus.Orchestrator)
+            activeTab.viewModel.lockProjectPathForLlmRequest()
             activeTab.viewModel.setPrompt("")
             activeTab.viewModel.appendPersistentMessage(
                 ChatMessage(role = ChatRole.User, content = prompt),
@@ -1296,6 +1304,7 @@ class AiChatAppViewModel(
                 ChatTabSnapshot(
                     number = tab.number,
                     systemPrompt = tab.viewModel.state.systemPrompt,
+                    projectPath = tab.viewModel.state.projectPath,
                     taskSession = tab.taskSession?.toSnapshot(),
                 )
             },
@@ -2169,6 +2178,7 @@ private fun ChatEvent.isPromptInputEvent(): Boolean =
     when (this) {
         is ChatEvent.PromptChanged,
         is ChatEvent.SystemPromptChanged,
+        is ChatEvent.ProjectPathChanged,
         is ChatEvent.AttachmentSelected,
         is ChatEvent.AttachmentError,
         ChatEvent.AttachmentCleared,

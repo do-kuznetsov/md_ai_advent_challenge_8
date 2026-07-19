@@ -17,6 +17,9 @@ import com.sibgear.rag.domain.model.ChunkingStrategyType
 data class ChatViewState(
     val systemPrompt: String = "",
     val isSystemPromptReadOnly: Boolean = false,
+    val projectPath: String = "",
+    val isProjectPathReadOnly: Boolean = false,
+    val isProjectFileToolsEnabled: Boolean = false,
     val prompt: String = "",
     val attachment: PromptAttachment? = null,
     val attachmentError: String? = null,

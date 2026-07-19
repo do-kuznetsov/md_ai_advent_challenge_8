@@ -88,6 +88,29 @@ class WorkspaceStorageTest {
     }
 
     @Test
+    fun savesAndRestoresTabProjectPath() {
+        val baseDir = tempBaseDir()
+        val storage = WorkspaceStorage(baseDir)
+
+        storage.save(
+            tabs = listOf(WorkspaceTabSnapshot(number = 1, projectPath = "/tmp/project")),
+            activeTabNumber = 1,
+            nextTabNumber = 2,
+            selectedStorageType = ChatStorageType.Json,
+        )
+
+        assertEquals(
+            WorkspaceSnapshot(
+                tabs = listOf(WorkspaceTabSnapshot(number = 1, projectPath = "/tmp/project")),
+                activeTabNumber = 1,
+                nextTabNumber = 2,
+                selectedStorageType = ChatStorageType.Json,
+            ),
+            WorkspaceStorage(baseDir).load(),
+        )
+    }
+
+    @Test
     fun legacyWorkspaceWithoutStorageTypeRestoresJsonStorage() {
         val baseDir = tempBaseDir()
         baseDir.mkdirs()

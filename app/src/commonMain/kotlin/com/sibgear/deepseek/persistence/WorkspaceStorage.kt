@@ -179,6 +179,7 @@ internal class WorkspaceStorage(
                 WorkspaceTabSnapshot(
                     number = it.number,
                     systemPrompt = it.systemPrompt,
+                    projectPath = it.projectPath,
                     taskSession = it.taskSession?.toDomain(),
                 )
             }
@@ -205,6 +206,7 @@ internal class WorkspaceStorage(
                 WorkspaceTabDto(
                     number = it.number,
                     systemPrompt = it.systemPrompt,
+                    projectPath = it.projectPath,
                     taskSession = it.taskSession?.toDto(),
                 )
             },
@@ -229,6 +231,7 @@ internal data class WorkspaceSnapshot(
 internal data class WorkspaceTabSnapshot(
     val number: Int,
     val systemPrompt: String = "",
+    val projectPath: String = "",
     val taskSession: TaskSessionSnapshot? = null,
 )
 
@@ -246,6 +249,7 @@ private data class WorkspaceTabDto(
     val number: Int,
     val historyFileName: String? = null,
     val systemPrompt: String = "",
+    val projectPath: String = "",
     val taskSession: TaskSessionSnapshotDto? = null,
 )
 

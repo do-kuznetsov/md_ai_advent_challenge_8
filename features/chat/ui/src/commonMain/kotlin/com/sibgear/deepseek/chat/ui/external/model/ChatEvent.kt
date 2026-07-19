@@ -7,6 +7,7 @@ import com.sibgear.rag.domain.model.ChunkingStrategyType
 
 sealed interface ChatEvent {
     data class SystemPromptChanged(val systemPrompt: String) : ChatEvent
+    data class ProjectPathChanged(val projectPath: String) : ChatEvent
     data class PromptChanged(val prompt: String) : ChatEvent
     data class AttachmentSelected(val attachment: PromptAttachment) : ChatEvent
     data class AttachmentError(val message: String) : ChatEvent

@@ -47,6 +47,7 @@ class ChatViewModel(
     initialStickyFacts: List<StickyFact> = emptyList(),
     initialBranches: List<ChatBranch> = emptyList(),
     initialSystemPrompt: String = "",
+    initialProjectPath: String = "",
     initialPrompt: String = "",
     initialAttachment: PromptAttachment? = null,
     isSystemPromptReadOnly: Boolean = false,
@@ -62,6 +63,9 @@ class ChatViewModel(
         ChatViewState(
             systemPrompt = initialSystemPrompt,
             isSystemPromptReadOnly = isSystemPromptReadOnly,
+            projectPath = initialProjectPath,
+            isProjectPathReadOnly = initialMessages.isNotEmpty(),
+            isProjectFileToolsEnabled = initialMessages.isNotEmpty() && initialProjectPath.isNotBlank(),
             prompt = initialPrompt,
             attachment = initialAttachment,
             messages = initialMessages,
@@ -276,6 +280,12 @@ class ChatViewModel(
                 state = state.copy(prompt = event.prompt)
             }
 
+            is ChatEvent.ProjectPathChanged -> {
+                if (!state.isProjectPathReadOnly) {
+                    state = state.copy(projectPath = event.projectPath)
+                }
+            }
+
             is ChatEvent.StopWordChanged -> {
                 state = state.copy(
                     apiSettings = state.apiSettings.copy(stopWord = event.stopWord),
@@ -438,6 +448,7 @@ class ChatViewModel(
 
         val effectivePrompt = (developerHelpCommand as? DeveloperHelpCommand.Question)?.question ?: prompt
         val isDeveloperHelp = developerHelpCommand != null
+        lockProjectPathForLlmRequest()
         val ragSettings = state.toRagRequestSettings().let { settings ->
             if (isDeveloperHelp) settings.copy(isEnabled = true) else settings
         }
@@ -535,6 +546,7 @@ class ChatViewModel(
             return
         }
 
+        lockProjectPathForLlmRequest()
         val request = buildRequest(
             prompt = trimmedPrompt,
             runtimeSystemPrompt = runtimeSystemPrompt,
@@ -569,6 +581,10 @@ class ChatViewModel(
 
     fun setPrompt(prompt: String) {
         state = state.copy(prompt = prompt)
+    }
+
+    fun lockProjectPathForLlmRequest() {
+        state = state.withLockedProjectPathForLlmRequest()
     }
 
     fun appendLocalMessage(message: ChatMessage) {
@@ -640,6 +656,9 @@ class ChatViewModel(
             isRagRerankingEnabled = source.isRagRerankingEnabled,
             ragRerankerModelDirectory = source.ragRerankerModelDirectory,
             ragStatus = source.ragStatus,
+            projectPath = source.projectPath,
+            isProjectPathReadOnly = source.isProjectPathReadOnly,
+            isProjectFileToolsEnabled = source.isProjectFileToolsEnabled,
         ).withContextPresentation()
     }
 
@@ -670,6 +689,18 @@ class ChatViewModel(
             persistUserMessage = persistUserMessage,
             toolProvider = toolProvider,
         )
+
+    private fun ChatViewState.withLockedProjectPathForLlmRequest(): ChatViewState {
+        if (isProjectPathReadOnly) {
+            return this
+        }
+        val lockedProjectPath = projectPath.trim()
+        return copy(
+            projectPath = lockedProjectPath,
+            isProjectPathReadOnly = true,
+            isProjectFileToolsEnabled = lockedProjectPath.isNotBlank(),
+        )
+    }
 
     private suspend fun AiRequestData.withRagContextIfNeeded(
         originalPrompt: String,

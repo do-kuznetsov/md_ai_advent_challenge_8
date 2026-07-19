@@ -82,23 +82,43 @@ internal fun PromptInputArea(
             onEvent = onEvent,
         )
 
-        if (promptHeaderContent == null && state.messages.isEmpty() && !state.isSystemPromptReadOnly) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("system prompt:")
+        if (promptHeaderContent == null) {
+            if (!state.isProjectPathReadOnly) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("project path:")
 
-                ShortcutOutlinedTextField(
-                    value = state.systemPrompt,
-                    onValueChange = { onEvent(ChatEvent.SystemPromptChanged(it)) },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    enabled = !state.isSystemPromptReadOnly,
-                )
+                    ShortcutOutlinedTextField(
+                        value = state.projectPath,
+                        onValueChange = { onEvent(ChatEvent.ProjectPathChanged(it)) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        enabled = true,
+                    )
+                }
             }
-        } else if (promptHeaderContent != null) {
+
+            if (state.messages.isEmpty() && !state.isSystemPromptReadOnly) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("system prompt:")
+
+                    ShortcutOutlinedTextField(
+                        value = state.systemPrompt,
+                        onValueChange = { onEvent(ChatEvent.SystemPromptChanged(it)) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        enabled = !state.isSystemPromptReadOnly,
+                    )
+                }
+            }
+        } else {
             promptHeaderContent()
         }
 
