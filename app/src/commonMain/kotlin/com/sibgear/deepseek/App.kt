@@ -52,7 +52,6 @@ import com.sibgear.deepseek.mapper.toHistoryMessages
 import com.sibgear.deepseek.mapper.toStickyFacts
 import com.sibgear.deepseek.persistence.WorkspaceStorage
 import com.sibgear.deepseek.persistence.WorkspaceTabSnapshot
-import com.sibgear.deepseek.persistence.defaultClientFilesDir
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import com.sibgear.deepseek.settings.ui.external.presentation.SettingsViewModel
 import com.sibgear.deepseek.settings.ui.external.view.SettingsDialogs
@@ -132,8 +131,11 @@ fun App() {
             },
         )
     }
-    val localFileToolProvider = remember {
-        LocalFileAiToolProvider(filesDir = defaultClientFilesDir())
+    val activeProjectRootProvider = remember { ActiveProjectRootProvider() }
+    val localFileToolProvider = remember(activeProjectRootProvider) {
+        LocalFileAiToolProvider(
+            projectRootProvider = { activeProjectRootProvider.projectRoot() },
+        )
     }
     val localTimeToolProvider = remember {
         LocalTimeAiToolProvider()
@@ -173,6 +175,7 @@ fun App() {
             initialSystemPrompt: String = "",
             initialPrompt: String = "",
             isSystemPromptReadOnly: Boolean = false,
+            initialProjectPath: String = "",
         ): ChatViewModel {
             val historyStorage = if (useTaskStageHistory) {
                 workspaceStorage.createTaskStageHistoryStorage(storageType)
@@ -240,6 +243,7 @@ fun App() {
                 initialStickyFacts = restoredFacts.toStickyFacts(),
                 initialBranches = restoredBranches.toChatBranches(),
                 initialSystemPrompt = initialSystemPrompt,
+                initialProjectPath = initialProjectPath,
                 initialPrompt = initialPrompt,
                 initialAttachment = defaultFirstPromptAttachment.takeIf {
                     !useTaskStageHistory && restoredMessages.isEmpty()
@@ -259,6 +263,7 @@ fun App() {
             storageType: ChatStorageType,
             initialMessages: List<HistoryMessage>,
             initialSystemPrompt: String = "",
+            initialProjectPath: String = "",
             taskSession: TaskSessionSnapshot? = null,
         ): ChatTab {
             val chatViewModel = createChatViewModel(
@@ -266,6 +271,7 @@ fun App() {
                 storageType = storageType,
                 initialMessages = initialMessages,
                 initialSystemPrompt = initialSystemPrompt,
+                initialProjectPath = initialProjectPath,
             )
             chatViewModel.loadModels()
             return ChatTab(
@@ -301,12 +307,13 @@ fun App() {
         }
 
         AiChatAppViewModel(
-            createChatViewModel = { tabNumber, storageType, systemPrompt ->
+            createChatViewModel = { tabNumber, storageType, systemPrompt, projectPath ->
                 createChatViewModel(
                     tabNumber = tabNumber,
                     storageType = storageType,
                     initialMessages = initialHistoryByTab[tabNumber],
                     initialSystemPrompt = systemPrompt,
+                    initialProjectPath = projectPath,
                 )
             },
             createTaskStageChatViewModel = { chatId, storageType, systemPrompt, initialPrompt ->
@@ -352,6 +359,9 @@ fun App() {
                 val systemPromptsByTab = currentTabs.associate { tab ->
                     tab.number to tab.viewModel.state.systemPrompt
                 }
+                val projectPathsByTab = currentTabs.associate { tab ->
+                    tab.number to tab.viewModel.state.projectPath
+                }
 
                 val currentNumbers = currentTabs.map { it.number }
                 val mergedNumbers = mergeTabNumbers(
@@ -367,6 +377,7 @@ fun App() {
                         storageType = storageType,
                         initialMessages = messages,
                         initialSystemPrompt = systemPromptsByTab[tabNumber].orEmpty(),
+                        initialProjectPath = projectPathsByTab[tabNumber].orEmpty(),
                         taskSession = taskSnapshotsByTab[tabNumber],
                     )
                 }
@@ -391,6 +402,9 @@ fun App() {
             initialSystemPromptsByTab = initialWorkspace.tabs.associate { tab ->
                 tab.number to tab.systemPrompt
             },
+            initialProjectPathsByTab = initialWorkspace.tabs.associate { tab ->
+                tab.number to tab.projectPath
+            },
             initialActiveTabNumber = initialWorkspace.activeTabNumber,
             initialNextTabNumber = initialWorkspace.nextTabNumber,
             initialStorageType = initialStorageType,
@@ -401,6 +415,7 @@ fun App() {
                         WorkspaceTabSnapshot(
                             number = it.number,
                             systemPrompt = it.systemPrompt,
+                            projectPath = it.projectPath,
                             taskSession = it.taskSession,
                         )
                     },
@@ -418,6 +433,7 @@ fun App() {
             },
         )
     }
+    activeProjectRootProvider.viewModel = viewModel
     val settingsViewModel = remember(scope, workspaceStorage, viewModel, profileServices, invariantServices) {
         SettingsViewModel(
             coroutineScope = scope,
@@ -583,6 +599,17 @@ private fun loadDefaultFirstPromptAttachment(): PromptAttachment? {
 
 private fun Int.toTaskStageChatId(stage: TaskState): Int =
     this * TaskStageChatIdMultiplier + stage.ordinal + 1
+
+private class ActiveProjectRootProvider {
+    var viewModel: AiChatAppViewModel? = null
+
+    fun projectRoot(): String? {
+        val chatState = viewModel?.state?.activeTab?.viewModel?.state ?: return null
+        return chatState.projectPath
+            .takeIf { chatState.isProjectFileToolsEnabled }
+            ?.takeIf { it.isNotBlank() }
+    }
+}
 
 private const val MaxTabTitleWords = 5
 private const val TaskStageChatIdMultiplier = 10

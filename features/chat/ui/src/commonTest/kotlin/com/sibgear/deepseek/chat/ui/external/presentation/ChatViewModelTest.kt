@@ -52,6 +52,57 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun projectPathCanChangeBeforeFirstLlmRequest() {
+        val viewModel = chatViewModel()
+
+        viewModel.onEvent(ChatEvent.ProjectPathChanged("/tmp/project"))
+
+        assertEquals("/tmp/project", viewModel.state.projectPath)
+        assertFalse(viewModel.state.isProjectPathReadOnly)
+        assertFalse(viewModel.state.isProjectFileToolsEnabled)
+    }
+
+    @Test
+    fun projectPathLocksAndEnablesFileToolsOnFirstLlmRequest() = runTest {
+        val viewModel = chatViewModel()
+
+        viewModel.onEvent(ChatEvent.ProjectPathChanged(" /tmp/project "))
+        viewModel.onEvent(ChatEvent.PromptChanged("hello"))
+        viewModel.sendPrompt()
+        viewModel.onEvent(ChatEvent.ProjectPathChanged("/tmp/changed"))
+
+        assertEquals("/tmp/project", viewModel.state.projectPath)
+        assertTrue(viewModel.state.isProjectPathReadOnly)
+        assertTrue(viewModel.state.isProjectFileToolsEnabled)
+    }
+
+    @Test
+    fun emptyProjectPathLocksAndDisablesFileToolsOnFirstLlmRequest() = runTest {
+        val viewModel = chatViewModel()
+
+        viewModel.onEvent(ChatEvent.PromptChanged("hello"))
+        viewModel.sendPrompt()
+        viewModel.onEvent(ChatEvent.ProjectPathChanged("/tmp/project"))
+
+        assertEquals("", viewModel.state.projectPath)
+        assertTrue(viewModel.state.isProjectPathReadOnly)
+        assertFalse(viewModel.state.isProjectFileToolsEnabled)
+    }
+
+    @Test
+    fun helpHintDoesNotLockProjectPathBecauseItDoesNotCallLlm() = runTest {
+        val viewModel = chatViewModel()
+
+        viewModel.onEvent(ChatEvent.PromptChanged("/help"))
+        viewModel.sendPrompt()
+        viewModel.onEvent(ChatEvent.ProjectPathChanged("/tmp/project"))
+
+        assertEquals("/tmp/project", viewModel.state.projectPath)
+        assertFalse(viewModel.state.isProjectPathReadOnly)
+        assertFalse(viewModel.state.isProjectFileToolsEnabled)
+    }
+
+    @Test
     fun apiSettingsUseOptimizedLocalLlmDefaults() {
         val viewModel = chatViewModel()
 
@@ -677,6 +728,20 @@ class ChatViewModelTest {
         assertTrue(viewModel.state.messages.last().content.contains("Ошибка RAG: Ollama down"))
     }
 
+    @Test
+    fun syncRequestSettingsFromCopiesProjectPathSettings() = runTest {
+        val source = chatViewModel(initialProjectPath = "/tmp/project")
+        val target = chatViewModel()
+
+        source.onEvent(ChatEvent.PromptChanged("hello"))
+        source.sendPrompt()
+        target.syncRequestSettingsFrom(source.state)
+
+        assertEquals("/tmp/project", target.state.projectPath)
+        assertTrue(target.state.isProjectPathReadOnly)
+        assertTrue(target.state.isProjectFileToolsEnabled)
+    }
+
     private fun chatViewModel(
         chatRepository: RecordingChatRepository = RecordingChatRepository(),
         modelRepositories: Map<AiProvider, AiModelsRepository> = emptyMap(),
@@ -684,6 +749,7 @@ class ChatViewModelTest {
         ragRerankerFactory: ((String) -> RagReranker)? = null,
         initialMessages: List<ChatMessage> = emptyList(),
         initialAttachment: PromptAttachment? = null,
+        initialProjectPath: String = "",
     ): ChatViewModel =
         ChatViewModel(
             interactor = ChatInteractor(
@@ -699,6 +765,7 @@ class ChatViewModelTest {
             ),
             coroutineScope = CoroutineScope(Dispatchers.Unconfined),
             initialMessages = initialMessages,
+            initialProjectPath = initialProjectPath,
             initialAttachment = initialAttachment,
             ragQueryInteractor = ragQueryInteractor,
             ragRerankerFactory = { modelDirectory: String ->

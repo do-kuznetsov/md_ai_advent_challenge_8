@@ -496,7 +496,7 @@ class DeepSeekChatRepository(
         }
 
         return DeepSeekCompletionResult(
-            content = "Ошибка MCP tools: достигнут лимит вызовов tools за один запрос.",
+            content = "Превышено количество MCP вызовов в рамках одного взаимодействия.",
             isError = true,
         )
     }
@@ -774,7 +774,7 @@ private val ToolArgumentsJson = Json {
     explicitNulls = false
 }
 
-private const val MaxToolCallRounds = 4
+private const val MaxToolCallRounds = 15
 private const val ChatCompletionsUrl = "https://api.deepseek.com/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L
 private const val RequestTimeoutMillis = 180_000L
