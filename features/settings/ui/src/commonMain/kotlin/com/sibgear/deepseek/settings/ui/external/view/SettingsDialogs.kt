@@ -30,8 +30,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -464,12 +471,10 @@ private fun McpHeadersBlock(
                         placeholder = { Text("Header name") },
                     )
 
-                    OutlinedTextField(
+                    McpHeaderValueField(
                         value = header.value,
                         onValueChange = { onHeaderValueChanged(index, it) },
                         modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        placeholder = { Text("Header value") },
                     )
 
                     IconButton(onClick = { onHeaderRemoved(index) }) {
@@ -569,6 +574,30 @@ private fun McpServerInputBlock(
             )
         }
     }
+}
+
+@Composable
+private fun McpHeaderValueField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.onFocusChanged { focusState ->
+            isFocused = focusState.isFocused
+        },
+        singleLine = true,
+        placeholder = { Text("Header value") },
+        visualTransformation = if (isFocused) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation(mask = '*')
+        },
+    )
 }
 
 @Composable
