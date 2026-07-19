@@ -24,6 +24,11 @@ sealed interface SettingsEvent {
     data object McpServerFormClosed : SettingsEvent
     data class McpServerDraftNameChanged(val text: String) : SettingsEvent
     data class McpServerDraftUrlChanged(val text: String) : SettingsEvent
+    data object McpServerHeaderAdded : SettingsEvent
+    data class McpServerHeaderRemoved(val index: Int) : SettingsEvent
+    data class McpServerHeaderNameChanged(val index: Int, val text: String) : SettingsEvent
+    data class McpServerHeaderValueChanged(val index: Int, val text: String) : SettingsEvent
+    data class McpServerSkipTlsVerificationChanged(val isEnabled: Boolean) : SettingsEvent
     data object McpServerSaved : SettingsEvent
     data object McpServerUninstalled : SettingsEvent
     data class McpServerEnabledChanged(val id: Int, val isEnabled: Boolean) : SettingsEvent

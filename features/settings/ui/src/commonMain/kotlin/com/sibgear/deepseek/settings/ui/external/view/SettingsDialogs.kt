@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -28,11 +30,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.sibgear.deepseek.settings.ui.external.model.McpHeaderUiModel
 import com.sibgear.deepseek.settings.ui.external.model.McpServerDraft
 import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
@@ -106,6 +116,13 @@ fun SettingsDialogs(
             onDismissRequest = { onEvent(SettingsEvent.McpServerFormClosed) },
             onNameChanged = { onEvent(SettingsEvent.McpServerDraftNameChanged(it)) },
             onUrlChanged = { onEvent(SettingsEvent.McpServerDraftUrlChanged(it)) },
+            onHeaderAdded = { onEvent(SettingsEvent.McpServerHeaderAdded) },
+            onHeaderRemoved = { onEvent(SettingsEvent.McpServerHeaderRemoved(it)) },
+            onHeaderNameChanged = { index, text -> onEvent(SettingsEvent.McpServerHeaderNameChanged(index, text)) },
+            onHeaderValueChanged = { index, text -> onEvent(SettingsEvent.McpServerHeaderValueChanged(index, text)) },
+            onSkipTlsVerificationChanged = {
+                onEvent(SettingsEvent.McpServerSkipTlsVerificationChanged(it))
+            },
             onSaveClicked = { onEvent(SettingsEvent.McpServerSaved) },
             onUninstallClicked = { onEvent(SettingsEvent.McpServerUninstalled) },
         )
@@ -295,6 +312,11 @@ private fun McpServerFormDialog(
     onDismissRequest: () -> Unit,
     onNameChanged: (String) -> Unit,
     onUrlChanged: (String) -> Unit,
+    onHeaderAdded: () -> Unit,
+    onHeaderRemoved: (Int) -> Unit,
+    onHeaderNameChanged: (Int, String) -> Unit,
+    onHeaderValueChanged: (Int, String) -> Unit,
+    onSkipTlsVerificationChanged: (Boolean) -> Unit,
     onSaveClicked: () -> Unit,
     onUninstallClicked: () -> Unit,
 ) {
@@ -306,7 +328,9 @@ private fun McpServerFormDialog(
             shadowElevation = 8.dp,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 McpServerFormHeader(
@@ -338,6 +362,19 @@ private fun McpServerFormDialog(
                     onValueChange = onUrlChanged,
                 )
 
+                McpHeadersBlock(
+                    headers = draft.headers,
+                    onHeaderAdded = onHeaderAdded,
+                    onHeaderRemoved = onHeaderRemoved,
+                    onHeaderNameChanged = onHeaderNameChanged,
+                    onHeaderValueChanged = onHeaderValueChanged,
+                )
+
+                McpTlsBlock(
+                    skipTlsVerification = draft.skipTlsVerification,
+                    onSkipTlsVerificationChanged = onSkipTlsVerificationChanged,
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -355,6 +392,114 @@ private fun McpServerFormDialog(
                         Text("Сохранить")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun McpTlsBlock(
+    skipTlsVerification: Boolean,
+    onSkipTlsVerificationChanged: (Boolean) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 2.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "Skip TLS verification",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "Использовать только для доверенных корпоративных MCP endpoints.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            Switch(
+                checked = skipTlsVerification,
+                onCheckedChange = onSkipTlsVerificationChanged,
+            )
+        }
+    }
+}
+
+@Composable
+private fun McpHeadersBlock(
+    headers: List<McpHeaderUiModel>,
+    onHeaderAdded: () -> Unit,
+    onHeaderRemoved: (Int) -> Unit,
+    onHeaderNameChanged: (Int, String) -> Unit,
+    onHeaderValueChanged: (Int, String) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 2.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Headers",
+                style = MaterialTheme.typography.titleSmall,
+            )
+
+            headers.forEachIndexed { index, header ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = header.name,
+                        onValueChange = { onHeaderNameChanged(index, it) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        placeholder = { Text("Header name") },
+                    )
+
+                    McpHeaderValueField(
+                        value = header.value,
+                        onValueChange = { onHeaderValueChanged(index, it) },
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    IconButton(onClick = { onHeaderRemoved(index) }) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Удалить header",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = onHeaderAdded,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "Add header",
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
         }
     }
@@ -429,6 +574,30 @@ private fun McpServerInputBlock(
             )
         }
     }
+}
+
+@Composable
+private fun McpHeaderValueField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.onFocusChanged { focusState ->
+            isFocused = focusState.isFocused
+        },
+        singleLine = true,
+        placeholder = { Text("Header value") },
+        visualTransformation = if (isFocused) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation(mask = '*')
+        },
+    )
 }
 
 @Composable

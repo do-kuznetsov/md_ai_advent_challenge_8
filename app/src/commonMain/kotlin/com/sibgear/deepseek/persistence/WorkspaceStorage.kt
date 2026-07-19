@@ -9,6 +9,7 @@ import com.sibgear.deepseek.chat.domain.model.TaskStageSession
 import com.sibgear.deepseek.chat.domain.model.TaskState
 import com.sibgear.deepseek.chat.domain.model.TaskTransitionProposal
 import com.sibgear.deepseek.chat.workspace.ui.external.model.ChatStorageType
+import com.sibgear.deepseek.settings.ui.external.model.McpHeaderUiModel
 import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.sanitizedMcpServers
 import java.io.File
@@ -260,6 +261,14 @@ private data class McpServerDto(
     val name: String = "",
     val url: String = "",
     val enabled: Boolean = true,
+    val headers: List<McpHeaderDto> = emptyList(),
+    val skipTlsVerification: Boolean = false,
+)
+
+@Serializable
+private data class McpHeaderDto(
+    val name: String = "",
+    val value: String = "",
 )
 
 @Serializable
@@ -329,6 +338,13 @@ private fun McpServerUiModel.toDto(): McpServerDto =
         name = name,
         url = url,
         enabled = isEnabled,
+        headers = headers.map { header ->
+            McpHeaderDto(
+                name = header.name,
+                value = header.value,
+            )
+        },
+        skipTlsVerification = skipTlsVerification,
     )
 
 private fun McpServerDto.toDomain(): McpServerUiModel? =
@@ -337,6 +353,13 @@ private fun McpServerDto.toDomain(): McpServerUiModel? =
         name = name,
         url = url,
         isEnabled = enabled,
+        headers = headers.map { header ->
+            McpHeaderUiModel(
+                name = header.name,
+                value = header.value,
+            )
+        },
+        skipTlsVerification = skipTlsVerification,
     ).takeIf { it.id > 0 && it.name.isNotBlank() && it.url.isNotBlank() }
 
 private fun TaskSessionSnapshot.toDto(): TaskSessionSnapshotDto =

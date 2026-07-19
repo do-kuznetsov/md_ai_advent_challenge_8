@@ -9,6 +9,7 @@ import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionMes
 import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRole
 import com.sibgear.deepseek.settings.ui.external.model.InvariantsChatMessage
 import com.sibgear.deepseek.settings.ui.external.model.InvariantsChatRole
+import com.sibgear.deepseek.settings.ui.external.model.McpHeaderUiModel
 import com.sibgear.deepseek.settings.ui.external.model.McpServerDraft
 import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
@@ -82,6 +83,15 @@ class SettingsViewModel(
             }
             is SettingsEvent.McpServerDraftUrlChanged -> {
                 state = state.copy(mcpServerDraft = state.mcpServerDraft.copy(url = event.text))
+            }
+            SettingsEvent.McpServerHeaderAdded -> addMcpServerHeader()
+            is SettingsEvent.McpServerHeaderRemoved -> removeMcpServerHeader(event.index)
+            is SettingsEvent.McpServerHeaderNameChanged -> updateMcpServerHeaderName(event.index, event.text)
+            is SettingsEvent.McpServerHeaderValueChanged -> updateMcpServerHeaderValue(event.index, event.text)
+            is SettingsEvent.McpServerSkipTlsVerificationChanged -> {
+                state = state.copy(
+                    mcpServerDraft = state.mcpServerDraft.copy(skipTlsVerification = event.isEnabled),
+                )
             }
             SettingsEvent.McpServerSaved -> saveMcpServer()
             SettingsEvent.McpServerUninstalled -> uninstallMcpServer()
@@ -360,6 +370,8 @@ class SettingsViewModel(
                 id = server.id,
                 name = server.name,
                 url = server.url,
+                headers = server.headers,
+                skipTlsVerification = server.skipTlsVerification,
             ),
         )
     }
@@ -385,6 +397,8 @@ class SettingsViewModel(
                     name = draft.name.trim(),
                     url = draft.url.trim(),
                     isEnabled = true,
+                    headers = draft.sanitizedHeaders,
+                    skipTlsVerification = draft.skipTlsVerification,
                 ),
             )
             state = state.copy(
@@ -399,6 +413,8 @@ class SettingsViewModel(
                         server.copy(
                             name = draft.name.trim(),
                             url = draft.url.trim(),
+                            headers = draft.sanitizedHeaders,
+                            skipTlsVerification = draft.skipTlsVerification,
                         )
                     } else {
                         server
@@ -438,6 +454,51 @@ class SettingsViewModel(
         val safeServers = servers.sanitizedMcpServers()
         state = state.copy(mcpServers = safeServers)
         onMcpServersChanged(safeServers)
+    }
+
+    private fun addMcpServerHeader() {
+        state = state.copy(
+            mcpServerDraft = state.mcpServerDraft.copy(
+                headers = state.mcpServerDraft.headers + McpHeaderUiModel(name = "", value = ""),
+            ),
+        )
+    }
+
+    private fun removeMcpServerHeader(index: Int) {
+        val headers = state.mcpServerDraft.headers
+        if (index !in headers.indices) {
+            return
+        }
+        state = state.copy(
+            mcpServerDraft = state.mcpServerDraft.copy(
+                headers = headers.filterIndexed { headerIndex, _ -> headerIndex != index },
+            ),
+        )
+    }
+
+    private fun updateMcpServerHeaderName(index: Int, text: String) {
+        updateMcpServerHeader(index) { header -> header.copy(name = text) }
+    }
+
+    private fun updateMcpServerHeaderValue(index: Int, text: String) {
+        updateMcpServerHeader(index) { header -> header.copy(value = text) }
+    }
+
+    private fun updateMcpServerHeader(
+        index: Int,
+        transform: (McpHeaderUiModel) -> McpHeaderUiModel,
+    ) {
+        val headers = state.mcpServerDraft.headers
+        if (index !in headers.indices) {
+            return
+        }
+        state = state.copy(
+            mcpServerDraft = state.mcpServerDraft.copy(
+                headers = headers.mapIndexed { headerIndex, header ->
+                    if (headerIndex == index) transform(header) else header
+                },
+            ),
+        )
     }
 
     private companion object {

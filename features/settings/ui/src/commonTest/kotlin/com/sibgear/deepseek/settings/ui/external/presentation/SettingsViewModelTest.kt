@@ -3,6 +3,7 @@ package com.sibgear.deepseek.settings.ui.external.presentation
 import com.sibgear.deepseek.assistant.memory.domain.model.AssistantInvariant
 import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCategory
 import com.sibgear.deepseek.assistant.memory.domain.model.InvariantCollectionRole
+import com.sibgear.deepseek.settings.ui.external.model.McpHeaderUiModel
 import com.sibgear.deepseek.settings.ui.external.model.McpServerUiModel
 import com.sibgear.deepseek.settings.ui.external.model.SettingsEvent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -202,6 +203,52 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun mcpServerDraftAddsEditsRemovesAndSavesHeaders() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.onEvent(SettingsEvent.McpServerAddClicked)
+        viewModel.onEvent(SettingsEvent.McpServerDraftNameChanged("atlassian"))
+        viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("https://mcp.example.com/mcp"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderAdded)
+        viewModel.onEvent(SettingsEvent.McpServerHeaderNameChanged(0, "X-Atlassian-Jira-Url"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderValueChanged(0, "https://jira.example.com"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderAdded)
+        viewModel.onEvent(SettingsEvent.McpServerHeaderNameChanged(1, "remove-me"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderValueChanged(1, "value"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderRemoved(1))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+
+        assertEquals(
+            listOf(McpHeaderUiModel("X-Atlassian-Jira-Url", "https://jira.example.com")),
+            viewModel.state.mcpServers.single().headers,
+        )
+    }
+
+    @Test
+    fun mcpServerSaveDropsBlankHeadersAndKeepsLastDuplicate() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.onEvent(SettingsEvent.McpServerAddClicked)
+        viewModel.onEvent(SettingsEvent.McpServerDraftNameChanged("atlassian"))
+        viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("https://mcp.example.com/mcp"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderAdded)
+        viewModel.onEvent(SettingsEvent.McpServerHeaderNameChanged(0, " X-Token "))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderValueChanged(0, " old "))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderAdded)
+        viewModel.onEvent(SettingsEvent.McpServerHeaderNameChanged(1, "X-Blank"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderValueChanged(1, ""))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderAdded)
+        viewModel.onEvent(SettingsEvent.McpServerHeaderNameChanged(2, "X-Token"))
+        viewModel.onEvent(SettingsEvent.McpServerHeaderValueChanged(2, "new"))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+
+        assertEquals(
+            listOf(McpHeaderUiModel("X-Token", "new")),
+            viewModel.state.mcpServers.single().headers,
+        )
+    }
+
+    @Test
     fun mcpServerSaveIgnoresBlankNameOrUrl() = runTest {
         val viewModel = SettingsViewModel(coroutineScope = this)
 
@@ -232,6 +279,7 @@ class SettingsViewModelTest {
         assertEquals(false, viewModel.state.isMcpServersDialogOpen)
         assertEquals(true, viewModel.state.isMcpServerFormDialogOpen)
         assertEquals("ai_challenge", viewModel.state.mcpServerDraft.name)
+        assertEquals(emptyList(), viewModel.state.mcpServerDraft.headers)
 
         viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("https://mcp.example.com/mcp"))
         viewModel.onEvent(SettingsEvent.McpServerSaved)
@@ -239,6 +287,47 @@ class SettingsViewModelTest {
         assertEquals(true, viewModel.state.isMcpServersDialogOpen)
         assertEquals(false, viewModel.state.isMcpServerFormDialogOpen)
         assertEquals("https://mcp.example.com/mcp", viewModel.state.mcpServers.single().url)
+    }
+
+    @Test
+    fun mcpServerEditRestoresAndUpdatesHeaders() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.addMcpServerForTest(
+            name = "atlassian",
+            url = "https://mcp.example.com/mcp",
+            headers = listOf(McpHeaderUiModel("X-Token", "old")),
+        )
+        val serverId = viewModel.state.mcpServers.single().id
+
+        viewModel.onEvent(SettingsEvent.McpServerEditClicked(serverId))
+        assertEquals(listOf(McpHeaderUiModel("X-Token", "old")), viewModel.state.mcpServerDraft.headers)
+
+        viewModel.onEvent(SettingsEvent.McpServerHeaderValueChanged(0, "new"))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+
+        assertEquals(listOf(McpHeaderUiModel("X-Token", "new")), viewModel.state.mcpServers.single().headers)
+    }
+
+    @Test
+    fun mcpServerSavesAndRestoresSkipTlsVerification() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.onEvent(SettingsEvent.McpServerAddClicked)
+        viewModel.onEvent(SettingsEvent.McpServerDraftNameChanged("corp"))
+        viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("https://corp.example.com/mcp"))
+        viewModel.onEvent(SettingsEvent.McpServerSkipTlsVerificationChanged(true))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+        val serverId = viewModel.state.mcpServers.single().id
+
+        assertEquals(true, viewModel.state.mcpServers.single().skipTlsVerification)
+
+        viewModel.onEvent(SettingsEvent.McpServerEditClicked(serverId))
+        assertEquals(true, viewModel.state.mcpServerDraft.skipTlsVerification)
+
+        viewModel.onEvent(SettingsEvent.McpServerSkipTlsVerificationChanged(false))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+        assertEquals(false, viewModel.state.mcpServers.single().skipTlsVerification)
     }
 
     @Test
@@ -304,10 +393,16 @@ class SettingsViewModelTest {
     private fun SettingsViewModel.addMcpServerForTest(
         name: String,
         url: String,
+        headers: List<McpHeaderUiModel> = emptyList(),
     ) {
         onEvent(SettingsEvent.McpServerAddClicked)
         onEvent(SettingsEvent.McpServerDraftNameChanged(name))
         onEvent(SettingsEvent.McpServerDraftUrlChanged(url))
+        headers.forEachIndexed { index, header ->
+            onEvent(SettingsEvent.McpServerHeaderAdded)
+            onEvent(SettingsEvent.McpServerHeaderNameChanged(index, header.name))
+            onEvent(SettingsEvent.McpServerHeaderValueChanged(index, header.value))
+        }
         onEvent(SettingsEvent.McpServerSaved)
     }
 }
