@@ -77,6 +77,87 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun helpWithoutQuestionAddsLocalHintAndDoesNotCallModel() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val embeddingProvider = RecordingEmbeddingProvider()
+        val ragRepository = RecordingRagSearchRepository()
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            ragQueryInteractor = RagQueryInteractor(embeddingProvider, ragRepository),
+        )
+
+        viewModel.onEvent(ChatEvent.PromptChanged("/help"))
+        viewModel.sendPrompt()
+
+        assertEquals(0, chatRepository.callCount)
+        assertEquals(0, embeddingProvider.callCount)
+        assertEquals(0, ragRepository.callCount)
+        assertEquals("", viewModel.state.prompt)
+        assertEquals(ChatRole.User, viewModel.state.messages.first().role)
+        assertEquals("/help", viewModel.state.messages.first().content)
+        assertEquals(ChatRole.Assistant, viewModel.state.messages.last().role)
+        assertTrue(viewModel.state.messages.last().content.contains("Команда /help"))
+    }
+
+    @Test
+    fun helpQuestionForcesRagAndSendsQuestionWithoutCommandPrefix() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val embeddingProvider = RecordingEmbeddingProvider()
+        val ragRepository = RecordingRagSearchRepository(
+            results = listOf(
+                RagSearchResult(
+                    source = "README.md",
+                    title = "README.md",
+                    section = "Структура",
+                    chunkId = "readme-structure",
+                    text = "Проект состоит из app, rag и mcp модулей.",
+                    score = 0.9f,
+                ),
+            ),
+        )
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            ragQueryInteractor = RagQueryInteractor(embeddingProvider, ragRepository),
+            ragRerankerFactory = { RecordingReranker() },
+        )
+
+        viewModel.onEvent(ChatEvent.PromptChanged("/help какие модули есть в проекте?"))
+        viewModel.sendPrompt()
+
+        val request = requireNotNull(chatRepository.lastRequest)
+        assertEquals("какие модули есть в проекте?", request.prompt)
+        assertEquals("какие модули есть в проекте?", embeddingProvider.lastText)
+        assertEquals(1, ragRepository.callCount)
+        assertEquals("../rag/indexed", ragRepository.lastIndexDirectory)
+        assertEquals(ChunkingStrategyType.Structure, ragRepository.lastStrategy)
+        assertTrue(request.systemPrompt.contains("Ты ассистент разработчика"))
+        assertTrue(request.systemPrompt.contains("get_git_branch"))
+        assertTrue(request.systemPrompt.contains("[RAG_CONTEXT]"))
+        assertTrue(request.systemPrompt.contains("chunk_id: readme-structure"))
+        assertEquals("какие модули есть в проекте?", viewModel.state.messages.last { it.role == ChatRole.User }.content)
+    }
+
+    @Test
+    fun regularPromptDoesNotEnableDeveloperHelpMode() = runTest {
+        val chatRepository = RecordingChatRepository()
+        val embeddingProvider = RecordingEmbeddingProvider()
+        val ragRepository = RecordingRagSearchRepository()
+        val viewModel = chatViewModel(
+            chatRepository = chatRepository,
+            ragQueryInteractor = RagQueryInteractor(embeddingProvider, ragRepository),
+        )
+
+        viewModel.onEvent(ChatEvent.PromptChanged("какие модули есть в проекте?"))
+        viewModel.sendPrompt()
+
+        val request = requireNotNull(chatRepository.lastRequest)
+        assertEquals("какие модули есть в проекте?", request.prompt)
+        assertEquals(0, embeddingProvider.callCount)
+        assertEquals(0, ragRepository.callCount)
+        assertFalse(request.systemPrompt.contains("Ты ассистент разработчика"))
+    }
+
+    @Test
     fun initialAttachmentIsSentWithFirstPromptAndThenCleared() = runTest {
         val chatRepository = RecordingChatRepository()
         val attachment = PromptAttachment(

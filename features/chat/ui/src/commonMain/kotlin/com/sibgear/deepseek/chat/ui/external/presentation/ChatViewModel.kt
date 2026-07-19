@@ -422,17 +422,34 @@ class ChatViewModel(
         if (prompt.isEmpty() || state.isLoading) {
             return
         }
+        val developerHelpCommand = prompt.toDeveloperHelpCommand()
+        if (developerHelpCommand is DeveloperHelpCommand.Empty) {
+            state = state.copy(
+                prompt = "",
+                attachmentError = null,
+                messages = state.messages + listOf(
+                    ChatMessage(role = ChatRole.User, content = prompt),
+                    ChatMessage(role = ChatRole.Assistant, content = DeveloperHelpMessage),
+                ),
+            ).withContextPresentation()
+            onCompleted?.invoke(state)
+            return
+        }
 
-        val ragSettings = state.toRagRequestSettings()
+        val effectivePrompt = (developerHelpCommand as? DeveloperHelpCommand.Question)?.question ?: prompt
+        val isDeveloperHelp = developerHelpCommand != null
+        val ragSettings = state.toRagRequestSettings().let { settings ->
+            if (isDeveloperHelp) settings.copy(isEnabled = true) else settings
+        }
         val request = buildRequest(
-            prompt = prompt,
-            runtimeSystemPrompt = runtimeSystemPrompt,
+            prompt = effectivePrompt,
+            runtimeSystemPrompt = runtimeSystemPrompt.withDeveloperHelpSystemPrompt(isDeveloperHelp),
             attachment = state.attachment,
             persistUserMessage = true,
         )
         val userMessage = ChatMessage(
             role = ChatRole.User,
-            content = prompt,
+            content = effectivePrompt,
             apiContent = request.userApiContent(),
             attachment = request.attachment?.let {
                 ChatMessageAttachment(
@@ -442,7 +459,7 @@ class ChatViewModel(
             },
         )
 
-        val taskMemoryState = taskMemoryStateUpdater.update(state.taskMemoryState, prompt)
+        val taskMemoryState = taskMemoryStateUpdater.update(state.taskMemoryState, effectivePrompt)
 
         coroutineScope.launch {
             state = state.copy(
@@ -457,7 +474,7 @@ class ChatViewModel(
             try {
                 val messagesBeforeRagCount = state.messages.size
                 val preparedRequest = try {
-                    request.withRagContextIfNeeded(prompt, ragSettings, taskMemoryState)
+                    request.withRagContextIfNeeded(effectivePrompt, ragSettings, taskMemoryState)
                 } catch (exception: CancellationException) {
                     throw exception
                 } catch (exception: RagNoRelevantContextException) {
@@ -1010,6 +1027,41 @@ private class RagNoRelevantContextException(
     val ragStatus: String,
 ) : IllegalStateException(RagNoRelevantContextMessage)
 
+private sealed interface DeveloperHelpCommand {
+    data object Empty : DeveloperHelpCommand
+    data class Question(val question: String) : DeveloperHelpCommand
+}
+
+private fun String.toDeveloperHelpCommand(): DeveloperHelpCommand? {
+    if (this == DeveloperHelpCommandPrefix) {
+        return DeveloperHelpCommand.Empty
+    }
+    if (!startsWith(DeveloperHelpCommandPrefix) || getOrNull(DeveloperHelpCommandPrefix.length)?.isWhitespace() != true) {
+        return null
+    }
+
+    val question = drop(DeveloperHelpCommandPrefix.length).trim()
+    return if (question.isBlank()) {
+        DeveloperHelpCommand.Empty
+    } else {
+        DeveloperHelpCommand.Question(question)
+    }
+}
+
+private fun String?.withDeveloperHelpSystemPrompt(isDeveloperHelp: Boolean): String? {
+    if (!isDeveloperHelp) {
+        return this
+    }
+    val base = this?.trim().orEmpty()
+    return buildString {
+        if (base.isNotEmpty()) {
+            appendLine(base)
+            appendLine()
+        }
+        append(DeveloperHelpSystemPrompt)
+    }
+}
+
 private const val RagNoRelevantContextMessage =
     "Не знаю. В индексе не найден достаточно релевантный контекст. " +
         "Уточните вопрос или снизьте порог релевантности."
@@ -1018,6 +1070,23 @@ private const val DefaultRagRerankerModelDirectory = "../rag/models/bge-reranker
 private const val DefaultRagTopKBeforeFilter = 15
 private const val DefaultRagTopKAfterFilter = 5
 private const val DefaultRagSimilarityThreshold = 0.7f
+private const val DeveloperHelpCommandPrefix = "/help"
+private const val DeveloperHelpMessage = """
+Команда /help отвечает на вопросы о проекте через RAG и MCP.
+
+Примеры:
+- /help какие модули есть в проекте?
+- /help какая текущая git-ветка?
+- /help где описана структура проекта?
+"""
+
+private const val DeveloperHelpSystemPrompt = """
+Ты ассистент разработчика, подключенный к проекту.
+Отвечай на вопросы о структуре, документации, API, данных и текущем git-состоянии проекта.
+Для фактов из документации используй только найденный RAG-контекст и всегда возвращай источники.
+Если вопрос касается текущей git-ветки или состояния рабочей копии, используй доступные MCP tools get_git_branch и get_git_status.
+Если RAG-контекст или MCP tools не содержат ответа, скажи "Не знаю. Уточните вопрос." и не выдумывай детали.
+"""
 
 private fun String.normalizedDecimalInput(): String {
     var hasSeparator = false

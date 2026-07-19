@@ -33,6 +33,7 @@ include(
     ":features:chat-workspace:ui",
     ":features:settings:ui",
     ":mcp:server:visitors",
+    ":mcp:server:project",
     ":mcp:server:weather",
     ":mcp:server:worldtime",
     ":mcp:client",

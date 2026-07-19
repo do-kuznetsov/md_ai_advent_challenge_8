@@ -10,6 +10,7 @@
 mcp
   server
     visitors  # посещения, отчеты и SQLite-хранилище
+    project   # git-контекст подключенного проекта
     weather   # текущая погода через Open-Meteo
     worldtime # текущее локальное время города через Open-Meteo Geocoding
 ```
@@ -30,6 +31,22 @@ http://127.0.0.1:3000/mcp
 - `schedule_visit_report`
 
 Visitors-сервер хранит SQLite-БД `visitor-log.db` рядом с jar/runtime-директорией. Путь к БД можно передать вторым аргументом, а `:memory:` включает in-memory режим.
+
+Запустить project MCP-сервер:
+```bash
+./gradlew :mcp:server:project:jvmRun --args="--port 3003 --project /absolute/project/path"
+```
+
+По умолчанию он доступен по адресу:
+```text
+http://127.0.0.1:3003/mcp
+```
+
+Доступные tools:
+- `get_git_branch`
+- `get_git_status`
+
+Project-сервер подключает ассистента к git-контексту проекта. Путь к проекту передается через `--project`; порт можно изменить через `--port`.
 
 Запустить weather MCP-сервер:
 ```bash
@@ -61,6 +78,7 @@ Worldtime-сервер принимает город в русском или а
 
 Если агенту нужны посещения, погода и текущее время, добавьте в настройках приложения нужные MCP серверы:
 - visitors: `http://127.0.0.1:3000/mcp`
+- project: `http://127.0.0.1:3003/mcp`
 - weather: `http://127.0.0.1:3001/mcp`
 - worldtime: `http://127.0.0.1:3002/mcp`
 
@@ -68,6 +86,26 @@ Worldtime-сервер принимает город в русском или а
 ```bash
 ./gradlew -q :mcp:client:jvmRun --args='http://127.0.0.1:3000/mcp'
 ```
+
+## День 31: ассистент разработчика
+
+Для проверки сценария:
+
+1. Убедитесь, что RAG-индекс уже подготовлен в `rag/indexed`.
+2. Запустите project MCP-сервер:
+
+```bash
+./gradlew :mcp:server:project:jvmRun --args="--port 3003 --project /absolute/project/path"
+```
+
+3. В настройках приложения добавьте MCP сервер `project` с URL `http://127.0.0.1:3003/mcp`.
+4. В чате задайте вопрос через команду:
+
+```text
+/help какие модули есть в проекте?
+```
+
+Команда `/help вопрос` принудительно использует RAG-контекст и доступные MCP tools. `/help` без вопроса показывает короткую подсказку с примерами.
 
 ## RAG CLI
 
