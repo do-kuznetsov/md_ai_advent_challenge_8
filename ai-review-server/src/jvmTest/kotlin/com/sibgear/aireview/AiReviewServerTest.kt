@@ -239,6 +239,41 @@ class AiReviewServerTest {
     }
 
     @Test
+    fun githubCreateReviewRequestIncludesCommentEvent() = runTest {
+        var requestBody = ""
+        val client = io.ktor.client.HttpClient(
+            MockEngine { request ->
+                requestBody = request.body.requestText()
+                respond(
+                    content = "{}",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            },
+        ) {
+            install(ContentNegotiation) {
+                json(AiReviewJson)
+            }
+        }
+        val github = KtorGitHubClient(
+            config = testConfig().copy(githubApiBaseUrl = "https://api.github.test"),
+            client = client,
+        )
+
+        github.createPullRequestReview(
+            GitHubCreateReviewRequest(
+                ownerRepo = OwnerRepo("owner", "repo"),
+                pullNumber = 7,
+                commitId = "abc123",
+                body = "review body",
+                comments = emptyList(),
+            ),
+        )
+
+        assertTrue(requestBody.contains(""""event":"COMMENT""""))
+    }
+
+    @Test
     fun deepSeekAssistantRequestsJsonOutputAndParsesFencedJson() = runTest {
         var requestBody = ""
         val client = io.ktor.client.HttpClient(

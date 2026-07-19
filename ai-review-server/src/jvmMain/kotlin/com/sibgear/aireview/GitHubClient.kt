@@ -123,7 +123,7 @@ private data class CreateReviewDto(
     @SerialName("commit_id")
     val commitId: String,
     val body: String,
-    val event: String = "COMMENT",
+    val event: String,
     val comments: List<CreateReviewCommentDto>? = null,
 )
 
@@ -139,6 +139,7 @@ private fun GitHubCreateReviewRequest.toDto(): CreateReviewDto =
     CreateReviewDto(
         commitId = commitId,
         body = body,
+        event = "COMMENT",
         comments = comments.map {
             CreateReviewCommentDto(
                 path = it.path,
