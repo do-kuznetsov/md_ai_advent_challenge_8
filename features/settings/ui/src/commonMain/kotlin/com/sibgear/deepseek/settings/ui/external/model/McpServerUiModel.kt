@@ -11,6 +11,7 @@ data class McpServerUiModel(
     val url: String,
     val isEnabled: Boolean = true,
     val headers: List<McpHeaderUiModel> = emptyList(),
+    val skipTlsVerification: Boolean = false,
 )
 
 data class McpServerDraft(
@@ -18,6 +19,7 @@ data class McpServerDraft(
     val name: String = "",
     val url: String = "",
     val headers: List<McpHeaderUiModel> = emptyList(),
+    val skipTlsVerification: Boolean = false,
 ) {
     val isNew: Boolean
         get() = id == null

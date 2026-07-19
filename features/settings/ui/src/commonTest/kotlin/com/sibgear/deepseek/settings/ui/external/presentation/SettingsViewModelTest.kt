@@ -310,6 +310,27 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun mcpServerSavesAndRestoresSkipTlsVerification() = runTest {
+        val viewModel = SettingsViewModel(coroutineScope = this)
+
+        viewModel.onEvent(SettingsEvent.McpServerAddClicked)
+        viewModel.onEvent(SettingsEvent.McpServerDraftNameChanged("corp"))
+        viewModel.onEvent(SettingsEvent.McpServerDraftUrlChanged("https://corp.example.com/mcp"))
+        viewModel.onEvent(SettingsEvent.McpServerSkipTlsVerificationChanged(true))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+        val serverId = viewModel.state.mcpServers.single().id
+
+        assertEquals(true, viewModel.state.mcpServers.single().skipTlsVerification)
+
+        viewModel.onEvent(SettingsEvent.McpServerEditClicked(serverId))
+        assertEquals(true, viewModel.state.mcpServerDraft.skipTlsVerification)
+
+        viewModel.onEvent(SettingsEvent.McpServerSkipTlsVerificationChanged(false))
+        viewModel.onEvent(SettingsEvent.McpServerSaved)
+        assertEquals(false, viewModel.state.mcpServers.single().skipTlsVerification)
+    }
+
+    @Test
     fun mcpServerUninstallRemovesSelectedServer() = runTest {
         val viewModel = SettingsViewModel(coroutineScope = this)
 

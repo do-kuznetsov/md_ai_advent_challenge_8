@@ -43,6 +43,8 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.security.cert.X509Certificate
+import javax.net.ssl.X509TrustManager
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -52,6 +54,7 @@ data class McpServerConnection(
     val url: String,
     val isEnabled: Boolean,
     val headers: Map<String, String> = emptyMap(),
+    val skipTlsVerification: Boolean = false,
 )
 
 class McpAiToolProvider internal constructor(
@@ -167,15 +170,17 @@ internal interface McpRemoteSessionFactory {
 }
 
 internal class DefaultMcpRemoteSessionFactory(
-    private val httpClient: HttpClient = HttpClient(CIO) {
-        install(SSE)
-    },
+    private val httpClient: HttpClient? = null,
     private val primaryDiscoveryTimeout: Duration = 5.seconds,
 ) : McpRemoteSessionFactory {
+    private val secureHttpClient: HttpClient by lazy { mcpHttpClient(skipTlsVerification = false) }
+    private val insecureHttpClient: HttpClient by lazy { mcpHttpClient(skipTlsVerification = true) }
+
     override suspend fun connect(server: McpServerConnection): McpRemoteSession {
+        val selectedHttpClient = httpClient ?: httpClientFor(server)
         val primaryError = runCatching {
             withTimeout(primaryDiscoveryTimeout) {
-                connectWithSdk(server)
+                connectWithSdk(server, selectedHttpClient)
             }
         }.fold(
             onSuccess = { return it },
@@ -187,7 +192,7 @@ internal class DefaultMcpRemoteSessionFactory(
 
         return runCatching {
             PostOnlyJsonRpcMcpClient(
-                httpClient = httpClient,
+                httpClient = selectedHttpClient,
                 url = server.url,
                 customHeaders = server.headers,
             ).connect()
@@ -201,7 +206,17 @@ internal class DefaultMcpRemoteSessionFactory(
         }
     }
 
-    private suspend fun connectWithSdk(server: McpServerConnection): McpRemoteSession {
+    private fun httpClientFor(server: McpServerConnection): HttpClient =
+        if (server.skipTlsVerification) {
+            insecureHttpClient
+        } else {
+            secureHttpClient
+        }
+
+    private suspend fun connectWithSdk(
+        server: McpServerConnection,
+        httpClient: HttpClient,
+    ): McpRemoteSession {
         val client = Client(
             clientInfo = Implementation(
                 name = "deepseek-client",
@@ -228,6 +243,26 @@ internal class DefaultMcpRemoteSessionFactory(
             throw throwable
         }
     }
+}
+
+private fun mcpHttpClient(skipTlsVerification: Boolean): HttpClient =
+    HttpClient(CIO) {
+        if (skipTlsVerification) {
+            engine {
+                https {
+                    trustManager = TrustAllCertificatesManager
+                }
+            }
+        }
+        install(SSE)
+    }
+
+private object TrustAllCertificatesManager : X509TrustManager {
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+
+    override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }
 
 internal interface McpRemoteSession {

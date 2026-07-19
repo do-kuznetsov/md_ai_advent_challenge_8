@@ -255,6 +255,30 @@ class McpAiToolProviderTest {
         assertEquals(listOf("primary__lookup"), catalog.tools.map { it.name })
     }
 
+    @Test
+    fun skipTlsVerificationFlagIsPassedToSessionFactory() = runTest {
+        val session = FakeRemoteSession(tools = emptyList())
+        val factory = FakeRemoteSessionFactory(session)
+        val provider = McpAiToolProvider(
+            loadServers = {
+                listOf(
+                    McpServerConnection(
+                        id = 1,
+                        name = "corp",
+                        url = "https://corp.example.com/mcp",
+                        isEnabled = true,
+                        skipTlsVerification = true,
+                    ),
+                )
+            },
+            sessionFactory = factory,
+        )
+
+        provider.availableTools()
+
+        assertEquals(true, factory.lastServer?.skipTlsVerification)
+    }
+
     private fun providerWithMockResponses(
         responseBody: (method: String, requestIndex: Int) -> String,
     ): McpAiToolProvider {
@@ -356,9 +380,12 @@ private class FakeRemoteSessionFactory(
 ) : McpRemoteSessionFactory {
     var connectCount = 0
         private set
+    var lastServer: McpServerConnection? = null
+        private set
 
     override suspend fun connect(server: McpServerConnection): McpRemoteSession {
         connectCount += 1
+        lastServer = server
         return session
     }
 }

@@ -88,6 +88,11 @@ class SettingsViewModel(
             is SettingsEvent.McpServerHeaderRemoved -> removeMcpServerHeader(event.index)
             is SettingsEvent.McpServerHeaderNameChanged -> updateMcpServerHeaderName(event.index, event.text)
             is SettingsEvent.McpServerHeaderValueChanged -> updateMcpServerHeaderValue(event.index, event.text)
+            is SettingsEvent.McpServerSkipTlsVerificationChanged -> {
+                state = state.copy(
+                    mcpServerDraft = state.mcpServerDraft.copy(skipTlsVerification = event.isEnabled),
+                )
+            }
             SettingsEvent.McpServerSaved -> saveMcpServer()
             SettingsEvent.McpServerUninstalled -> uninstallMcpServer()
             is SettingsEvent.McpServerEnabledChanged -> updateMcpServerEnabled(event.id, event.isEnabled)
@@ -366,6 +371,7 @@ class SettingsViewModel(
                 name = server.name,
                 url = server.url,
                 headers = server.headers,
+                skipTlsVerification = server.skipTlsVerification,
             ),
         )
     }
@@ -392,6 +398,7 @@ class SettingsViewModel(
                     url = draft.url.trim(),
                     isEnabled = true,
                     headers = draft.sanitizedHeaders,
+                    skipTlsVerification = draft.skipTlsVerification,
                 ),
             )
             state = state.copy(
@@ -407,6 +414,7 @@ class SettingsViewModel(
                             name = draft.name.trim(),
                             url = draft.url.trim(),
                             headers = draft.sanitizedHeaders,
+                            skipTlsVerification = draft.skipTlsVerification,
                         )
                     } else {
                         server

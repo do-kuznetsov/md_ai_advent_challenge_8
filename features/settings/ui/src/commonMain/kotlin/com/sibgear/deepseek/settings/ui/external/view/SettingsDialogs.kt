@@ -113,6 +113,9 @@ fun SettingsDialogs(
             onHeaderRemoved = { onEvent(SettingsEvent.McpServerHeaderRemoved(it)) },
             onHeaderNameChanged = { index, text -> onEvent(SettingsEvent.McpServerHeaderNameChanged(index, text)) },
             onHeaderValueChanged = { index, text -> onEvent(SettingsEvent.McpServerHeaderValueChanged(index, text)) },
+            onSkipTlsVerificationChanged = {
+                onEvent(SettingsEvent.McpServerSkipTlsVerificationChanged(it))
+            },
             onSaveClicked = { onEvent(SettingsEvent.McpServerSaved) },
             onUninstallClicked = { onEvent(SettingsEvent.McpServerUninstalled) },
         )
@@ -306,6 +309,7 @@ private fun McpServerFormDialog(
     onHeaderRemoved: (Int) -> Unit,
     onHeaderNameChanged: (Int, String) -> Unit,
     onHeaderValueChanged: (Int, String) -> Unit,
+    onSkipTlsVerificationChanged: (Boolean) -> Unit,
     onSaveClicked: () -> Unit,
     onUninstallClicked: () -> Unit,
 ) {
@@ -359,6 +363,11 @@ private fun McpServerFormDialog(
                     onHeaderValueChanged = onHeaderValueChanged,
                 )
 
+                McpTlsBlock(
+                    skipTlsVerification = draft.skipTlsVerification,
+                    onSkipTlsVerificationChanged = onSkipTlsVerificationChanged,
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -377,6 +386,44 @@ private fun McpServerFormDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun McpTlsBlock(
+    skipTlsVerification: Boolean,
+    onSkipTlsVerificationChanged: (Boolean) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 2.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "Skip TLS verification",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "Использовать только для доверенных корпоративных MCP endpoints.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            Switch(
+                checked = skipTlsVerification,
+                onCheckedChange = onSkipTlsVerificationChanged,
+            )
         }
     }
 }

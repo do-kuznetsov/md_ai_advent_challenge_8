@@ -262,6 +262,7 @@ private data class McpServerDto(
     val url: String = "",
     val enabled: Boolean = true,
     val headers: List<McpHeaderDto> = emptyList(),
+    val skipTlsVerification: Boolean = false,
 )
 
 @Serializable
@@ -343,6 +344,7 @@ private fun McpServerUiModel.toDto(): McpServerDto =
                 value = header.value,
             )
         },
+        skipTlsVerification = skipTlsVerification,
     )
 
 private fun McpServerDto.toDomain(): McpServerUiModel? =
@@ -357,6 +359,7 @@ private fun McpServerDto.toDomain(): McpServerUiModel? =
                 value = header.value,
             )
         },
+        skipTlsVerification = skipTlsVerification,
     ).takeIf { it.id > 0 && it.name.isNotBlank() && it.url.isNotBlank() }
 
 private fun TaskSessionSnapshot.toDto(): TaskSessionSnapshotDto =

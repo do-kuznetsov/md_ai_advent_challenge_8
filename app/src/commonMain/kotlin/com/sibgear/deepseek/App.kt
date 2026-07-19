@@ -126,6 +126,7 @@ fun App() {
                         url = server.url,
                         isEnabled = server.isEnabled,
                         headers = server.headers.associate { header -> header.name to header.value },
+                        skipTlsVerification = server.skipTlsVerification,
                     )
                 }
             },

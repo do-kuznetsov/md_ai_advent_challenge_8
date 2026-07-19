@@ -214,6 +214,7 @@ class WorkspaceStorageTest {
                             value = "jira-token",
                         ),
                     ),
+                    skipTlsVerification = true,
                 ),
             ),
         )
@@ -241,6 +242,7 @@ class WorkspaceStorageTest {
                             value = "jira-token",
                         ),
                     ),
+                    skipTlsVerification = true,
                 ),
             ),
             WorkspaceStorage(baseDir).loadMcpServers(),
@@ -275,6 +277,7 @@ class WorkspaceStorageTest {
                     url = "https://mcp.example.com/mcp",
                     isEnabled = true,
                     headers = emptyList(),
+                    skipTlsVerification = false,
                 ),
             ),
             WorkspaceStorage(baseDir).loadMcpServers(),
