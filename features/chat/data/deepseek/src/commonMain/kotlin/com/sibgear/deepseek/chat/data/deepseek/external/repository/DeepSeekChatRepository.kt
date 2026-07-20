@@ -27,9 +27,13 @@ import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekApiChatMes
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekAssistantMessage
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatCompletionResponse
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekResponseUsage
+import com.sibgear.deepseek.chat.data.deepseek.internal.repository.DeepSeekStreamAccumulator
+import com.sibgear.deepseek.chat.data.deepseek.internal.repository.DeepSeekStreamResult
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolCallBudget
+import com.sibgear.deepseek.chat.domain.model.AiToolDefinition
 import com.sibgear.deepseek.chat.domain.model.AiToolInvocation
 import com.sibgear.deepseek.chat.domain.model.AiToolSession
 import com.sibgear.deepseek.chat.domain.model.BranchSelection
@@ -38,7 +42,10 @@ import com.sibgear.deepseek.chat.domain.model.ChatInvariant
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.StickyFact
-import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
+import com.sibgear.deepseek.chat.domain.model.StreamingChatDeltaType
+import com.sibgear.deepseek.chat.domain.model.ToolCallLimitExceededMessage
+import com.sibgear.deepseek.chat.domain.repository.StreamingAiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
@@ -49,11 +56,14 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.readLine
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -64,7 +74,7 @@ class DeepSeekChatRepository(
     private val historyInteractor: ChatHistoryInteractor,
     private val memoryInteractor: AssistantMemoryInteractor? = null,
     private val contextPlanner: ChatContextPlanner = ChatContextPlanner(),
-) : AiChatRepository {
+) : StreamingAiChatRepository {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -87,6 +97,16 @@ class DeepSeekChatRepository(
             sendBranchingMessage(request)
         } else {
             sendLinearMessage(request)
+        }
+
+    override suspend fun sendStreamingMessage(
+        request: AiRequestData,
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): AgentResponse =
+        if (request.contextManagementSettings.mode == ContextManagementMode.Branching) {
+            sendBranchingMessage(request)
+        } else {
+            sendStreamingLinearMessage(request, onDelta)
         }
 
     private suspend fun sendLinearMessage(request: AiRequestData): AgentResponse {
@@ -114,9 +134,81 @@ class DeepSeekChatRepository(
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
                     content = completion.content,
+                    thinkingContent = completion.reasoningContent.takeIf { it.isNotBlank() },
                     responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
                     usage = completion.usage,
                 )
+            )
+            val updatedStickyFacts = if (!completion.isError &&
+                request.persistUserMessage &&
+                request.contextManagementSettings.mode == ContextManagementMode.StickyFacts
+            ) {
+                updateStickyFacts(request, messagesWithAssistant, stickyFacts)
+            } else {
+                stickyFacts
+            }
+
+            AgentResponse(
+                messages = if (completion.isError) {
+                    messagesWithAssistant
+                } else {
+                    maybeCompressContext(request, messagesWithAssistant)
+                }.toChatMessages(),
+                stickyFacts = updatedStickyFacts,
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = messagesWithAssistant.lastOrNull { it.branchId != null }?.branchId,
+            )
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Throwable) {
+            val messages = historyInteractor.add(
+                request.toDeepSeekAssistantHistoryMessage(
+                    content = "Ошибка запроса: ${exception.message ?: exception::class.simpleName ?: "unknown"}",
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                ),
+            )
+            AgentResponse(
+                messages = messages.toChatMessages(),
+                stickyFacts = historyInteractor.getFacts().toStickyFacts(),
+                branches = historyInteractor.getBranches().toChatBranches(),
+                activeBranchId = messages.lastOrNull { it.branchId != null }?.branchId,
+            )
+        }
+    }
+
+    private suspend fun sendStreamingLinearMessage(
+        request: AiRequestData,
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): AgentResponse {
+        val preparedMemory = prepareMemory(request)
+        if (request.persistUserMessage) {
+            historyInteractor.add(request.toDeepSeekUserHistoryMessage(memory = preparedMemory.metadata))
+        }
+        val startedAt = TimeSource.Monotonic.markNow()
+
+        return try {
+            val historyMessages = historyInteractor.getMessages()
+            val stickyFacts = historyInteractor.getFacts().toStickyFacts()
+            val completion = sendStreamingCompletion(
+                request = request,
+                contextMessages = contextPlanner.plan(
+                    messages = historyMessages.toContextMessages(),
+                    contextManagementSettings = request.contextManagementSettings,
+                    stickyFacts = stickyFacts,
+                ).apiMessages,
+                includeSystemPrompt = true,
+                effectiveSystemPrompt = preparedMemory.effectiveSystemPrompt,
+                servicePrompt = request.prompt.takeUnless { request.persistUserMessage },
+                allowTools = true,
+                onDelta = onDelta,
+            )
+            val messagesWithAssistant = historyInteractor.add(
+                request.toDeepSeekAssistantHistoryMessage(
+                    content = completion.content,
+                    thinkingContent = completion.reasoningContent.takeIf { it.isNotBlank() },
+                    responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
+                    usage = completion.usage,
+                ),
             )
             val updatedStickyFacts = if (!completion.isError &&
                 request.persistUserMessage &&
@@ -192,6 +284,7 @@ class DeepSeekChatRepository(
             val messagesWithAssistant = historyInteractor.add(
                 request.toDeepSeekAssistantHistoryMessage(
                     content = completion.content,
+                    thinkingContent = completion.reasoningContent.takeIf { it.isNotBlank() },
                     responseTimeMs = startedAt.elapsedNow().inWholeMilliseconds,
                     usage = completion.usage,
                     branchId = branchSelection.activeBranchId,
@@ -431,6 +524,38 @@ class DeepSeekChatRepository(
         }
     }
 
+    private suspend fun sendStreamingCompletion(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String? = null,
+        effectiveSystemPrompt: String? = null,
+        allowTools: Boolean = false,
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): DeepSeekCompletionResult {
+        val toolProvider = request.toolProvider.takeIf { allowTools }
+            ?: return sendSingleStreamingCompletion(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                onDelta = onDelta,
+            )
+
+        return toolProvider.withSession { session ->
+            sendStreamingCompletionWithTools(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                toolSession = session,
+                onDelta = onDelta,
+            )
+        }
+    }
+
     private suspend fun sendCompletionWithTools(
         request: AiRequestData,
         contextMessages: List<ContextMessage>,
@@ -452,7 +577,8 @@ class DeepSeekChatRepository(
         }
 
         var extraMessages = emptyList<DeepSeekApiChatMessage>()
-        repeat(MaxToolCallRounds) {
+        val budget = AiToolCallBudget()
+        while (true) {
             val result = sendSingleCompletionRaw(
                 request = request,
                 contextMessages = contextMessages,
@@ -475,16 +601,24 @@ class DeepSeekChatRepository(
                     usage = result.usage,
                 )
             }
+            if (!budget.canExecuteBatch(toolCalls.size)) {
+                return DeepSeekCompletionResult(
+                    content = ToolCallLimitExceededMessage,
+                    isError = true,
+                )
+            }
 
             extraMessages = extraMessages + DeepSeekApiChatMessage(
                 role = "assistant",
                 content = message?.content,
                 toolCalls = toolCalls,
             ) + toolCalls.map { toolCall ->
-                val toolResult = toolSession.callTool(
-                    AiToolInvocation(
-                        name = toolCall.function.name,
-                        arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                val toolResult = budget.recordResult(
+                    toolSession.callTool(
+                        AiToolInvocation(
+                            name = toolCall.function.name,
+                            arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                        ),
                     ),
                 )
                 DeepSeekApiChatMessage(
@@ -494,11 +628,114 @@ class DeepSeekChatRepository(
                 )
             }
         }
+    }
 
-        return DeepSeekCompletionResult(
-            content = "Превышено количество MCP вызовов в рамках одного взаимодействия.",
-            isError = true,
-        )
+    private suspend fun sendStreamingCompletionWithTools(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String?,
+        effectiveSystemPrompt: String?,
+        toolSession: AiToolSession,
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): DeepSeekCompletionResult {
+        val catalog = toolSession.catalog
+        if (catalog.tools.isEmpty()) {
+            return sendSingleStreamingCompletion(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                toolWarnings = catalog.warnings,
+                onDelta = onDelta,
+            )
+        }
+
+        var extraMessages = emptyList<DeepSeekApiChatMessage>()
+        val displayedContent = StringBuilder()
+        val displayedReasoningContent = StringBuilder()
+        var lastUsage: DeepSeekResponseUsage? = null
+        val budget = AiToolCallBudget()
+
+        while (true) {
+            val result = sendSingleStreamingCompletionRaw(
+                request = request,
+                contextMessages = contextMessages,
+                includeSystemPrompt = includeSystemPrompt,
+                servicePrompt = servicePrompt,
+                effectiveSystemPrompt = effectiveSystemPrompt,
+                tools = catalog.tools,
+                toolWarnings = catalog.warnings,
+                extraMessages = extraMessages,
+                onDelta = { delta ->
+                    when (delta.type) {
+                        StreamingChatDeltaType.Thinking -> displayedReasoningContent.append(delta.text)
+                        StreamingChatDeltaType.Content -> displayedContent.append(delta.text)
+                    }
+                    onDelta(delta)
+                },
+            )
+            result.errorResult?.let { return it }
+
+            val stream = result.stream ?: return DeepSeekCompletionResult(
+                content = "DeepSeek вернул пустой ответ.",
+                reasoningContent = displayedReasoningContent.toString(),
+                isError = true,
+            )
+            lastUsage = stream.usage ?: lastUsage
+            if (stream.hasStreamError) {
+                return DeepSeekCompletionResult(
+                    content = displayedContent.toString().takeIf { it.isNotBlank() }
+                        ?: stream.content,
+                    reasoningContent = displayedReasoningContent.toString()
+                        .takeIf { it.isNotBlank() }
+                        ?: stream.reasoningContent,
+                    usage = stream.usage,
+                    isError = true,
+                )
+            }
+            if (stream.toolCalls.isEmpty()) {
+                return DeepSeekCompletionResult(
+                    content = displayedContent.toString().takeIf { it.isNotBlank() }
+                        ?: stream.content.takeIf { it.isNotBlank() }
+                        ?: "DeepSeek вернул пустой ответ.",
+                    reasoningContent = displayedReasoningContent.toString()
+                        .takeIf { it.isNotBlank() }
+                        ?: stream.reasoningContent,
+                    usage = stream.usage ?: lastUsage,
+                )
+            }
+            if (!budget.canExecuteBatch(stream.toolCalls.size)) {
+                return DeepSeekCompletionResult(
+                    content = ToolCallLimitExceededMessage,
+                    reasoningContent = displayedReasoningContent.toString(),
+                    usage = lastUsage,
+                    isError = true,
+                )
+            }
+
+            extraMessages = extraMessages + DeepSeekApiChatMessage(
+                role = "assistant",
+                content = stream.content.takeIf { it.isNotBlank() },
+                reasoningContent = stream.reasoningContent.takeIf { it.isNotBlank() },
+                toolCalls = stream.toolCalls,
+            ) + stream.toolCalls.map { toolCall ->
+                val toolResult = budget.recordResult(
+                    toolSession.callTool(
+                        AiToolInvocation(
+                            name = toolCall.function.name,
+                            arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                        ),
+                    ),
+                )
+                DeepSeekApiChatMessage(
+                    role = "tool",
+                    content = toolResult.content,
+                    toolCallId = toolCall.id,
+                )
+            }
+        }
     }
 
     private suspend fun sendSingleCompletion(
@@ -523,7 +760,42 @@ class DeepSeekChatRepository(
 
         return DeepSeekCompletionResult(
             content = content,
+            reasoningContent = result.message?.reasoningContent.orEmpty(),
             usage = result.usage,
+        )
+    }
+
+    private suspend fun sendSingleStreamingCompletion(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String? = null,
+        effectiveSystemPrompt: String? = null,
+        toolWarnings: List<String> = emptyList(),
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): DeepSeekCompletionResult {
+        val result = sendSingleStreamingCompletionRaw(
+            request = request,
+            contextMessages = contextMessages,
+            includeSystemPrompt = includeSystemPrompt,
+            servicePrompt = servicePrompt,
+            effectiveSystemPrompt = effectiveSystemPrompt,
+            toolWarnings = toolWarnings,
+            onDelta = onDelta,
+        )
+        result.errorResult?.let { return it }
+        val stream = result.stream ?: return DeepSeekCompletionResult(
+            content = "DeepSeek вернул пустой ответ.",
+            isError = true,
+        )
+        val content = stream.content.takeIf { it.isNotBlank() }
+            ?: "DeepSeek вернул пустой ответ."
+
+        return DeepSeekCompletionResult(
+            content = content,
+            reasoningContent = stream.reasoningContent,
+            usage = stream.usage,
+            isError = stream.hasStreamError,
         )
     }
 
@@ -533,7 +805,7 @@ class DeepSeekChatRepository(
         includeSystemPrompt: Boolean,
         servicePrompt: String? = null,
         effectiveSystemPrompt: String? = null,
-        tools: List<com.sibgear.deepseek.chat.domain.model.AiToolDefinition> = emptyList(),
+        tools: List<AiToolDefinition> = emptyList(),
         toolWarnings: List<String> = emptyList(),
         extraMessages: List<DeepSeekApiChatMessage> = emptyList(),
     ): DeepSeekRawCompletionResult {
@@ -572,6 +844,68 @@ class DeepSeekChatRepository(
             message = completion.choices.firstOrNull()?.message,
             usage = completion.usage,
         )
+    }
+
+    private suspend fun sendSingleStreamingCompletionRaw(
+        request: AiRequestData,
+        contextMessages: List<ContextMessage>,
+        includeSystemPrompt: Boolean,
+        servicePrompt: String? = null,
+        effectiveSystemPrompt: String? = null,
+        tools: List<AiToolDefinition> = emptyList(),
+        toolWarnings: List<String> = emptyList(),
+        extraMessages: List<DeepSeekApiChatMessage> = emptyList(),
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): DeepSeekStreamingRawCompletionResult {
+        val response = client.post(ChatCompletionsUrl) {
+            bearerAuth(apiKey)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            header(HttpHeaders.Accept, "text/event-stream")
+            setBody(
+                request.toDeepSeekChatCompletionRequest(
+                    contextMessages = contextMessages,
+                    includeSystemPrompt = includeSystemPrompt,
+                    servicePrompt = servicePrompt,
+                    effectiveSystemPrompt = effectiveSystemPrompt,
+                    tools = tools,
+                    toolWarnings = toolWarnings,
+                    extraMessages = extraMessages,
+                    stream = true,
+                ),
+            )
+        }
+
+        if (!response.status.isSuccess()) {
+            val body = response.bodyAsText()
+            return DeepSeekStreamingRawCompletionResult(
+                errorResult = DeepSeekCompletionResult(
+                    content = formatApiError(
+                        statusCode = response.status.value,
+                        statusDescription = response.status.description,
+                        body = body,
+                    ),
+                    isError = true,
+                ),
+            )
+        }
+
+        return DeepSeekStreamingRawCompletionResult(
+            stream = response.readDeepSeekStream(onDelta),
+        )
+    }
+
+    private suspend fun HttpResponse.readDeepSeekStream(
+        onDelta: suspend (StreamingChatDelta) -> Unit,
+    ): DeepSeekStreamResult {
+        val accumulator = DeepSeekStreamAccumulator(json, onDelta)
+        val channel = bodyAsChannel()
+
+        while (true) {
+            val line = channel.readLine() ?: break
+            accumulator.acceptLine(line)
+        }
+
+        return accumulator.result()
     }
 
     private suspend fun prepareMemory(request: AiRequestData): PreparedMemory {
@@ -727,6 +1061,7 @@ class DeepSeekChatRepository(
 
 private data class DeepSeekCompletionResult(
     val content: String,
+    val reasoningContent: String = "",
     val usage: DeepSeekResponseUsage? = null,
     val isError: Boolean = false,
 )
@@ -734,6 +1069,11 @@ private data class DeepSeekCompletionResult(
 private data class DeepSeekRawCompletionResult(
     val message: DeepSeekAssistantMessage? = null,
     val usage: DeepSeekResponseUsage? = null,
+    val errorResult: DeepSeekCompletionResult? = null,
+)
+
+private data class DeepSeekStreamingRawCompletionResult(
+    val stream: DeepSeekStreamResult? = null,
     val errorResult: DeepSeekCompletionResult? = null,
 )
 
@@ -774,7 +1114,6 @@ private val ToolArgumentsJson = Json {
     explicitNulls = false
 }
 
-private const val MaxToolCallRounds = 15
 private const val ChatCompletionsUrl = "https://api.deepseek.com/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L
 private const val RequestTimeoutMillis = 180_000L

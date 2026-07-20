@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class AiToolProviderTest {
@@ -100,6 +101,50 @@ class AiToolProviderTest {
 
         assertEquals("unknown_tool", result.name)
         assertEquals(true, result.isError)
+    }
+
+    @Test
+    fun toolBudgetWarnsWhenThreeOrFewerCallsRemain() {
+        val budget = AiToolCallBudget()
+
+        repeat(26) {
+            val result = budget.recordResult(AiToolResult(name = "tool", content = "ok"))
+            assertFalse(result.content.contains("[MCP_TOOL_BUDGET_WARNING]"))
+        }
+
+        assertEquals(4, budget.remainingCalls)
+        assertTrue(budget.canExecuteBatch(4))
+        assertFalse(budget.canExecuteBatch(5))
+
+        val remainingThree = budget.recordResult(AiToolResult(name = "tool", content = "ok"))
+        val remainingTwo = budget.recordResult(AiToolResult(name = "tool", content = "ok"))
+        val remainingOne = budget.recordResult(AiToolResult(name = "tool", content = "ok"))
+
+        assertEquals(true, remainingThree.content.contains("Осталось 3 из 30"))
+        assertEquals(true, remainingTwo.content.contains("Осталось 2 из 30"))
+        assertEquals(true, remainingOne.content.contains("Осталось 1 из 30"))
+    }
+
+    @Test
+    fun toolBudgetRejectsBatchBeyondRemainingCalls() {
+        val budget = AiToolCallBudget(maxCalls = 3)
+
+        budget.recordResult(AiToolResult(name = "tool", content = "first"))
+        budget.recordResult(AiToolResult(name = "tool", content = "second"))
+
+        assertEquals(1, budget.remainingCalls)
+        assertTrue(budget.canExecuteBatch(1))
+        assertFalse(budget.canExecuteBatch(2))
+    }
+
+    @Test
+    fun mcpToolPolicyIsAddedOnlyForToolRequests() {
+        val withoutTools = "system".withMcpToolPolicy(hasTools = false, warnings = emptyList())
+        val withTools = "system".withMcpToolPolicy(hasTools = true, warnings = emptyList())
+
+        assertFalse(withoutTools.contains("[MCP_TOOL_POLICY]"))
+        assertTrue(withTools.contains("[MCP_TOOL_POLICY]"))
+        assertTrue(withTools.contains("максимум 30 MCP/file tool вызовов"))
     }
 }
 

@@ -29,6 +29,7 @@ sealed interface ChatEvent {
     data class RepeatPenaltyChanged(val repeatPenalty: String) : ChatEvent
     data class StopWordChanged(val stopWord: String) : ChatEvent
     data class ApiControlChanged(val isEnabled: Boolean) : ChatEvent
+    data class DeepSeekThinkingChanged(val isEnabled: Boolean) : ChatEvent
     data class RagEnabledChanged(val isEnabled: Boolean) : ChatEvent
     data class RagStrategySelected(val strategy: ChunkingStrategyType) : ChatEvent
     data class RagIndexDirectoryChanged(val indexDirectory: String) : ChatEvent

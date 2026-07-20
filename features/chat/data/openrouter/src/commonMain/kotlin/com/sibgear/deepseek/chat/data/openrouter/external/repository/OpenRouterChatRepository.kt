@@ -37,6 +37,7 @@ import com.sibgear.deepseek.chat.data.openrouter.internal.repository.isTimeoutEr
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolCallBudget
 import com.sibgear.deepseek.chat.domain.model.AiToolInvocation
 import com.sibgear.deepseek.chat.domain.model.AiToolSession
 import com.sibgear.deepseek.chat.domain.model.BranchSelection
@@ -45,6 +46,7 @@ import com.sibgear.deepseek.chat.domain.model.ChatInvariant
 import com.sibgear.deepseek.chat.domain.model.ContextManagementMode
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.StickyFact
+import com.sibgear.deepseek.chat.domain.model.ToolCallLimitExceededMessage
 import com.sibgear.deepseek.chat.domain.repository.AiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessage
@@ -504,7 +506,8 @@ class OpenRouterChatRepository(
         }
 
         var extraMessages = emptyList<OpenRouterApiChatMessage>()
-        repeat(MaxToolCallRounds) {
+        val budget = AiToolCallBudget()
+        while (true) {
             val result = sendNonStreamingCompletionRaw(
                 request = request,
                 contextMessages = contextMessages,
@@ -527,16 +530,24 @@ class OpenRouterChatRepository(
                     usage = result.usage,
                 )
             }
+            if (!budget.canExecuteBatch(toolCalls.size)) {
+                return OpenRouterCompletionResult(
+                    content = ToolCallLimitExceededMessage,
+                    isError = true,
+                )
+            }
 
             extraMessages = extraMessages + OpenRouterApiChatMessage(
                 role = "assistant",
                 content = message?.content,
                 toolCalls = toolCalls,
             ) + toolCalls.map { toolCall ->
-                val toolResult = toolSession.callTool(
-                    AiToolInvocation(
-                        name = toolCall.function.name,
-                        arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                val toolResult = budget.recordResult(
+                    toolSession.callTool(
+                        AiToolInvocation(
+                            name = toolCall.function.name,
+                            arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                        ),
                     ),
                 )
                 OpenRouterApiChatMessage(
@@ -546,11 +557,6 @@ class OpenRouterChatRepository(
                 )
             }
         }
-
-        return OpenRouterCompletionResult(
-            content = "Превышено количество MCP вызовов в рамках одного взаимодействия.",
-            isError = true,
-        )
     }
 
     private suspend fun sendNonStreamingCompletion(
@@ -900,7 +906,6 @@ private val ToolArgumentsJson = Json {
     explicitNulls = false
 }
 
-private const val MaxToolCallRounds = 15
 private const val ChatCompletionsUrl = "https://openrouter.ai/api/v1/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L
 private const val DefaultRequestTimeoutMillis = 180_000L

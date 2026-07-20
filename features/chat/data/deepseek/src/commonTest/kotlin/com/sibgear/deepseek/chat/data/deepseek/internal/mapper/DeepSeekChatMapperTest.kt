@@ -182,6 +182,86 @@ class DeepSeekChatMapperTest {
     }
 
     @Test
+    fun requestBodyCanEnableStreamingAndThinkingMode() {
+        val request = AiRequestData(
+            systemPrompt = "",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(isDeepSeekThinkingEnabled = true),
+        )
+
+        val apiRequest = request.toDeepSeekChatCompletionRequest(
+            contextMessages = listOf(HistoryMessage(role = HistoryRole.User, content = "visible prompt"))
+                .toContextMessages(),
+            stream = true,
+        )
+
+        assertEquals(true, apiRequest.stream)
+        assertEquals(true, apiRequest.streamOptions?.includeUsage)
+        assertEquals("enabled", apiRequest.thinking?.type)
+    }
+
+    @Test
+    fun requestBodyKeepsThinkingDisabledByDefault() {
+        val request = AiRequestData(
+            systemPrompt = "",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(),
+        )
+
+        val apiRequest = request.toDeepSeekChatCompletionRequest(
+            contextMessages = listOf(HistoryMessage(role = HistoryRole.User, content = "visible prompt"))
+                .toContextMessages(),
+        )
+
+        assertEquals(false, apiRequest.stream)
+        assertEquals(null, apiRequest.streamOptions)
+        assertEquals("disabled", apiRequest.thinking?.type)
+    }
+
+    @Test
+    fun requestBodyAddsMcpToolPolicyOnlyWhenToolsAreSent() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(),
+        )
+
+        val withoutTools = request.toDeepSeekChatCompletionRequest(contextMessages = emptyList())
+        val withTools = request.toDeepSeekChatCompletionRequest(
+            contextMessages = emptyList(),
+            tools = listOf(testToolDefinition()),
+        )
+
+        assertEquals(false, withoutTools.messages.first().content.orEmpty().contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, withTools.messages.first().content.orEmpty().contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, withTools.messages.first().content.orEmpty().contains("максимум 30 MCP/file tool"))
+    }
+
+    @Test
+    fun requestBodyKeepsMcpWarningsWithToolPolicy() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(),
+        )
+
+        val apiRequest = request.toDeepSeekChatCompletionRequest(
+            contextMessages = emptyList(),
+            tools = listOf(testToolDefinition()),
+            toolWarnings = listOf("MCP server unavailable"),
+        )
+
+        val systemPrompt = apiRequest.messages.first().content.orEmpty()
+        assertEquals(true, systemPrompt.contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, systemPrompt.contains("[MCP_WARNINGS]"))
+        assertEquals(true, systemPrompt.contains("- MCP server unavailable"))
+    }
+
+    @Test
     fun requestBodySerializesToolsAndTransientToolMessages() {
         val request = AiRequestData(
             systemPrompt = "system",
@@ -196,6 +276,7 @@ class DeepSeekChatMapperTest {
             extraMessages = listOf(
                 DeepSeekApiChatMessage(
                     role = "assistant",
+                    reasoningContent = "thinking",
                     toolCalls = listOf(
                         DeepSeekToolCall(
                             id = "call_1",
@@ -218,6 +299,7 @@ class DeepSeekChatMapperTest {
         assertEquals("auto", apiRequest.toolChoice)
         assertEquals("ai_challenge__lookup", apiRequest.tools?.single()?.function?.name)
         assertEquals("object", apiRequest.tools?.single()?.function?.parameters?.get("type")?.toString()?.trim('"'))
+        assertEquals("thinking", apiRequest.messages[1].reasoningContent)
         assertEquals("tool", apiRequest.messages.last().role)
         assertEquals("call_1", apiRequest.messages.last().toolCallId)
         assertEquals("tool result", apiRequest.messages.last().content)

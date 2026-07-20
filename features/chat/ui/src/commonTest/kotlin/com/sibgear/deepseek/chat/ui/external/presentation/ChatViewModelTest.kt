@@ -364,6 +364,26 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sendPromptStreamsDeepSeekThinkingAndFinalContent() = runTest {
+        val chatRepository = RecordingChatRepository(
+            streamingDeltas = listOf(
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, "Проверяю "),
+                StreamingChatDelta(StreamingChatDeltaType.Content, "Готово."),
+            ),
+        )
+        val viewModel = chatViewModel(chatRepository = chatRepository)
+        val deepSeekModel = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek)
+
+        viewModel.onEvent(ChatEvent.ModelSelected(deepSeekModel))
+        viewModel.onEvent(ChatEvent.PromptChanged("Сделай ревью"))
+        viewModel.sendPrompt()
+
+        assertEquals(1, chatRepository.streamingCallCount)
+        assertEquals("Готово.", viewModel.state.messages.last().content)
+        assertEquals("Проверяю ", viewModel.state.messages.last().thinkingContent)
+    }
+
+    @Test
     fun sendSyntheticPromptKeepsNonStreamingBehaviorForOllama() = runTest {
         val chatRepository = RecordingChatRepository(
             streamingDeltas = listOf(
@@ -378,6 +398,32 @@ class ChatViewModelTest {
 
         assertEquals(0, chatRepository.streamingCallCount)
         assertEquals(1, chatRepository.callCount)
+    }
+
+    @Test
+    fun sendSyntheticPromptKeepsNonStreamingBehaviorForDeepSeek() = runTest {
+        val chatRepository = RecordingChatRepository(
+            streamingDeltas = listOf(
+                StreamingChatDelta(StreamingChatDeltaType.Thinking, "Не должно стримиться."),
+            ),
+        )
+        val viewModel = chatViewModel(chatRepository = chatRepository)
+        val deepSeekModel = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek)
+
+        viewModel.onEvent(ChatEvent.ModelSelected(deepSeekModel))
+        viewModel.sendSyntheticPrompt("service prompt")
+
+        assertEquals(0, chatRepository.streamingCallCount)
+        assertEquals(1, chatRepository.callCount)
+    }
+
+    @Test
+    fun deepSeekThinkingEventUpdatesApiSettings() {
+        val viewModel = chatViewModel()
+
+        viewModel.onEvent(ChatEvent.DeepSeekThinkingChanged(true))
+
+        assertEquals(true, viewModel.state.apiSettings.isDeepSeekThinkingEnabled)
     }
 
     @Test
@@ -740,6 +786,17 @@ class ChatViewModelTest {
         assertEquals("/tmp/project", target.state.projectPath)
         assertTrue(target.state.isProjectPathReadOnly)
         assertTrue(target.state.isProjectFileToolsEnabled)
+    }
+
+    @Test
+    fun syncRequestSettingsFromCopiesDeepSeekThinking() {
+        val source = chatViewModel()
+        val target = chatViewModel()
+
+        source.onEvent(ChatEvent.DeepSeekThinkingChanged(true))
+        target.syncRequestSettingsFrom(source.state)
+
+        assertEquals(true, target.state.apiSettings.isDeepSeekThinkingEnabled)
     }
 
     private fun chatViewModel(
