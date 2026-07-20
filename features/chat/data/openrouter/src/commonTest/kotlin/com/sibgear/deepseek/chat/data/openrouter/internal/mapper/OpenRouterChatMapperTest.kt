@@ -182,6 +182,47 @@ class OpenRouterChatMapperTest {
     }
 
     @Test
+    fun requestBodyAddsMcpToolPolicyOnlyWhenToolsAreSent() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "openrouter/test", provider = AiProvider.OpenRouter),
+            apiSettings = ApiSettings(),
+        )
+
+        val withoutTools = request.toOpenRouterChatCompletionRequest(contextMessages = emptyList())
+        val withTools = request.toOpenRouterChatCompletionRequest(
+            contextMessages = emptyList(),
+            tools = listOf(testToolDefinition()),
+        )
+
+        assertEquals(false, withoutTools.messages.first().content.orEmpty().contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, withTools.messages.first().content.orEmpty().contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, withTools.messages.first().content.orEmpty().contains("максимум 30 MCP/file tool"))
+    }
+
+    @Test
+    fun requestBodyKeepsMcpWarningsWithToolPolicy() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "openrouter/test", provider = AiProvider.OpenRouter),
+            apiSettings = ApiSettings(),
+        )
+
+        val apiRequest = request.toOpenRouterChatCompletionRequest(
+            contextMessages = emptyList(),
+            tools = listOf(testToolDefinition()),
+            toolWarnings = listOf("MCP server unavailable"),
+        )
+
+        val systemPrompt = apiRequest.messages.first().content.orEmpty()
+        assertEquals(true, systemPrompt.contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, systemPrompt.contains("[MCP_WARNINGS]"))
+        assertEquals(true, systemPrompt.contains("- MCP server unavailable"))
+    }
+
+    @Test
     fun requestBodySerializesToolsAndTransientToolMessages() {
         val request = AiRequestData(
             systemPrompt = "system",

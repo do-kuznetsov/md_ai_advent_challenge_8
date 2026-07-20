@@ -29,6 +29,7 @@ import com.sibgear.deepseek.chat.domain.model.ChatBranch
 import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.model.userApiContent
+import com.sibgear.deepseek.chat.domain.model.withMcpToolPolicy
 import com.sibgear.deepseek.chat.history.domain.model.HistoryBranch
 import com.sibgear.deepseek.chat.history.domain.model.HistoryFact
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMemoryChange
@@ -53,7 +54,7 @@ internal fun AiRequestData.toDeepSeekChatCompletionRequest(
     stream: Boolean = false,
 ): DeepSeekChatCompletionRequest {
     val trimmedSystemPrompt = (effectiveSystemPrompt ?: systemPrompt)
-        .withToolWarnings(toolWarnings)
+        .withMcpToolPolicy(hasTools = tools.isNotEmpty(), warnings = toolWarnings)
         .trim()
     return DeepSeekChatCompletionRequest(
         model = model.id,
@@ -92,23 +93,6 @@ internal fun AiRequestData.toDeepSeekChatCompletionRequest(
         },
         toolChoice = "auto".takeIf { tools.isNotEmpty() },
     )
-}
-
-private fun String.withToolWarnings(warnings: List<String>): String {
-    if (warnings.isEmpty()) {
-        return this
-    }
-    return buildString {
-        append(this@withToolWarnings)
-        if (isNotBlank()) {
-            appendLine()
-            appendLine()
-        }
-        appendLine("[MCP_WARNINGS]")
-        warnings.forEach { warning ->
-            appendLine("- $warning")
-        }
-    }
 }
 
 internal fun AiRequestData.toDeepSeekAssistantHistoryMessage(

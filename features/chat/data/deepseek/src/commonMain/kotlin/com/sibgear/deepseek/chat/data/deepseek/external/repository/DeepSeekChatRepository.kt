@@ -32,6 +32,7 @@ import com.sibgear.deepseek.chat.data.deepseek.internal.repository.DeepSeekStrea
 import com.sibgear.deepseek.chat.domain.interactor.ChatContextPlanner
 import com.sibgear.deepseek.chat.domain.model.AgentResponse
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
+import com.sibgear.deepseek.chat.domain.model.AiToolCallBudget
 import com.sibgear.deepseek.chat.domain.model.AiToolDefinition
 import com.sibgear.deepseek.chat.domain.model.AiToolInvocation
 import com.sibgear.deepseek.chat.domain.model.AiToolSession
@@ -43,6 +44,7 @@ import com.sibgear.deepseek.chat.domain.model.ContextMessage
 import com.sibgear.deepseek.chat.domain.model.StickyFact
 import com.sibgear.deepseek.chat.domain.model.StreamingChatDelta
 import com.sibgear.deepseek.chat.domain.model.StreamingChatDeltaType
+import com.sibgear.deepseek.chat.domain.model.ToolCallLimitExceededMessage
 import com.sibgear.deepseek.chat.domain.repository.StreamingAiChatRepository
 import com.sibgear.deepseek.chat.history.domain.interactor.ChatHistoryInteractor
 import com.sibgear.deepseek.chat.history.domain.model.HistoryMessageMemoryMetadata
@@ -575,7 +577,8 @@ class DeepSeekChatRepository(
         }
 
         var extraMessages = emptyList<DeepSeekApiChatMessage>()
-        repeat(MaxToolCallRounds) {
+        val budget = AiToolCallBudget()
+        while (true) {
             val result = sendSingleCompletionRaw(
                 request = request,
                 contextMessages = contextMessages,
@@ -598,16 +601,24 @@ class DeepSeekChatRepository(
                     usage = result.usage,
                 )
             }
+            if (!budget.canExecuteBatch(toolCalls.size)) {
+                return DeepSeekCompletionResult(
+                    content = ToolCallLimitExceededMessage,
+                    isError = true,
+                )
+            }
 
             extraMessages = extraMessages + DeepSeekApiChatMessage(
                 role = "assistant",
                 content = message?.content,
                 toolCalls = toolCalls,
             ) + toolCalls.map { toolCall ->
-                val toolResult = toolSession.callTool(
-                    AiToolInvocation(
-                        name = toolCall.function.name,
-                        arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                val toolResult = budget.recordResult(
+                    toolSession.callTool(
+                        AiToolInvocation(
+                            name = toolCall.function.name,
+                            arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                        ),
                     ),
                 )
                 DeepSeekApiChatMessage(
@@ -617,11 +628,6 @@ class DeepSeekChatRepository(
                 )
             }
         }
-
-        return DeepSeekCompletionResult(
-            content = "Превышено количество MCP вызовов в рамках одного взаимодействия.",
-            isError = true,
-        )
     }
 
     private suspend fun sendStreamingCompletionWithTools(
@@ -650,8 +656,9 @@ class DeepSeekChatRepository(
         val displayedContent = StringBuilder()
         val displayedReasoningContent = StringBuilder()
         var lastUsage: DeepSeekResponseUsage? = null
+        val budget = AiToolCallBudget()
 
-        repeat(MaxToolCallRounds) {
+        while (true) {
             val result = sendSingleStreamingCompletionRaw(
                 request = request,
                 contextMessages = contextMessages,
@@ -699,6 +706,14 @@ class DeepSeekChatRepository(
                     usage = stream.usage ?: lastUsage,
                 )
             }
+            if (!budget.canExecuteBatch(stream.toolCalls.size)) {
+                return DeepSeekCompletionResult(
+                    content = ToolCallLimitExceededMessage,
+                    reasoningContent = displayedReasoningContent.toString(),
+                    usage = lastUsage,
+                    isError = true,
+                )
+            }
 
             extraMessages = extraMessages + DeepSeekApiChatMessage(
                 role = "assistant",
@@ -706,10 +721,12 @@ class DeepSeekChatRepository(
                 reasoningContent = stream.reasoningContent.takeIf { it.isNotBlank() },
                 toolCalls = stream.toolCalls,
             ) + stream.toolCalls.map { toolCall ->
-                val toolResult = toolSession.callTool(
-                    AiToolInvocation(
-                        name = toolCall.function.name,
-                        arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                val toolResult = budget.recordResult(
+                    toolSession.callTool(
+                        AiToolInvocation(
+                            name = toolCall.function.name,
+                            arguments = toolCall.function.arguments.toJsonObjectOrEmpty(),
+                        ),
                     ),
                 )
                 DeepSeekApiChatMessage(
@@ -719,13 +736,6 @@ class DeepSeekChatRepository(
                 )
             }
         }
-
-        return DeepSeekCompletionResult(
-            content = "Превышено количество MCP вызовов в рамках одного взаимодействия.",
-            reasoningContent = displayedReasoningContent.toString(),
-            usage = lastUsage,
-            isError = true,
-        )
     }
 
     private suspend fun sendSingleCompletion(
@@ -1104,7 +1114,6 @@ private val ToolArgumentsJson = Json {
     explicitNulls = false
 }
 
-private const val MaxToolCallRounds = 15
 private const val ChatCompletionsUrl = "https://api.deepseek.com/chat/completions"
 private const val ConnectTimeoutMillis = 30_000L
 private const val RequestTimeoutMillis = 180_000L

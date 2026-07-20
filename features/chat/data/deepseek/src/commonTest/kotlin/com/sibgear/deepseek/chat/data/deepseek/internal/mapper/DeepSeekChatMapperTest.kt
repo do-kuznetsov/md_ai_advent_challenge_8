@@ -221,6 +221,47 @@ class DeepSeekChatMapperTest {
     }
 
     @Test
+    fun requestBodyAddsMcpToolPolicyOnlyWhenToolsAreSent() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(),
+        )
+
+        val withoutTools = request.toDeepSeekChatCompletionRequest(contextMessages = emptyList())
+        val withTools = request.toDeepSeekChatCompletionRequest(
+            contextMessages = emptyList(),
+            tools = listOf(testToolDefinition()),
+        )
+
+        assertEquals(false, withoutTools.messages.first().content.orEmpty().contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, withTools.messages.first().content.orEmpty().contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, withTools.messages.first().content.orEmpty().contains("максимум 30 MCP/file tool"))
+    }
+
+    @Test
+    fun requestBodyKeepsMcpWarningsWithToolPolicy() {
+        val request = AiRequestData(
+            systemPrompt = "system",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(),
+        )
+
+        val apiRequest = request.toDeepSeekChatCompletionRequest(
+            contextMessages = emptyList(),
+            tools = listOf(testToolDefinition()),
+            toolWarnings = listOf("MCP server unavailable"),
+        )
+
+        val systemPrompt = apiRequest.messages.first().content.orEmpty()
+        assertEquals(true, systemPrompt.contains("[MCP_TOOL_POLICY]"))
+        assertEquals(true, systemPrompt.contains("[MCP_WARNINGS]"))
+        assertEquals(true, systemPrompt.contains("- MCP server unavailable"))
+    }
+
+    @Test
     fun requestBodySerializesToolsAndTransientToolMessages() {
         val request = AiRequestData(
             systemPrompt = "system",
