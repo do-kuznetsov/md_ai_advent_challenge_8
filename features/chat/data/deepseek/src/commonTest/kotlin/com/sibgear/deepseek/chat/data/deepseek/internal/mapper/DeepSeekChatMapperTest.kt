@@ -182,6 +182,45 @@ class DeepSeekChatMapperTest {
     }
 
     @Test
+    fun requestBodyCanEnableStreamingAndThinkingMode() {
+        val request = AiRequestData(
+            systemPrompt = "",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(isDeepSeekThinkingEnabled = true),
+        )
+
+        val apiRequest = request.toDeepSeekChatCompletionRequest(
+            contextMessages = listOf(HistoryMessage(role = HistoryRole.User, content = "visible prompt"))
+                .toContextMessages(),
+            stream = true,
+        )
+
+        assertEquals(true, apiRequest.stream)
+        assertEquals(true, apiRequest.streamOptions?.includeUsage)
+        assertEquals("enabled", apiRequest.thinking?.type)
+    }
+
+    @Test
+    fun requestBodyKeepsThinkingDisabledByDefault() {
+        val request = AiRequestData(
+            systemPrompt = "",
+            prompt = "visible prompt",
+            model = AiModel(id = "deepseek-v4-flash", provider = AiProvider.DeepSeek),
+            apiSettings = ApiSettings(),
+        )
+
+        val apiRequest = request.toDeepSeekChatCompletionRequest(
+            contextMessages = listOf(HistoryMessage(role = HistoryRole.User, content = "visible prompt"))
+                .toContextMessages(),
+        )
+
+        assertEquals(false, apiRequest.stream)
+        assertEquals(null, apiRequest.streamOptions)
+        assertEquals("disabled", apiRequest.thinking?.type)
+    }
+
+    @Test
     fun requestBodySerializesToolsAndTransientToolMessages() {
         val request = AiRequestData(
             systemPrompt = "system",
@@ -196,6 +235,7 @@ class DeepSeekChatMapperTest {
             extraMessages = listOf(
                 DeepSeekApiChatMessage(
                     role = "assistant",
+                    reasoningContent = "thinking",
                     toolCalls = listOf(
                         DeepSeekToolCall(
                             id = "call_1",
@@ -218,6 +258,7 @@ class DeepSeekChatMapperTest {
         assertEquals("auto", apiRequest.toolChoice)
         assertEquals("ai_challenge__lookup", apiRequest.tools?.single()?.function?.name)
         assertEquals("object", apiRequest.tools?.single()?.function?.parameters?.get("type")?.toString()?.trim('"'))
+        assertEquals("thinking", apiRequest.messages[1].reasoningContent)
         assertEquals("tool", apiRequest.messages.last().role)
         assertEquals("call_1", apiRequest.messages.last().toolCallId)
         assertEquals("tool result", apiRequest.messages.last().content)

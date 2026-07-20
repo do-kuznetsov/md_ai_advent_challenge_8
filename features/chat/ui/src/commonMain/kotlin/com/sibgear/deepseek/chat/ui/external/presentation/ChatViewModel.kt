@@ -111,6 +111,14 @@ class ChatViewModel(
                 )
             }
 
+            is ChatEvent.DeepSeekThinkingChanged -> {
+                state = state.copy(
+                    apiSettings = state.apiSettings.copy(
+                        isDeepSeekThinkingEnabled = event.isEnabled,
+                    ),
+                )
+            }
+
             is ChatEvent.RagEnabledChanged -> {
                 state = state.copy(
                     isRagEnabled = event.isEnabled,
@@ -514,7 +522,7 @@ class ChatViewModel(
                 val ragDiagnostics = state.messages
                     .drop(messagesBeforeRagCount)
                     .filter { it.kind == ChatMessageKind.RagDiagnostic }
-                if (preparedRequest.model.provider == AiProvider.Ollama) {
+                if (preparedRequest.shouldStream()) {
                     sendStreamingRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
                 } else {
                     sendRequestAndUpdateState(preparedRequest, onCompleted, ragDiagnostics)
@@ -822,7 +830,7 @@ class ChatViewModel(
         onCompleted: ((ChatViewState) -> Unit)?,
         preservedLocalMessages: List<ChatMessage> = emptyList(),
     ) {
-        val streamingSourceLabel = "Ollama / ${request.model.displayName}"
+        val streamingSourceLabel = "${request.model.provider.name} / ${request.model.displayName}"
         val streamingMessage = ChatMessage(
             role = ChatRole.Assistant,
             content = "",
@@ -905,6 +913,9 @@ class ChatViewModel(
             openRouterModelsStatus = status,
         ).withContextPresentation()
     }
+
+    private fun AiRequestData.shouldStream(): Boolean =
+        model.provider == AiProvider.Ollama || model.provider == AiProvider.DeepSeek
 
     private fun deepSeekFallback(models: List<AiModel>): AiModel =
         models.firstOrNull { it.id == ChatDefaults.DefaultDeepSeekModel.id } ?: ChatDefaults.DefaultDeepSeekModel

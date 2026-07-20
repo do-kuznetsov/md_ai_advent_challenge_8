@@ -169,6 +169,37 @@ internal fun ApiSettingsPanel(
                     enabled = isApiControlEnabled,
                 )
 
+                if (state.selectedModel.provider == AiProvider.DeepSeek) {
+                    HorizontalDivider(modifier = Modifier.fillMaxWidth())
+
+                    ApiSettingsLabel(
+                        text = "DeepSeek options",
+                        color = labelColor,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = state.apiSettings.isDeepSeekThinkingEnabled,
+                            onCheckedChange = { onEvent(ChatEvent.DeepSeekThinkingChanged(it)) },
+                            enabled = isApiControlEnabled,
+                        )
+
+                        ApiSettingsLabel(
+                            text = "thinking mode",
+                            color = labelColor,
+                        )
+                    }
+
+                    ApiSettingsHint(
+                        text = DeepSeekThinkingHint,
+                        color = labelColor,
+                    )
+                }
+
                 if (state.selectedModel.provider == AiProvider.Ollama) {
                     HorizontalDivider(modifier = Modifier.fillMaxWidth())
 
@@ -363,6 +394,8 @@ private const val MaxTokensHint =
     "Максимальное число токенов, которое модель может сгенерировать в ответе. Малое значение может оборвать ответ."
 private const val StopHint =
     "Строка, на которой генерация должна остановиться."
+private const val DeepSeekThinkingHint =
+    "Включает reasoning_content для DeepSeek. В thinking mode часть sampling-параметров API может игнорироваться моделью."
 private const val NumCtxHint =
     "Размер контекстного окна. Чем больше, тем больше входных документов и истории модель может учитывать, но выше расход ресурсов."
 private const val TopPHint =

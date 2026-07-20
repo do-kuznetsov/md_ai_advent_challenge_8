@@ -9,4 +9,5 @@ data class ApiSettings(
     val repeatPenalty: Float = 1.05f,
     val stopWord: String = "",
     val isApiControlEnabled: Boolean = false,
+    val isDeepSeekThinkingEnabled: Boolean = false,
 )

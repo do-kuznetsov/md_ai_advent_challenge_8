@@ -9,6 +9,8 @@ internal data class DeepSeekChatCompletionRequest(
     val model: String,
     val messages: List<DeepSeekApiChatMessage>,
     val stream: Boolean,
+    @SerialName("stream_options")
+    val streamOptions: DeepSeekStreamOptions? = null,
     val thinking: DeepSeekThinking? = null,
     val temperature: Float? = null,
     @SerialName("max_tokens")
@@ -20,9 +22,17 @@ internal data class DeepSeekChatCompletionRequest(
 )
 
 @Serializable
+internal data class DeepSeekStreamOptions(
+    @SerialName("include_usage")
+    val includeUsage: Boolean,
+)
+
+@Serializable
 internal data class DeepSeekApiChatMessage(
     val role: String,
     val content: String? = null,
+    @SerialName("reasoning_content")
+    val reasoningContent: String? = null,
     @SerialName("tool_call_id")
     val toolCallId: String? = null,
     @SerialName("tool_calls")
@@ -61,6 +71,8 @@ internal data class DeepSeekChoice(
 @Serializable
 internal data class DeepSeekAssistantMessage(
     val content: String? = null,
+    @SerialName("reasoning_content")
+    val reasoningContent: String? = null,
     @SerialName("tool_calls")
     val toolCalls: List<DeepSeekToolCall>? = null,
 )

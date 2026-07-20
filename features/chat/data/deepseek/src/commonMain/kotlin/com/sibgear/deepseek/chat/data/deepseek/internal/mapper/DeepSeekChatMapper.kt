@@ -9,6 +9,7 @@ import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatComple
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatTool
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekChatToolFunction
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekResponseUsage
+import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekStreamOptions
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.DeepSeekThinking
 import com.sibgear.deepseek.chat.data.deepseek.internal.model.deepSeekCost
 import com.sibgear.deepseek.chat.domain.model.AiRequestData
@@ -49,6 +50,7 @@ internal fun AiRequestData.toDeepSeekChatCompletionRequest(
     tools: List<AiToolDefinition> = emptyList(),
     toolWarnings: List<String> = emptyList(),
     extraMessages: List<DeepSeekApiChatMessage> = emptyList(),
+    stream: Boolean = false,
 ): DeepSeekChatCompletionRequest {
     val trimmedSystemPrompt = (effectiveSystemPrompt ?: systemPrompt)
         .withToolWarnings(toolWarnings)
@@ -70,8 +72,11 @@ internal fun AiRequestData.toDeepSeekChatCompletionRequest(
 
             addAll(extraMessages)
         },
-        stream = false,
-        thinking = DeepSeekThinking(type = "disabled"),
+        stream = stream,
+        streamOptions = DeepSeekStreamOptions(includeUsage = true).takeIf { stream },
+        thinking = DeepSeekThinking(
+            type = if (apiSettings.isDeepSeekThinkingEnabled) "enabled" else "disabled",
+        ),
         temperature = apiSettings.deepSeekTemperature(),
         maxTokens = apiSettings.deepSeekMaxTokens(),
         stop = apiSettings.deepSeekStop(),
@@ -108,6 +113,7 @@ private fun String.withToolWarnings(warnings: List<String>): String {
 
 internal fun AiRequestData.toDeepSeekAssistantHistoryMessage(
     content: String,
+    thinkingContent: String? = null,
     responseTimeMs: Long,
     usage: DeepSeekResponseUsage? = null,
     branchId: Int? = null,
@@ -115,6 +121,7 @@ internal fun AiRequestData.toDeepSeekAssistantHistoryMessage(
     HistoryMessage(
         role = HistoryRole.Assistant,
         content = content,
+        thinkingContent = thinkingContent,
         branchId = branchId,
         kind = HistoryMessageKind.Regular,
         sourceLabel = "DeepSeek / ${model.displayName}",
